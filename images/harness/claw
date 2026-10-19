@@ -1,0 +1,9 @@
+#!/bin/sh
+# The harness's command, also for pairing: `docker compose exec harness claw pair`. Started as root, it hands /data
+# (a bind mount Docker may have created as root) to the node user, then runs the host as node.
+set -eu
+if [ "$(id -u)" = 0 ]; then
+	chown -R node:node /data
+	exec setpriv --reuid=node --regid=node --init-groups "$0" "$@"
+fi
+exec node /app/pi-durable-claw/src/host.ts "$@"

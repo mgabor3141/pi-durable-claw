@@ -1,0 +1,4 @@
+.memory/
+node_modules/
+.env
+data/

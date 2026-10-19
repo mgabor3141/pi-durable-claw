@@ -1,0 +1,13 @@
+# Key-only auth, one user. Host keys live in a volume so the harness's trust survives container re-creation.
+Port 22
+HostKey /etc/ssh/host/ssh_host_ed25519_key
+PermitRootLogin no
+PasswordAuthentication no
+KbdInteractiveAuthentication no
+PubkeyAuthentication yes
+# The harness writes its public key there (as uid 1000, its user); sshd accepts it because agent is uid 1000 too.
+AuthorizedKeysFile /pubkey/id_ed25519.pub
+UsePAM no
+AllowUsers agent
+PrintMotd no
+AcceptEnv LANG LC_*

@@ -1,0 +1,32 @@
+# pi-durable-claw: a harness (keys, agent loop, T3 bridge) and a workspace (where the agent runs code, no keys).
+# The Docker socket is never mounted. See README.md.
+services:
+  harness:
+    build:
+      context: .
+      dockerfile: images/harness/Dockerfile
+    restart: unless-stopped
+    init: true
+    environment:
+      CLAW_PORT: ${CLAW_PORT:-3775}
+      CLAW_PUBLIC_URL: ${CLAW_PUBLIC_URL:-http://127.0.0.1:${CLAW_PORT:-3775}}
+    ports:
+      - "127.0.0.1:${CLAW_PORT:-3775}:${CLAW_PORT:-3775}"
+    volumes:
+      - ./data/harness:/data
+      - pubkey:/pubkey
+
+  workspace:
+    build: images/workspace
+    restart: unless-stopped
+    init: true
+    volumes:
+      - ./data/workspace:/workspace
+      # The workspace's SSH host key: the harness trusts it on first use and refuses a changed one.
+      - ./data/workspace-ssh:/etc/ssh/host
+      - pubkey:/pubkey:ro
+    # sshd is not published; only the harness connects to it.
+
+# Everything worth keeping is under ./data. This volume only carries the harness's public key, rewritten at each start.
+volumes:
+  pubkey:
