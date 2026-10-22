@@ -14,9 +14,9 @@
 		"@earendil-works/chord": "link:../pi-durable-t3/node_modules/@earendil-works/chord",
 		"@earendil-works/pi-ai": "link:../pi-durable-t3/node_modules/@earendil-works/pi-ai",
 		"@earendil-works/pi-coding-agent": "link:../pi-durable-t3/node_modules/@earendil-works/pi-coding-agent",
-		"@earendil-works/pi-codemode": "link:../pi-durable-t3/node_modules/.pnpm/@earendil-works+pi-codemode@1.3.0/node_modules/@earendil-works/pi-codemode",
+		"@earendil-works/pi-codemode": "link:../pi-durable-t3/node_modules/.pnpm/@earendil-works+pi-codemode@1.4.0/node_modules/@earendil-works/pi-codemode",
 		"@earendil-works/pi-durable": "link:../pi-durable-t3/node_modules/@earendil-works/pi-durable",
-		"@earendil-works/pi-env": "1.3.0",
+		"@earendil-works/pi-env": "1.4.0",
 		"pi-durable-t3": "link:../pi-durable-t3"
 	},
 	"devDependencies": {

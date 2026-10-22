@@ -4,7 +4,7 @@ ARG NODE_IMAGE=node:24-bookworm-slim
 
 # --- build: pi-durable-t3 (not published) as our sibling, then this repo against it ---------------------------------
 FROM ${NODE_IMAGE} AS build
-ARG T3_COMMIT=dbd405ce3b7b630c36e5034d33fdc2661e863bf0
+ARG T3_COMMIT=69144cb9f4a21563771dd6f1507dfd8d6849a5d9
 RUN apt-get update && apt-get install -y --no-install-recommends git curl ca-certificates \
 	&& rm -rf /var/lib/apt/lists/* \
 	&& corepack enable && corepack prepare pnpm@10.32.1 --activate
