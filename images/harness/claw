@@ -6,4 +6,4 @@ if [ "$(id -u)" = 0 ]; then
 	chown -R node:node /data
 	exec setpriv --reuid=node --regid=node --init-groups "$0" "$@"
 fi
-exec node /app/pi-durable-claw/src/host.ts "$@"
+exec node /app/src/host.ts "$@"

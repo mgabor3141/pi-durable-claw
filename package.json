@@ -11,13 +11,13 @@
 		"start": "node src/host.ts"
 	},
 	"dependencies": {
-		"@earendil-works/chord": "link:../pi-durable-t3/node_modules/@earendil-works/chord",
-		"@earendil-works/pi-ai": "link:../pi-durable-t3/node_modules/@earendil-works/pi-ai",
-		"@earendil-works/pi-coding-agent": "link:../pi-durable-t3/node_modules/@earendil-works/pi-coding-agent",
-		"@earendil-works/pi-codemode": "link:../pi-durable-t3/node_modules/.pnpm/@earendil-works+pi-codemode@1.4.0/node_modules/@earendil-works/pi-codemode",
-		"@earendil-works/pi-durable": "link:../pi-durable-t3/node_modules/@earendil-works/pi-durable",
+		"@earendil-works/chord": "1.4.0",
+		"@earendil-works/pi-ai": "1.4.0",
+		"@earendil-works/pi-coding-agent": "1.4.0",
+		"@earendil-works/pi-codemode": "1.4.0",
+		"@earendil-works/pi-durable": "1.4.0",
 		"@earendil-works/pi-env": "1.4.0",
-		"pi-durable-t3": "link:../pi-durable-t3"
+		"@mgabor3141/pi-durable-t3": "github:mgabor3141/pi-durable-t3#1b9e84e2d3023e36994b50b6b7468f7f9128a4d6"
 	},
 	"devDependencies": {
 		"@types/node": "24.10.1",
@@ -26,10 +26,8 @@
 		"vitest": "4.1.11"
 	},
 	"pnpm": {
-		"overrides": {
-			"@earendil-works/chord": "link:../pi-durable-t3/node_modules/@earendil-works/chord",
-			"@earendil-works/pi-durable": "link:../pi-durable-t3/node_modules/@earendil-works/pi-durable",
-			"@earendil-works/pi-ai": "link:../pi-durable-t3/node_modules/@earendil-works/pi-ai"
-		}
+		"onlyBuiltDependencies": [
+			"@mgabor3141/pi-durable-t3"
+		]
 	}
 }

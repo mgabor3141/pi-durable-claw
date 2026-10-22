@@ -1,7 +1,6 @@
 // The always-on assistant: the codemode-only harness (workspace read/write/bash over pi-env SSH) behind the T3 bridge
-// (`attachT3`), plus the example host's title hook and shutdown — both imported from the T3 repo, nothing copied.
-// `pi-durable-t3` is a `link:` dependency; Node resolves it to the repo's real path, so its .ts sources strip outside
-// node_modules (package.json shares one copy of each pi package).
+// (`attachT3` from @mgabor3141/pi-durable-t3, which serves T3's web app), plus the title hook and shutdown copied from
+// the bridge's example agent.
 //
 //   node src/host.ts [--root <dir>]        serve (root: CLAW_ROOT; storage, bridge state, SSH keys live under it)
 //   node src/host.ts pair                  mint a single-use pairing code and print the link
@@ -9,19 +8,14 @@
 // Configuration (all CLAW_*): ROOT, HOST (listen address, default 127.0.0.1), PORT (3775), PUBLIC_URL (what `pair`
 // prints; default http://127.0.0.1:PORT), WORKSPACE_HOST (workspace), WORKSPACE_PORT (22), PUBKEY_DIR (where to
 // publish the harness's public key for the workspace; unset: not published). Models: <root>/pi/auth.json (and models.json).
-import { existsSync } from "node:fs";
 import { join } from "node:path";
-import { fileURLToPath } from "node:url";
 import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
 import { ModelRuntime } from "@earendil-works/pi-coding-agent";
 import { openHarness } from "./harness.ts";
 import { connectWorkspace, ensureKeypair } from "./workspace.ts";
-import { attachT3, mintPairingCode } from "pi-durable-t3/src/bridge.ts";
-import { titleThread } from "pi-durable-t3/examples/coding-agent/src/title.ts";
-import { installShutdown } from "pi-durable-t3/examples/coding-agent/src/shutdown.ts";
-
-/** The T3 repo's built web app (its `pnpm setup:t3` output). */
-const WEB_APP_DIR = fileURLToPath(new URL("web-dist", import.meta.resolve("pi-durable-t3/package.json")));
+import { attachT3, mintPairingCode } from "@mgabor3141/pi-durable-t3";
+import { installShutdown } from "./shutdown.ts";
+import { titleThread } from "./title.ts";
 
 const PORT = Number(process.env.CLAW_PORT ?? 3775);
 const LISTEN = { host: process.env.CLAW_HOST ?? "127.0.0.1", port: PORT };
@@ -80,7 +74,6 @@ async function main(): Promise<void> {
 	}
 
 	const harness = await openHarness({ storagePath: join(root, "durable.db"), workspace, models });
-	const webApp = WEB_APP_DIR;
 
 	let t3;
 	try {
@@ -90,7 +83,6 @@ async function main(): Promise<void> {
 			scratchDir: join(root, "scratch"),
 			listen: LISTEN,
 			label: "claw",
-			...(existsSync(webApp) ? { webApp } : {}),
 			titleThread: titleThread(harness, models),
 			log,
 		});
@@ -112,7 +104,6 @@ async function main(): Promise<void> {
 		stateDir,
 		workspace: `${workspaceConfig.host}:${workspaceConfig.port} (${workspace.remote.platform}/${workspace.remote.arch})`,
 		models: (await models.getAvailable()).map((m) => `${m.provider}/${m.id}`),
-		webApp: existsSync(webApp) ? webApp : "none (the T3 repo has no web-dist; run its pnpm setup:t3)",
 	});
 	console.log("\n  Pair a device: docker compose exec harness claw pair\n");
 

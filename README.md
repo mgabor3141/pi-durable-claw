@@ -82,9 +82,12 @@ See [docs/design.md](docs/design.md) for the decisions and why.
 
 ## Development
 
-Check out [pi-durable-t3](https://github.com/mgabor3141/pi-durable-t3) next to this repo (installed, `pnpm setup:t3`
-run), then `pnpm install`, `pnpm typecheck`, `pnpm test` (needs Docker; `CLAW_TEST_MODEL=provider/modelId` adds a
-real-model test).
+`pnpm install`, `pnpm typecheck`, `pnpm test` (needs Docker; `CLAW_TEST_MODEL=provider/modelId` adds a real-model
+test). The T3 bridge, [pi-durable-t3](https://github.com/mgabor3141/pi-durable-t3), is not on npm yet: it installs
+from git at a pinned commit and builds on install (it fetches T3's contracts and web app), which `package.json`
+allowlists. Its pi packages are peers, so the pi versions are ours: keep every `@earendil-works` package on one
+version (`test/one-copy.test.ts` checks it). To try a bridge change, point the dependency at a local checkout
+(`link:../pi-durable-t3`, built with `pnpm build` there).
 
 ## License
 

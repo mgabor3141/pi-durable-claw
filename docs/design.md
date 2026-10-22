@@ -102,12 +102,13 @@ same harness and the same T3 window. The assistant cannot launch or prompt it. O
 `node src/host.ts` serves the codemode-only assistant through `attachT3`; `node src/host.ts pair` mints a pairing
 code. Verified in T3's web app (playwright + chromium, screenshots in `.memory/`):
 
-- **One copy of every pi package.** The bridge is a `link:` dependency on a `~/dev/pi-durable-t3` checkout (it is
-  not published); Node resolves it to the repo, so its TypeScript strips. chord, pi-ai, pi-durable and pi-codemode
-  link into that checkout's tree, and a pnpm override points pi-env's own dependencies there too
-  (`test/one-copy.test.ts`). The bridge therefore sets our pi versions. The harness image clones the bridge at a pinned commit into the sibling layout the `link:` deps expect.
-- **Titles.** The bridge's `titleThread` hook (the example's tool-less completion, imported from its repo) titles
-  threads, including scheduled-task threads, from the first user entry.
+- **The bridge is a package.** `@mgabor3141/pi-durable-t3` is a git dependency at a pinned commit (not on npm yet);
+  it builds on install and ships T3's web app, which `attachT3` serves by default. Its pi packages are peers, so we
+  choose the pi versions; every `@earendil-works` package is pinned to one version, giving one copy of each at
+  runtime (`test/one-copy.test.ts`).
+- **Titles.** The `titleThread` hook (a tool-less completion, copied with the shutdown handler from the bridge's
+  example agent) titles threads,
+  including scheduled-task threads, from the first user entry.
 - **Auth boundary.** The bridge binds loopback and guards no `Host` header — pairing is the boundary. Serving T3's
   web app from the host's own origin makes it "This machine"; no Tailscale is needed for local use.
 - **Crash resume holds through the UI:** kill -9 mid-script, restart, and the codemode call resumes from its
@@ -202,8 +203,8 @@ custom app on T3's client runtime. **To check:** the pi mobile UI mentioned on t
 1. Scheduling in the bridge — done, except the webhook trigger: interval and fixed-time tasks fire, the bridge
    refuses webhook triggers.
 2. Done: a pi-durable codemode tool with the workspace's read/write/bash injected over pi-env to an sshd container.
-3. Done (v0): harness and workspace images and a compose file for a fresh machine. The harness image builds the T3
-   bridge from a pinned commit; the harness's SSH public key reaches the workspace through a small shared volume.
+3. Done (v0): harness and workspace images and a compose file for a fresh machine. The T3 bridge installs as a package
+   from git; the harness's SSH public key reaches the workspace through a small shared volume.
 4. Key-bearing MCP servers, one process each; tool exposure defaults.
 5. Orchestration (T3's orchestrator MCP) and dev-project devcontainers.
 6. Memory and the nightly consolidation; spending caps; ntfy.
