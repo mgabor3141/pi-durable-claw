@@ -9,11 +9,11 @@ RUN apt-get update && apt-get install -y --no-install-recommends git curl ca-cer
 	&& rm -rf /var/lib/apt/lists/* \
 	&& corepack enable && corepack prepare pnpm@10.32.1 --activate
 WORKDIR /app
-COPY package.json pnpm-lock.yaml ./
-# The bridge's build on install needs its devDependencies, which `--prod` skips: install fully, then prune (a second
-# `pnpm install --prod` keeps the dev tools; `prune --prod` removes them).
-RUN pnpm install --frozen-lockfile && pnpm prune --prod
+COPY package.json pnpm-lock.yaml tsconfig.json ./
 COPY src ./src
+# The bridge's build on install needs its devDependencies, which `--prod` skips: install fully, typecheck, then prune
+# (a second `pnpm install --prod` keeps the dev tools; `prune --prod` removes them).
+RUN pnpm install --frozen-lockfile && pnpm typecheck && pnpm prune --prod
 
 # --- run ------------------------------------------------------------------------------------------------------------
 FROM ${NODE_IMAGE}

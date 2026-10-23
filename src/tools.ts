@@ -1,5 +1,5 @@
 import type { ToolRegistration } from "@earendil-works/pi-durable";
-import { createBashTool, createReadTool, createWriteTool } from "@earendil-works/pi-durable/tools";
+import { createBashTool, createEditTool, createReadTool, createWriteTool } from "@earendil-works/pi-durable/tools";
 
 /**
  * The workspace's files and shell: pi-durable's own coding tools, unchanged except `callers: ["tools"]` — the model
@@ -10,6 +10,7 @@ export function workspaceTools(): ToolRegistration[] {
 	return [
 		{ ...createReadTool(), callers: ["tools"] as const },
 		{ ...createWriteTool(), callers: ["tools"] as const },
+		{ ...createEditTool(), callers: ["tools"] as const },
 		{ ...createBashTool(), callers: ["tools"] as const },
 	];
 }

@@ -4,6 +4,7 @@ import { createRegistry, defineExtension, Harness, type Extension, type HarnessO
 import { createCodemodeExtension } from "@earendil-works/pi-durable/codemode";
 import { openNodeSqliteStorage } from "@earendil-works/pi-durable/storage/sqlite/node";
 import { CodemodeSandbox } from "@earendil-works/pi-codemode";
+import { workspaceMemoryExtension } from "./memory.ts";
 import { workspaceTools } from "./tools.ts";
 import { workspaceEnv, type WorkspaceConnection } from "./workspace.ts";
 
@@ -24,6 +25,7 @@ export function harnessExtensions(extraTools: readonly ToolRegistration[] = []):
 	return [
 		createCodemodeExtension({ sandbox: codemodeSandbox() }) as Extension,
 		defineExtension({ name: "harness-tools", tools: harnessTools }),
+		workspaceMemoryExtension(),
 	];
 }
 
