@@ -17,7 +17,7 @@
 		"@earendil-works/pi-codemode": "1.4.0",
 		"@earendil-works/pi-durable": "1.4.0",
 		"@earendil-works/pi-env": "1.4.0",
-		"@mgabor3141/pi-durable-t3": "github:mgabor3141/pi-durable-t3#03a23bce351619b036ae78ebd17076abce230be6"
+		"@mgabor3141/pi-durable-t3": "github:mgabor3141/pi-durable-t3#ccda9aba57e2681b59f23219995802e7b093d563"
 	},
 	"devDependencies": {
 		"@types/node": "24.10.1",
