@@ -80,7 +80,7 @@ async function main(): Promise<void> {
 		t3 = await attachT3(harness, {
 			models,
 			stateDir,
-			scratchDir: join(root, "scratch"),
+			scratchDir: "/workspace/scratch",
 			listen: LISTEN,
 			label: "claw",
 			titleThread: titleThread(harness, models),
