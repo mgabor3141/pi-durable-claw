@@ -164,11 +164,11 @@ Three layers:
 
 Files, not a vector database. Adapted from piclaw's "Dream":
 
-- every new conversation starts with the same conventions and a compact memory index;
+- every new conversation starts with the same conventions (`AGENTS.md`); the user profile is referenced and the memory index is named, but both are read on demand;
 - a nightly scheduled run reviews recent activity, writes human-readable daily notes, distils preferences,
   corrections and project state, and prunes the rest. It may edit only the memory and feedback files.
 
-The memory files live in the workspace; the harness reads them into each new conversation.
+The memory files live in the workspace. The harness injects the global `AGENTS.md` and only references `USER.md`; the agent reads the rest when a task needs it, so a project conversation does not carry personal context by default.
 
 ## Spending caps
 
