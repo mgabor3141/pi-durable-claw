@@ -60,10 +60,9 @@ and the workspace's host key is the one the harness trusts. The archive holds th
 
 - No integrations yet (calendar, MCP servers): the assistant has a workspace and nothing else.
 - Scheduled tasks run on intervals or fixed times; there are no webhook triggers.
-- T3 projects do not map to containers: use "No project" threads. The project picker and git panel look at the
-  harness's filesystem, not the workspace's.
-- T3's file panel and search work in project folders on the harness's filesystem. Do not register the data
-  directory (`data/harness`: credentials, pairings, the SSH key) as a project; a paired client could read it.
+- T3 projects do not map to containers: use "No project" threads. The project picker, file panel and search go
+  through the workspace execution environment, so a project must live under the workspace's `/workspace` (the
+  harness's data directory is not visible there).
 - Nested calls inside a codemode script are invisible in T3: you see the script and its result.
 - The workspace can reach the app. Everything there needs a pairing credential except the web app's static files,
   the environment descriptor and pairing itself.
