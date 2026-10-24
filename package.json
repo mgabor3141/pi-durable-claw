@@ -1,33 +1,33 @@
 {
-	"name": "pi-durable-claw",
-	"private": true,
-	"type": "module",
-	"engines": {
-		"node": ">=22.19.0"
-	},
-	"scripts": {
-		"typecheck": "tsc",
-		"test": "vitest --run",
-		"start": "node src/host.ts"
-	},
-	"dependencies": {
-		"@earendil-works/chord": "1.4.0",
-		"@earendil-works/pi-ai": "1.4.0",
-		"@earendil-works/pi-coding-agent": "1.4.0",
-		"@earendil-works/pi-codemode": "1.4.0",
-		"@earendil-works/pi-durable": "1.4.0",
-		"@earendil-works/pi-env": "1.4.0",
-		"@mgabor3141/pi-durable-t3": "github:mgabor3141/pi-durable-t3#636449b"
-	},
-	"devDependencies": {
-		"@types/node": "24.10.1",
-		"playwright-core": "1.56.1",
-		"typescript": "5.9.3",
-		"vitest": "4.1.11"
-	},
-	"pnpm": {
-		"onlyBuiltDependencies": [
-			"@mgabor3141/pi-durable-t3"
-		]
-	}
+  "name": "pi-durable-claw",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=22.19.0"
+  },
+  "scripts": {
+    "typecheck": "tsc",
+    "test": "vitest --run",
+    "start": "node src/host.ts"
+  },
+  "dependencies": {
+    "@earendil-works/chord": "1.4.0",
+    "@earendil-works/pi-ai": "1.4.0",
+    "@earendil-works/pi-coding-agent": "1.4.0",
+    "@earendil-works/pi-codemode": "1.4.0",
+    "@earendil-works/pi-durable": "1.4.0",
+    "@earendil-works/pi-env": "1.4.0",
+    "@mgabor3141/pi-durable-t3": "github:mgabor3141/pi-durable-t3#0ae31ab4c5a941ea2d6b27f61c85a67b566826c0"
+  },
+  "devDependencies": {
+    "@types/node": "24.10.1",
+    "playwright-core": "1.56.1",
+    "typescript": "5.9.3",
+    "vitest": "4.1.11"
+  },
+  "pnpm": {
+    "onlyBuiltDependencies": [
+      "@mgabor3141/pi-durable-t3"
+    ]
+  }
 }
