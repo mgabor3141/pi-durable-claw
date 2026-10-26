@@ -87,6 +87,14 @@ describe("fetch page", () => {
 		expect(called).toBe(false);
 	});
 
+	it("refuses a redirect into a private address", async () => {
+		await expect(
+			fetchPage("https://example.com", {
+				fetch: fakeFetch(async () => response({ url: "http://127.0.0.1/", markdown: "# private" })),
+			}),
+		).rejects.toThrow(/private|internal/);
+	});
+
 	it("reports an empty page as an error", async () => {
 		await expect(
 			fetchPage("https://example.com", { fetch: fakeFetch(async () => response({ url: "https://example.com", markdown: " " })) }),

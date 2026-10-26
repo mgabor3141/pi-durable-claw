@@ -204,6 +204,9 @@ export async function fetchPage(
 	}
 	const result = parsed as { url?: unknown; markdown?: unknown };
 	const finalUrl = typeof result.url === "string" ? result.url : url;
+	// Crawl4AI follows redirects in the browser. A public URL must not be able to
+	// redirect into the workspace network, so apply the same check to the landing URL.
+	assertFetchableUrl(finalUrl);
 	const markdown = typeof result.markdown === "string" ? result.markdown.trim() : "";
 	if (markdown === "") throw new Error(`crawl4ai found no readable content at ${url}`);
 	const truncated = markdown.length > maxChars;
