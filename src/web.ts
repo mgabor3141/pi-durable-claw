@@ -5,18 +5,19 @@ import { defineTool, type ToolRegistration } from "@earendil-works/pi-durable";
 
 /**
  * Web tools for the workspace agent: search through a private SearXNG and read
- * one page through a private Crawl4AI sidecar. Both services live on the
- * workspace network. They carry no account credentials, so the tools only need
- * these two URLs; the harness never asks the workspace to run network code.
+ * one page through a private Crawl4AI extraction service. The services carry no
+ * account credentials, so the tools only need these two URLs; the harness never
+ * asks the workspace to run network code.
  *
- * The defaults match the `claw` deployment. They can be overridden in the
- * harness environment when another deployment uses different service names.
+ * The defaults are the common compose service names. A deployment can override
+ * them in the harness environment when its services use other names.
  */
 const SEARXNG_URL = (process.env.SEARXNG_URL ?? "http://searxng:8080").replace(/\/+$/, "");
-const CRAWL4AI_URL = (process.env.CRAWL4AI_URL ?? "http://crawler:11235").replace(/\/+$/, "");
-const CRAWL4AI_API_TOKEN = process.env.CRAWL4AI_API_TOKEN?.trim() ?? "";
+const CRAWL4AI_URL = (process.env.CRAWL4AI_URL ?? "http://crawl4ai:11235").replace(/\/+$/, "");
 
-const DEFAULT_TIMEOUT_MS = 20_000;
+const DEFAULT_SEARCH_TIMEOUT_MS = 20_000;
+// The extraction service may spend time on browser retries or its optional cleanup.
+const DEFAULT_CRAWL_TIMEOUT_MS = 180_000;
 const DEFAULT_MAX_RESULTS = 5;
 const MAX_RESULTS = 10;
 const DEFAULT_MAX_CHARS = 8_000;
@@ -94,6 +95,7 @@ export function assertFetchableUrl(value: string): string {
 		"searxng",
 		"crawler",
 		"crawl4ai",
+		"crawl4ai-extract",
 		"harness",
 		"workspace",
 		"inference-proxy",
@@ -101,7 +103,7 @@ export function assertFetchableUrl(value: string): string {
 		"host.docker.internal",
 		"gateway.docker.internal",
 	]);
-	if (internalNames.has(host) || host.endsWith(".local")) {
+	if (internalNames.has(host) || host.endsWith(".local") || host.endsWith(".internal")) {
 		throw new Error(`refusing internal host: ${host}`);
 	}
 	if (isPrivateAddress(host)) {
@@ -153,7 +155,7 @@ export async function searchWeb(
 
 	const response = await fetcher(options)(url, {
 		headers: { accept: "application/json" },
-		signal: AbortSignal.timeout(options.timeoutMs ?? DEFAULT_TIMEOUT_MS),
+		signal: AbortSignal.timeout(options.timeoutMs ?? DEFAULT_SEARCH_TIMEOUT_MS),
 	});
 	const body = await response.text();
 	if (!response.ok) throw new Error(`searxng returned HTTP ${response.status}: ${errorDetail(body)}`);
@@ -188,9 +190,9 @@ export async function fetchPage(
 	const maxChars = Math.max(1, Math.min(options.maxChars ?? DEFAULT_MAX_CHARS, MAX_CHARS));
 	const response = await fetcher(options)(`${CRAWL4AI_URL}/md`, {
 		method: "POST",
-		headers: { "content-type": "application/json", accept: "application/json", ...(CRAWL4AI_API_TOKEN === "" ? {} : { authorization: `Bearer ${CRAWL4AI_API_TOKEN}` }) },
+		headers: { "content-type": "application/json", accept: "application/json" },
 		body: JSON.stringify({ url }),
-		signal: AbortSignal.timeout(options.timeoutMs ?? DEFAULT_TIMEOUT_MS),
+		signal: AbortSignal.timeout(options.timeoutMs ?? DEFAULT_CRAWL_TIMEOUT_MS),
 	});
 	const body = await response.text();
 	if (body.length > MAX_RESPONSE_CHARS) throw new Error(`crawl4ai response is too large (${body.length} chars)`);

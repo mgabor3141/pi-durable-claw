@@ -117,7 +117,7 @@ describe("tool registration", () => {
 			"http://[::1]/",
 			"http://[fd00::1]/",
 			"http://[::ffff:127.0.0.1]/",
-			"http://crawler:11235/",
+			"http://crawl4ai-extract:8000/",
 			"ftp://example.com/",
 		]) {
 			expect(() => assertFetchableUrl(url)).toThrow();
