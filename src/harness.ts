@@ -6,6 +6,7 @@ import { openNodeSqliteStorage } from "@earendil-works/pi-durable/storage/sqlite
 import { CodemodeSandbox } from "@earendil-works/pi-codemode";
 import { workspaceMemoryExtension } from "./memory.ts";
 import { workspaceTools } from "./tools.ts";
+import { webTools } from "./web.ts";
 import { workspaceEnv, type WorkspaceConnection } from "./workspace.ts";
 
 /** One QuickJS sandbox per process is enough: each execution gets its own VM and worker. */
@@ -21,7 +22,7 @@ export function codemodeSandbox(): CodemodeSandbox {
  * and the model is offered exactly one tool: `codemode`.
  */
 export function harnessExtensions(extraTools: readonly ToolRegistration[] = []): readonly Extension[] {
-	const harnessTools: ToolRegistration[] = [...extraTools, ...workspaceTools()];
+	const harnessTools: ToolRegistration[] = [...extraTools, ...workspaceTools(), ...webTools()];
 	return [
 		createCodemodeExtension({ sandbox: codemodeSandbox() }) as Extension,
 		defineExtension({ name: "harness-tools", tools: harnessTools }),

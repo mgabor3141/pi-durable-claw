@@ -2,7 +2,9 @@
 
 Status: decisions agreed. Plan step 1 is implemented in the bridge (interval and fixed-time schedules; the webhook
 trigger is not), step 2 (codemode over the workspace) is the harness in `src/`, and step 3 is done: `docker compose
-up` runs the harness and a workspace (the README has the install). Nothing past step 3 is built. Sections marked **unverified** are assumptions a spike must confirm.
+up` runs the harness and a workspace (the README has the install). Web search and page fetch are implemented as
+harness tools against local SearXNG and Crawl4AI services; account integrations and the rest of the plan are not
+built. Sections marked **unverified** are assumptions a spike must confirm.
 
 ## Goal
 
@@ -129,6 +131,10 @@ code. Verified in T3's web app (playwright + chromium, screenshots in `.memory/`
 - Profiles are expressed with `ToolRegistration.callers` and the agent's `modelTools`: key-bearing and workspace tools
   are script-callable only, so a request offers exactly the tools in the column above.
 
+- **Web research** is two harness tools, not one combined action: `web_search` reads SearXNG JSON, and `fetch_page`
+  reads one page through Crawl4AI and returns Markdown. Both live in the harness because the keys and service URLs
+  do; the browser server is a separate container, so page-driven code never runs beside the keys. Results carry
+  caps and are wrapped as untrusted data. The workspace still has no direct route to the LAN.
 - **Orchestration** replicates T3's orchestrator MCP: launch, send, wait, read, interrupt and fork threads; queues;
   projects. Agents can prompt dev-project agents (they hold no keys); none can reach a host conversation.
 - **Schedules** replicate T3's scheduled tasks: interval, fixed time, and signed webhook. The webhook lets a cheap

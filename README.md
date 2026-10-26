@@ -56,9 +56,22 @@ Restore all of it together: the conversations (`harness/durable.db`) and the bri
 and the workspace's host key is the one the harness trusts. The archive holds the harness's SSH key and your
 `auth.json`, so treat it like your credentials.
 
+## Web tools
+
+The harness offers `web_search` and `fetch_page` to codemode scripts. They are local services, not cloud APIs:
+
+- `web_search` calls a SearXNG JSON endpoint (`SEARXNG_URL`, default `http://searxng:8080`).
+- `fetch_page` calls a Crawl4AI server (`CRAWL4AI_URL`, default `http://crawler:11235`) and returns Markdown.
+  Set `CRAWL4AI_API_TOKEN` if that server requires a Bearer token.
+
+Point both at services the harness can reach; this repo does not run them. `fetch_page` accepts only `http` and
+`https`, refuses embedded credentials and private/internal addresses, and marks the result as untrusted data. Both
+tools cap results, size and time. If a service is absent or the token is wrong, the tool returns the backend error
+instead of inventing a result.
+
 ### Known limitations
 
-- No integrations yet (calendar, MCP servers): the assistant has a workspace and nothing else.
+- No account integrations yet (calendar, email, MCP servers): web search and page fetch are the only connectors.
 - Scheduled tasks run on intervals or fixed times; there are no webhook triggers.
 - T3 projects do not map to containers: use "No project" threads. The project picker, file panel and search go
   through the workspace execution environment, so a project must live under the workspace's `/workspace` (the
@@ -69,6 +82,7 @@ and the workspace's host key is the one the harness trusts. The archive holds th
 - A harness restart resumes a turn, but a command that was running in the workspace is cut off, not rerun; the
   agent sees it as interrupted.
 - Experimental: pi-durable and the T3 bridge are pre-release and pinned to specific commits.
+- `fetch_page` runs a headless browser: JavaScript-heavy and anti-bot pages may still fail or return partial text.
 
 ## Shape
 
