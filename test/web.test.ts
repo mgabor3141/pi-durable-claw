@@ -52,7 +52,7 @@ describe("web search", () => {
 });
 
 describe("fetch page", () => {
-	it("reads markdown from Crawl4AI and reports the final URL", async () => {
+	it("reads markdown from the page reader and reports the final URL", async () => {
 		let body = "";
 		const out = await fetchPage("https://example.com/start", {
 			fetch: fakeFetch(async (_input, init) => {
@@ -118,6 +118,8 @@ describe("tool registration", () => {
 			"http://[fd00::1]/",
 			"http://[::ffff:127.0.0.1]/",
 			"http://crawl4ai-extract:8000/",
+			"http://scrapling:8000/",
+			"http://reader:8000/",
 			"ftp://example.com/",
 		]) {
 			expect(() => assertFetchableUrl(url)).toThrow();

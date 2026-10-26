@@ -61,13 +61,13 @@ and the workspace's host key is the one the harness trusts. The archive holds th
 The harness offers `web_search` and `fetch_page` to codemode scripts. They are local services, not cloud APIs:
 
 - `web_search` calls a SearXNG JSON endpoint (`SEARXNG_URL`, default `http://searxng:8080`).
-- `fetch_page` calls a Crawl4AI server (`CRAWL4AI_URL`, default `http://crawl4ai:11235`) and returns Markdown.
+- `fetch_page` calls a page-reader service (`READER_URL`, default `http://reader:8000`) and returns Markdown.
 
-Point both at services the harness can reach; this repo does not run them. Any
-Crawl4AI-compatible `/md` endpoint works. `fetch_page` accepts only `http` and
-`https`, refuses embedded credentials and private/internal addresses, and marks the result as untrusted data. Both
-tools cap results, size and time. If a service is absent or the request fails, the tool returns the backend error
-instead of inventing a result.
+Point both at services the harness can reach; this repo does not run them. The
+reader accepts `POST /read` with `{"url":"..."}` and returns `markdown` and the final `url`.
+`fetch_page` accepts only `http` and `https`, refuses embedded credentials and private/internal addresses, and marks
+the result as untrusted data. Both tools cap results, size and time. If a service is absent or the request fails, the
+tool returns the backend error instead of inventing a result.
 
 ### Known limitations
 
