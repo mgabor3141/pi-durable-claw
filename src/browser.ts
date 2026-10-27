@@ -28,6 +28,7 @@ const MAX_HTML_CHARS = 2_000_000;
 const MAX_MESSAGE_CHARS = 10_000;
 const MAX_SNAPSHOT_CHARS = 20_000;
 const MAX_CONSOLE_LINES = 30;
+const MAX_SCREENSHOT_BYTES = 4_000_000;
 
 export interface BrowserSnapshot {
 	readonly sessionId: string;
@@ -390,6 +391,7 @@ export function browserTools(): ToolRegistration[] {
 			callers: ["tools"],
 			async execute(args, api) {
 				const png = await sessions.screenshot(api.conversationId, args.session_id);
+				if (png.length > MAX_SCREENSHOT_BYTES) throw new Error(`screenshot is too large (${png.length} bytes); the page is too tall`);
 				const data = png.toString("base64");
 				return {
 					output: [{ type: "text", text: "screenshot ready; call image(shot) to attach it" }],
