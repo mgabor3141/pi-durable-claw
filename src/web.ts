@@ -99,6 +99,8 @@ export function assertFetchableUrl(value: string): string {
 		"scrapling-reader",
 		"crawl4ai",
 		"crawl4ai-extract",
+		"browserless",
+		"browser",
 		"harness",
 		"workspace",
 		"inference-proxy",
@@ -219,7 +221,7 @@ export async function fetchPage(
 }
 
 /** Web text is evidence, not instructions. Keep the boundary visible to the model. */
-function untrusted(label: string, source: string, content: string): string {
+export function untrusted(label: string, source: string, content: string): string {
 	return `<untrusted-${label} url="${source.replaceAll('"', "&quot;")}">\n${content}\n</untrusted-${label}>`;
 }
 

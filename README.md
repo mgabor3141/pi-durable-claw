@@ -58,20 +58,31 @@ and the workspace's host key is the one the harness trusts. The archive holds th
 
 ## Web tools
 
-The harness offers `web_search` and `fetch_page` to codemode scripts. They are local services, not cloud APIs:
+The harness offers `web_search`, `fetch_page` and the `browser_*` tools to codemode scripts. They are local
+services, not cloud APIs:
 
 - `web_search` calls a SearXNG JSON endpoint (`SEARXNG_URL`, default `http://searxng:8080`).
 - `fetch_page` calls a page-reader service (`READER_URL`, default `http://reader:8000`) and returns Markdown.
+- `browser_open`, `browser_act`, `browser_snapshot`, `browser_screenshot` and `browser_close` drive a shared
+  Browserless Chromium pool (`BROWSERLESS_URL`, default `ws://browserless:3000/chromium`) over CDP. `BROWSERLESS_TOKEN`
+  is optional in the default endpoint and becomes a `token` query parameter when set.
 
-Point both at services the harness can reach; this repo does not run them. The
+Point them at services the harness can reach; this repo does not run them. The
 reader accepts `POST /read` with `{"url":"..."}` and returns `markdown` and the final `url`.
 `fetch_page` accepts only `http` and `https`, refuses embedded credentials and private/internal addresses, and marks
-the result as untrusted data. Both tools cap results, size and time. If a service is absent or the request fails, the
-tool returns the backend error instead of inventing a result.
+the result as untrusted data. The browser tools apply the same URL check to `browser_open` and `browser_act`'s
+`goto`, and wrap page text as untrusted data too. Every tool caps results, size and time. If a service is absent or
+the request fails, the tool returns the backend error instead of inventing a result.
+
+The browser is for interaction, not reading. `fetch_page` is the cheap, stateless path and should be the default;
+use the browser when a page needs clicks, typing, JavaScript, a screenshot, or a short interactive test. A
+screenshot result is an image block; call `image(shot)` in the same codemode script to attach it. One page
+is kept per conversation and closed after five idle minutes; Browserless closes it unconditionally after ten
+minutes. Local HTML can be opened with `browser_open({ html })`.
 
 ### Known limitations
 
-- No account integrations yet (calendar, email, MCP servers): web search and page fetch are the only connectors.
+- No account integrations yet (calendar, email, MCP servers): web search, page fetch and the browser are the only connectors.
 - Scheduled tasks run on intervals or fixed times; there are no webhook triggers.
 - T3 projects do not map to containers: use "No project" threads. The project picker, file panel and search go
   through the workspace execution environment, so a project must live under the workspace's `/workspace` (the
@@ -83,6 +94,8 @@ tool returns the backend error instead of inventing a result.
   agent sees it as interrupted.
 - Experimental: pi-durable and the T3 bridge are pre-release and pinned to specific commits.
 - `fetch_page` runs a headless browser: JavaScript-heavy and anti-bot pages may still fail or return partial text.
+- The browser keeps no login profile and has no live view or human takeover yet. A CAPTCHA, 2FA prompt or payment
+  step that needs you stays blocked.
 
 ## Shape
 
