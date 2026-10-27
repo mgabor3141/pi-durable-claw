@@ -111,6 +111,8 @@ describe("tool registration", () => {
 
 	it("accepts only http(s) public URLs", () => {
 		expect(assertFetchableUrl("https://example.com/a?b=c")).toBe("https://example.com/a?b=c");
+		expect(assertFetchableUrl("http://workspace:3000/", { allowHosts: ["workspace"] })).toBe("http://workspace:3000/");
+		expect(() => assertFetchableUrl("http://10.253.0.2:3000/", { allowHosts: ["workspace"] })).toThrow();
 		for (const url of [
 			"http://localhost/",
 			"http://192.168.1.1/",

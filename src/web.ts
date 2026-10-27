@@ -74,8 +74,17 @@ function errorDetail(body: string): string {
 	return body.slice(0, 500);
 }
 
+export interface FetchUrlPolicy {
+	/**
+	 * Exact hostnames that a caller may reach even though they are normally
+	 * rejected as internal. The browser uses this for the workspace's own dev
+	 * server; the page reader never does.
+	 */
+	readonly allowHosts?: readonly string[];
+}
+
 /** Reject non-HTTP URLs and private or internal hosts before the reader sees them. */
-export function assertFetchableUrl(value: string): string {
+export function assertFetchableUrl(value: string, policy: FetchUrlPolicy = {}): string {
 	let url: URL;
 	try {
 		url = new URL(value);
@@ -108,10 +117,11 @@ export function assertFetchableUrl(value: string): string {
 		"host.docker.internal",
 		"gateway.docker.internal",
 	]);
-	if (internalNames.has(host) || host.endsWith(".local") || host.endsWith(".internal")) {
+	const allowed = new Set((policy.allowHosts ?? []).map((name) => name.toLowerCase().replace(/^\[|\]$/g, "")));
+	if (!allowed.has(host) && (internalNames.has(host) || host.endsWith(".local") || host.endsWith(".internal"))) {
 		throw new Error(`refusing internal host: ${host}`);
 	}
-	if (isPrivateAddress(host)) {
+	if (!allowed.has(host) && isPrivateAddress(host)) {
 		throw new Error(`refusing private address: ${host}`);
 	}
 	return url.toString();

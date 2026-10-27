@@ -63,9 +63,11 @@ services, not cloud APIs:
 
 - `web_search` calls a SearXNG JSON endpoint (`SEARXNG_URL`, default `http://searxng:8080`).
 - `fetch_page` calls a page-reader service (`READER_URL`, default `http://reader:8000`) and returns Markdown.
-- `browser_open`, `browser_act`, `browser_snapshot`, `browser_screenshot` and `browser_close` drive a shared
+- `browser_open`, `browser_act`, `browser_snapshot`, `browser_screenshot` and `browser_close` drive a
   Browserless Chromium pool (`BROWSERLESS_URL`, default `ws://browserless:3000/chromium`) over CDP. `BROWSERLESS_TOKEN`
-  is optional in the default endpoint and becomes a `token` query parameter when set.
+  is optional in the default endpoint and becomes a `token` query parameter when set. `BROWSER_LOCAL_HOSTS` is an
+  optional comma-separated allowlist for the browser only; a deployment can set `workspace` so the agent can open
+  its own local dev server. `fetch_page` never uses that allowlist.
 
 Point them at services the harness can reach; this repo does not run them. The
 reader accepts `POST /read` with `{"url":"..."}` and returns `markdown` and the final `url`.
