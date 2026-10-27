@@ -89,6 +89,9 @@ async function main(): Promise<void> {
 			listen: LISTEN,
 			label: "claw",
 			titleThread: titleThread(harness, models),
+			...(process.env.BROWSERLESS_URL === undefined || process.env.BROWSERLESS_URL.trim() === ""
+				? {}
+				: { preview: { cdpUrl: process.env.BROWSERLESS_URL.trim(), ...(process.env.BROWSERLESS_TOKEN === undefined ? {} : { token: process.env.BROWSERLESS_TOKEN }) } }),
 			log,
 		});
 	} catch (error) {

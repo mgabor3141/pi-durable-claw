@@ -82,6 +82,14 @@ screenshot result is an image block; call `image(shot)` in the same codemode scr
 is kept per conversation and closed after five idle minutes; Browserless closes it unconditionally after ten
 minutes. Local HTML can be opened with `browser_open({ html })`.
 
+When `BROWSERLESS_URL` is set, the bridge also offers T3's in-app Browser panel: it advertises
+`serverBrowser`, implements `preview.*` and `subscribePreviewEvents`, and serves `/api/preview-stream/ws`
+from the same Browserless Chromium. T3's panel opens a tab, receives JPEG frames and forwards pointer and
+keyboard input, so the same browser is visible and controllable from the web or mobile client. This is a live
+view, not a page reader. A preview tab has no profile store, upload/download or file chooser; closing the panel
+closes its tab. The URL is reached from Browserless, not from the device, so no host forwarder or proxy is
+needed.
+
 ### Known limitations
 
 - No account integrations yet (calendar, email, MCP servers): web search, page fetch and the browser are the only connectors.
@@ -96,8 +104,9 @@ minutes. Local HTML can be opened with `browser_open({ html })`.
   agent sees it as interrupted.
 - Experimental: pi-durable and the T3 bridge are pre-release and pinned to specific commits.
 - `fetch_page` runs a headless browser: JavaScript-heavy and anti-bot pages may still fail or return partial text.
-- The browser keeps no login profile and has no live view or human takeover yet. A CAPTCHA, 2FA prompt or payment
-  step that needs you stays blocked.
+- The browser keeps no login profile. Live view and human takeover are available through T3's Browser panel
+  when `BROWSERLESS_URL` is set; a CAPTCHA, 2FA prompt or payment step that needs you stays blocked.
+- The preview panel serves one page per tab and has no profile store, upload/download or file chooser.
 
 ## Shape
 
