@@ -62,7 +62,7 @@ The harness offers `web_search`, `web_view`, `summarize` and the `browser_*` too
 services, not cloud APIs:
 
 - `web_search` calls a SearXNG JSON endpoint (`SEARXNG_URL`, default `http://searxng:8080`).
-- `web_view` calls a page-reader service (`READER_URL`, default `http://reader:8000`) and returns the complete page as main-content Markdown, or HTML when `format: "html"` is set. There is no tool-level character limit; the codemode output limit decides what reaches the model.
+- `web_view` calls a page-reader service (`READER_URL`, default `http://reader:8000`) and returns the complete page as main-content Markdown. There is no tool-level character limit; the codemode output limit decides what reaches the model.
 - `summarize` makes one model call over supplied text or a workspace file; it is not a subagent and cannot run tools.
 - `browser_open`, `browser_act`, `browser_snapshot`, `browser_screenshot` and `browser_close` drive a
   Browserless Chromium pool (`BROWSERLESS_URL`, default `ws://browserless:3000/chromium`) over CDP. `BROWSERLESS_TOKEN`
@@ -71,8 +71,7 @@ services, not cloud APIs:
   its own local dev server. `web_view` never uses that allowlist.
 
 Point them at services the harness can reach; this repo does not run them. The
-reader accepts `POST /read` with `{"url":"...","format":"markdown"|"html"}` and returns `content`, the final `url`
-and the chosen `format`.
+reader accepts `POST /read` with `{"url":"..."}` and returns `markdown` and the final `url`.
 `web_view` accepts only `http` and `https`, refuses embedded credentials and private/internal addresses, and marks
 the result as untrusted data. The browser tools apply the same URL check to `browser_open` and `browser_act`'s
 `goto`, and wrap page text as untrusted data too. Backend calls are bounded in size and time. If a service is absent or

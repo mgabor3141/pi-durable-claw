@@ -57,28 +57,12 @@ describe("web view", () => {
 		const out = await viewWeb("https://example.com/start", {
 			fetch: fakeFetch(async (_input, init) => {
 				body = String(init?.body ?? "");
-				return response({ url: "https://example.com/end", content: "# Title\n\nBody" });
+				return response({ url: "https://example.com/end", markdown: "# Title\n\nBody" });
 			}),
 		});
 		expect(body).toContain('"url":"https://example.com/start"');
-		expect(body).toContain('"format":"markdown"');
-		expect(out).toMatchObject({ url: "https://example.com/start", finalUrl: "https://example.com/end", format: "markdown" });
-		expect(out.content).toBe("# Title\n\nBody");
-	});
-
-	it("returns HTML when asked without imposing a character limit", async () => {
-		let body = "";
-		const html = `<main>${"x".repeat(50_000)}</main>`;
-		const out = await viewWeb("https://example.com", {
-			format: "html",
-			fetch: fakeFetch(async (_input, init) => {
-				body = String(init?.body ?? "");
-				return response({ url: "https://example.com", content: html });
-			}),
-		});
-		expect(body).toContain('"format":"html"');
-		expect(out).toMatchObject({ format: "html", finalUrl: "https://example.com" });
-		expect(out.content).toBe(html);
+		expect(out).toMatchObject({ url: "https://example.com/start", finalUrl: "https://example.com/end" });
+		expect(out.markdown).toBe("# Title\n\nBody");
 	});
 
 	it("refuses private, internal and non-http URLs before fetching", async () => {
@@ -96,14 +80,14 @@ describe("web view", () => {
 	it("refuses a redirect into a private address", async () => {
 		await expect(
 			viewWeb("https://example.com", {
-				fetch: fakeFetch(async () => response({ url: "http://127.0.0.1/", content: "# private" })),
+				fetch: fakeFetch(async () => response({ url: "http://127.0.0.1/", markdown: "# private" })),
 			}),
 		).rejects.toThrow(/private|internal/);
 	});
 
 	it("reports an empty page as an error", async () => {
 		await expect(
-			viewWeb("https://example.com", { fetch: fakeFetch(async () => response({ url: "https://example.com", content: " " })) }),
+			viewWeb("https://example.com", { fetch: fakeFetch(async () => response({ url: "https://example.com", markdown: " " })) }),
 		).rejects.toThrow("no readable content");
 	});
 });
