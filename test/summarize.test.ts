@@ -26,7 +26,7 @@ describe("summarize", () => {
 	it("reads a workspace file and sends it to the selected model", async () => {
 		const { api, seen } = fakeApi("page text", "answer");
 		const tool = summarizeTools()[0]!;
-		const result = await (tool as any).execute({ path: "/workspace/long-page.md", instruction: "What changed?" }, api, context);
+		const result = await (tool as any).execute({ path: "/home/agent/long-page.md", instruction: "What changed?" }, api, context);
 		expect(result.structuredOutput).toEqual({ summary: "answer" });
 		expect(seen()).toContain("page text");
 		expect(seen()).toContain("What changed?");

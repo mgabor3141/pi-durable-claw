@@ -33,10 +33,10 @@ export interface WorkspaceMemoryOptions {
  * or unreadable file is omitted rather than failing the request.
  */
 const FILES = [
-	{ label: "AGENTS.md", path: "/workspace/AGENTS.md", mode: "content" },
+	{ label: "AGENTS.md", path: "/home/agent/AGENTS.md", mode: "content" },
 	{
 		label: "USER.md",
-		path: "/workspace/USER.md",
+		path: "/home/agent/USER.md",
 		mode: "reference",
 		summary: "The user's stable profile: identity, communication style, and preferences",
 	},

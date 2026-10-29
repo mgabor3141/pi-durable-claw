@@ -60,7 +60,7 @@ export async function openHarness(
 			models: options.models,
 			registry,
 			// Every tool call's environment is the workspace container over SSH.
-			env: () => workspaceEnv(options.workspace.connection, options.cwd ?? "/workspace"),
+			env: () => workspaceEnv(options.workspace.connection, options.cwd ?? "/home/agent"),
 			settings: { toolExecution: "sequential" },
 		},
 		context,

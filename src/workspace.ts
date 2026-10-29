@@ -58,6 +58,6 @@ export async function connectWorkspace(config: WorkspaceConfig, timeoutMs = 60_0
 }
 
 /** The workspace as a pi-durable ExecutionEnv: the agent's files and bash, over SSH. */
-export function workspaceEnv(connection: Connection, cwd = "/workspace"): RemoteExecutionEnv {
+export function workspaceEnv(connection: Connection, cwd = "/home/agent"): RemoteExecutionEnv {
 	return new RemoteExecutionEnv({ connection, id: "pi-env:claw-workspace", cwd });
 }

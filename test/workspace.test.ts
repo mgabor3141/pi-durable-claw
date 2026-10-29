@@ -14,7 +14,7 @@ import { connectTestWorkspace, dockerWorkspace } from "./fixtures/workspace.ts";
 const context = BACKGROUND_CONTEXT;
 // A key the harness holds; if this string ever reaches the container, isolation failed.
 const SECRET_KEY = "sk-mgabor-SECRETKEY-7f3a9c2b1d";
-const WORKSPACE_KEY_FILE = "/workspace/x.json";
+const WORKSPACE_KEY_FILE = "/home/agent/x.json";
 
 // The model's script, run by upstream's codemode tool. `secret_lookup` and the workspace tools are callable only
 // from scripts (`callers: ["tools"]`), reached as nested `pi.tool` tasks; `bash` resolves to its structured
@@ -46,7 +46,7 @@ beforeAll(async () => {
 		models,
 		extraTools: [secretLookupTool(SECRET_KEY)],
 	});
-	const root = await harness.root(context, { agent: { model: { provider: "faux", modelId: "faux-1" }, cwd: "/workspace" } });
+	const root = await harness.root(context, { agent: { model: { provider: "faux", modelId: "faux-1" }, cwd: "/home/agent" } });
 
 	// The model is offered exactly one tool: codemode. (`agent.tools` are the tools a request offers, in order:
 	// enabled, callable by the model, selected by `modelTools`.) The script-callable tools are enabled, not offered.
@@ -89,7 +89,7 @@ describe("upstream codemode in a pi-durable conversation", () => {
 		expect(resultText).toContain('"exit":0');
 	});
 
-	it("wrote the derived record to /workspace/x.json in the container", () => {
+	it("wrote the derived record to /home/agent/x.json in the container", () => {
 		const content = dockerWorkspace(`cat ${WORKSPACE_KEY_FILE}`);
 		expect(content).toContain("record-for-calendar-sig-9c2b1d");
 	});
@@ -115,13 +115,13 @@ describe("upstream codemode in a pi-durable conversation", () => {
 		const out = dockerWorkspace(`cat ${JSON.stringify(sentinel)} 2>&1 || echo MISSING`);
 		expect(out).toContain("MISSING");
 		// And an SSH-run bash from the workspace env reports a non-zero exit for the same read.
-		const env = workspaceEnv(workspace.connection, "/workspace");
+		const env = workspaceEnv(workspace.connection, "/home/agent");
 		const exec = await env.exec(`cat ${JSON.stringify(sentinel)}`, undefined, context);
 		expect(exec.ok ? exec.value.exitCode : "spawn_error").not.toBe(0);
 	});
 
 	it("the workspace has no harness key material in its environment (shell env of a real command)", async () => {
-		const env = workspaceEnv(workspace.connection, "/workspace");
+		const env = workspaceEnv(workspace.connection, "/home/agent");
 		let out = "";
 		const exec = await env.exec("env", { onOutput: (t) => (out += t) }, context);
 		expect(exec.ok && exec.value.exitCode).toBe(0);

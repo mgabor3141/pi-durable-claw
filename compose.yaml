@@ -21,7 +21,7 @@ services:
     restart: unless-stopped
     init: true
     volumes:
-      - ./data/workspace:/workspace
+      - ./data/workspace:/home/agent
       # The workspace's SSH host key: the harness trusts it on first use and refuses a changed one.
       - ./data/workspace-ssh:/etc/ssh/host
       - pubkey:/pubkey:ro

@@ -21,13 +21,13 @@ let child: ChildProcess | undefined;
 
 /** Count lines matching `marker` in the side-effect file, through docker exec (never trusting the container). */
 function countLines(marker: string): number {
-	const out = dockerWorkspace(`grep -c '^${marker}$' /workspace/crash-ran 2>/dev/null || true`).trim();
+	const out = dockerWorkspace(`grep -c '^${marker}$' /home/agent/crash-ran 2>/dev/null || true`).trim();
 	return Number(out || "0");
 }
 
 beforeAll(async () => {
 	workspace = await connectTestWorkspace();
-	dockerWorkspace("rm -f /workspace/crash-ran");
+	dockerWorkspace("rm -f /home/agent/crash-ran");
 	directory = await mkdtemp(join(tmpdir(), "pdc-test-crash-"));
 	storagePath = join(directory, "session.sqlite");
 	await writeFile(storagePath, "");
@@ -74,7 +74,7 @@ describe("crash mid-script: durable codemode resumes from its journal", () => {
 		const { faux, models } = fauxModels();
 		faux.setResponses([codemodeAnswer("recovered")]);
 		const harness = await openHarness({ storagePath, workspace, models });
-		const root = await harness.root(context, { agent: { model: { provider: "faux", modelId: "faux-1" }, cwd: "/workspace" } });
+		const root = await harness.root(context, { agent: { model: { provider: "faux", modelId: "faux-1" }, cwd: "/home/agent" } });
 		harness.resume();
 
 		// The run settles: the codemode call's result is the script's own, from the resumed VM.

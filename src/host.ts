@@ -8,7 +8,7 @@
 // Configuration (all CLAW_*): ROOT, HOST (listen address, default 127.0.0.1), PORT (3775), PUBLIC_URL (what `pair`
 // prints; default http://127.0.0.1:PORT), WORKSPACE_HOST (workspace), WORKSPACE_PORT (22), PUBKEY_DIR (where to
 // publish the harness's public key for the workspace; unset: not published), SCRATCH_DIR (T3's scratch project root,
-// an absolute path in the workspace environment; default /workspace/scratch). Models: <root>/pi/auth.json (and models.json).
+// an absolute path in the workspace environment; default /home/agent/scratch). Models: <root>/pi/auth.json (and models.json).
 import { join } from "node:path";
 import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
 import { ModelRuntime } from "@earendil-works/pi-coding-agent";
@@ -43,7 +43,7 @@ async function main(): Promise<void> {
 		process.exit(2);
 	}
 	const stateDir = join(root, "t3");
-	const scratchDir = process.env.CLAW_SCRATCH_DIR?.trim() || "/workspace/scratch";
+	const scratchDir = process.env.CLAW_SCRATCH_DIR?.trim() || "/home/agent/scratch";
 
 	// `pair`: mint a code against the state dir's auth store and exit; the running host reads the store per attempt.
 	if (argv[0] === "pair") {

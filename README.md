@@ -36,8 +36,8 @@ Requirements: a Linux server with Docker (Compose v2) and git, and a model provi
    model in the catalog, which may not be one you can use.
 
 Everything worth keeping lives in `./data`, next to `compose.yaml`: `harness/` (your credentials, conversations,
-pairings, settings, the harness's SSH key), `workspace/` (the agent's files, at `/workspace` in its container) and `workspace-ssh/` (the
-workspace's host key). The containers own them as uid 1000. The workspace's sshd is not published, and the Docker
+pairings, settings, the harness's SSH key), `workspace/` (the agent's files, at `/home/agent` in its container)
+and `workspace-ssh/` (the workspace's host key). The containers own them as uid 1000. The workspace's sshd is not published, and the Docker
 socket is never mounted. There is no hako sshd image yet, so the workspace is a plain Debian image (python3, git, curl).
 
 ### Tailscale (optional)
@@ -96,7 +96,7 @@ needed.
 - No account integrations yet (calendar, email, MCP servers): web search, page view and the browser are the only connectors.
 - Scheduled tasks run on intervals or fixed times; there are no webhook triggers.
 - T3 projects do not map to containers: use "No project" threads. The project picker, file panel and search go
-  through the workspace execution environment, so a project must live under the workspace's `/workspace` (the
+  through the workspace execution environment, so a project must live under the workspace's `/home/agent` (the
   harness's data directory is not visible there).
 - Nested calls inside a codemode script are invisible in T3: you see the script and its result.
 - The workspace can reach the app. Everything there needs a pairing credential except the web app's static files,

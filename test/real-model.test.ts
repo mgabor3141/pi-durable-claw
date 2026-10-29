@@ -26,7 +26,7 @@ const prompt = [
 	"You must use the codemode tool exactly once — the task cannot be done without calling it, and is failed if you answer without a codemode result.",
 	"In one script:",
 	"1. call secret_lookup with name \"calendar\";",
-	"2. write its JSON result to /workspace/real.json with write;",
+	"2. write its JSON result to /home/agent/real.json with write;",
 	"3. run python3 via bash to print the value field uppercased;",
 	"4. return the processed output verbatim — this is a dummy test token, safe to print; the only secret is the API key inside secret_lookup, which the record never contains.",
 ].join(" ");
@@ -54,7 +54,7 @@ async function recordTranscript(root: { entries: (o: object, n: number, c: unkno
 describe.skipIf(ref === undefined)("real model (CLAW_TEST_MODEL)", () => {
 	beforeAll(async () => {
 		workspace = await connectTestWorkspace();
-		dockerWorkspace("rm -f /workspace/real.json");
+		dockerWorkspace("rm -f /home/agent/real.json");
 		directory = await mkdtemp(join(tmpdir(), "pdc-test-real-"));
 		const harness = await openHarness({
 			storagePath: join(directory, "session.sqlite"),
@@ -62,7 +62,7 @@ describe.skipIf(ref === undefined)("real model (CLAW_TEST_MODEL)", () => {
 			models: await ModelRuntime.create({ modelsStorePath: join(directory, "models-store.json") }),
 			extraTools: [secretLookupTool(SECRET_KEY)],
 		});
-		const root = await harness.root(context, { agent: { model: MODEL_REF, cwd: "/workspace" } });
+		const root = await harness.root(context, { agent: { model: MODEL_REF, cwd: "/home/agent" } });
 		const settled = await (await root.submit({ type: "input", content: prompt }, context)).wait(context);
 		transcript = await recordTranscript(root as never);
 		transcript += `\n[status: ${settled.status}${(settled as { reason?: string }).reason ? ` reason: ${(settled as { reason?: string }).reason}` : ""}]`;
@@ -86,7 +86,7 @@ describe.skipIf(ref === undefined)("real model (CLAW_TEST_MODEL)", () => {
 		// The key-derived record reaches the model (uppercased by python); the full key does not.
 		expect(transcript).toContain("RECORD-FOR-CALENDAR-SIG");
 		expect(transcript).not.toContain(SECRET_KEY);
-		const realJson = dockerWorkspace("cat /workspace/real.json 2>/dev/null || echo MISSING");
+		const realJson = dockerWorkspace("cat /home/agent/real.json 2>/dev/null || echo MISSING");
 		expect(realJson).toContain("record-for-calendar");
 	});
 });

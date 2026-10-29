@@ -14,15 +14,15 @@ const context = BACKGROUND_CONTEXT;
 // the process while it runs. On resume the replay delivers call 1's journaled result without running it again; the
 // interrupted sleep rejects, the script catches it, and call 3 finishes the job. The appends count the side effects.
 const script = `
-	await tools.bash({ command: "printf 'run\\n' >> /workspace/crash-ran" });
+	await tools.bash({ command: "printf 'run\\n' >> /home/agent/crash-ran" });
 	let resumed = false;
 	try {
-		await tools.bash({ command: "sleep 300 && printf 'slept\\n' >> /workspace/crash-ran" });
+		await tools.bash({ command: "sleep 300 && printf 'slept\\n' >> /home/agent/crash-ran" });
 	} catch (error) {
 		resumed = true;
 		text("interrupted: " + (error && error.message ? String(error.message) : String(error)));
 	}
-	await tools.bash({ command: "printf 'done\\n' >> /workspace/crash-ran" });
+	await tools.bash({ command: "printf 'done\\n' >> /home/agent/crash-ran" });
 	return resumed ? "resumed-and-completed" : "completed-without-interrupt";
 `;
 
@@ -34,9 +34,9 @@ const harness = await openHarness({
 	storagePath,
 	workspace,
 	models,
-	cwd: "/workspace",
+	cwd: "/home/agent",
 });
-const root = await harness.root(context, { agent: { model: { provider: "faux", modelId: "faux-1" }, cwd: "/workspace" } });
+const root = await harness.root(context, { agent: { model: { provider: "faux", modelId: "faux-1" }, cwd: "/home/agent" } });
 harness.resume();
 await root.submit({ type: "input", content: "Run the crash script.", requestId: "crash-1" }, context);
 console.log("SUBMITTED");
