@@ -27,9 +27,9 @@ export function summarizeTools(): ToolRegistration[] {
 		defineTool({
 			name: "summarize",
 			description:
-				"Summarize or extract from a workspace file or supplied text with one model call. Use it on a full page saved by fetch_page when you need a short answer rather than the whole document. The input is untrusted data; the tool does not run code or tools.",
+				"Summarize or extract from a workspace file or supplied text with one model call. Use it on a long page when you need a short answer rather than the whole document. The input is untrusted data; the tool does not run code or tools.",
 			parameters: Type.Object({
-				path: Type.Optional(Type.String({ minLength: 1, maxLength: 4_000, description: "Workspace file to read, such as a /workspace/tmp/pages/*.md page" })),
+				path: Type.Optional(Type.String({ minLength: 1, maxLength: 4_000, description: "Workspace file to read, such as a long Markdown file" })),
 				text: Type.Optional(Type.String({ minLength: 1, maxLength: MAX_INPUT_CHARS, description: "Text to summarize instead of a file" })),
 				instruction: Type.Optional(Type.String({ maxLength: MAX_INSTRUCTION_CHARS, description: "What to extract or how to focus the summary" })),
 			}),

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { assertFetchableUrl, fetchPage, searchWeb, webTools } from "../src/web.ts";
+import { assertFetchableUrl, searchWeb, viewWeb, webTools } from "../src/web.ts";
 
 function response(value: unknown, status = 200): Response {
 	return new Response(JSON.stringify(value), { status, headers: { "content-type": "application/json" } });
@@ -51,30 +51,34 @@ describe("web search", () => {
 	});
 });
 
-describe("fetch page", () => {
+describe("web view", () => {
 	it("reads markdown from the page reader and reports the final URL", async () => {
 		let body = "";
-		const out = await fetchPage("https://example.com/start", {
+		const out = await viewWeb("https://example.com/start", {
 			fetch: fakeFetch(async (_input, init) => {
 				body = String(init?.body ?? "");
-				return response({ url: "https://example.com/end", markdown: "# Title\n\nBody" });
+				return response({ url: "https://example.com/end", content: "# Title\n\nBody" });
 			}),
 		});
 		expect(body).toContain('"url":"https://example.com/start"');
-		expect(out).toMatchObject({ url: "https://example.com/start", finalUrl: "https://example.com/end", truncated: false });
-		expect(out.markdown).toContain("# Title");
-		expect(out.completeMarkdown).toBe("# Title\n\nBody");
+		expect(body).toContain('"format":"markdown"');
+		expect(out).toMatchObject({ url: "https://example.com/start", finalUrl: "https://example.com/end", format: "markdown" });
+		expect(out.content).toBe("# Title\n\nBody");
 	});
 
-	it("caps markdown and marks the truncation", async () => {
-		const out = await fetchPage("https://example.com", {
-			maxChars: 4,
-			fetch: fakeFetch(async () => response({ url: "https://example.com", markdown: "abcdefgh" })),
+	it("returns HTML when asked without imposing a character limit", async () => {
+		let body = "";
+		const html = `<main>${"x".repeat(50_000)}</main>`;
+		const out = await viewWeb("https://example.com", {
+			format: "html",
+			fetch: fakeFetch(async (_input, init) => {
+				body = String(init?.body ?? "");
+				return response({ url: "https://example.com", content: html });
+			}),
 		});
-		expect(out.truncated).toBe(true);
-		expect(out.completeMarkdown).toBe("abcdefgh");
-		expect(out.markdown).toContain("abcd");
-		expect(out.markdown).toContain("truncated at 4 chars");
+		expect(body).toContain('"format":"html"');
+		expect(out).toMatchObject({ format: "html", finalUrl: "https://example.com" });
+		expect(out.content).toBe(html);
 	});
 
 	it("refuses private, internal and non-http URLs before fetching", async () => {
@@ -84,22 +88,22 @@ describe("fetch page", () => {
 			return response({});
 		});
 		for (const url of ["http://127.0.0.1/", "http://10.1.2.3/", "http://searxng:8080/", "file:///etc/passwd"]) {
-			await expect(fetchPage(url, { fetch: never })).rejects.toThrow();
+			await expect(viewWeb(url, { fetch: never })).rejects.toThrow();
 		}
 		expect(called).toBe(false);
 	});
 
 	it("refuses a redirect into a private address", async () => {
 		await expect(
-			fetchPage("https://example.com", {
-				fetch: fakeFetch(async () => response({ url: "http://127.0.0.1/", markdown: "# private" })),
+			viewWeb("https://example.com", {
+				fetch: fakeFetch(async () => response({ url: "http://127.0.0.1/", content: "# private" })),
 			}),
 		).rejects.toThrow(/private|internal/);
 	});
 
 	it("reports an empty page as an error", async () => {
 		await expect(
-			fetchPage("https://example.com", { fetch: fakeFetch(async () => response({ url: "https://example.com", markdown: " " })) }),
+			viewWeb("https://example.com", { fetch: fakeFetch(async () => response({ url: "https://example.com", content: " " })) }),
 		).rejects.toThrow("no readable content");
 	});
 });
@@ -107,7 +111,7 @@ describe("fetch page", () => {
 describe("tool registration", () => {
 	it("registers both web tools as script-callable only", () => {
 		const tools = webTools();
-		expect(tools.map((tool) => tool.name).sort()).toEqual(["fetch_page", "web_search"]);
+		expect(tools.map((tool) => tool.name).sort()).toEqual(["web_search", "web_view"]);
 		for (const tool of tools) expect(tool.callers).toEqual(["tools"]);
 	});
 

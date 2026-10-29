@@ -131,7 +131,7 @@ code. Verified in T3's web app (playwright + chromium, screenshots in `.memory/`
 - Profiles are expressed with `ToolRegistration.callers` and the agent's `modelTools`: key-bearing and workspace tools
   are script-callable only, so a request offers exactly the tools in the column above.
 
-- **Web research** is split by job: `web_search` reads SearXNG JSON, `fetch_page` reads one page through the
+- **Web research** is split by job: `web_search` reads SearXNG JSON, `web_view` reads one page through the
   stateless reader, and the `browser_*` tools drive an interactive Browserless pool. All live in the harness because
   the service URLs and the browser token do; the services are separate containers, so page-driven code never runs
   beside the keys. Results carry caps and are wrapped as untrusted data. The workspace still has no direct route to
