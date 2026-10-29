@@ -58,11 +58,12 @@ and the workspace's host key is the one the harness trusts. The archive holds th
 
 ## Web tools
 
-The harness offers `web_search`, `fetch_page` and the `browser_*` tools to codemode scripts. They are local
+The harness offers `web_search`, `fetch_page`, `summarize` and the `browser_*` tools to codemode scripts. They are local
 services, not cloud APIs:
 
 - `web_search` calls a SearXNG JSON endpoint (`SEARXNG_URL`, default `http://searxng:8080`).
-- `fetch_page` calls a page-reader service (`READER_URL`, default `http://reader:8000`) and returns Markdown.
+- `fetch_page` calls a page-reader service (`READER_URL`, default `http://reader:8000`) and returns main-content Markdown. It also writes the complete page to `/workspace/tmp/pages/` when an execution environment exists; the workspace cleans that directory automatically. Use it to grep or read long pages instead of fetching them again.
+- `summarize` makes one model call over supplied text or a workspace file; it is not a subagent and cannot run tools.
 - `browser_open`, `browser_act`, `browser_snapshot`, `browser_screenshot` and `browser_close` drive a
   Browserless Chromium pool (`BROWSERLESS_URL`, default `ws://browserless:3000/chromium`) over CDP. `BROWSERLESS_TOKEN`
   is optional in the default endpoint and becomes a `token` query parameter when set. `BROWSER_LOCAL_HOSTS` is an
@@ -103,7 +104,7 @@ needed.
 - A harness restart resumes a turn, but a command that was running in the workspace is cut off, not rerun; the
   agent sees it as interrupted.
 - Experimental: pi-durable and the T3 bridge are pre-release and pinned to specific commits.
-- `fetch_page` runs a headless browser: JavaScript-heavy and anti-bot pages may still fail or return partial text.
+- `fetch_page` uses a local reader that extracts main content; JavaScript-heavy and anti-bot pages may still fail or return partial text. The complete extracted page is available in `/workspace/tmp/pages/` until it expires.
 - The browser keeps no login profile. Live view and human takeover are available through T3's Browser panel
   when `BROWSERLESS_URL` is set; a CAPTCHA, 2FA prompt or payment step that needs you stays blocked.
 - The preview panel serves one page per tab and has no profile store, upload/download or file chooser.

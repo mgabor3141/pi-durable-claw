@@ -63,6 +63,7 @@ describe("fetch page", () => {
 		expect(body).toContain('"url":"https://example.com/start"');
 		expect(out).toMatchObject({ url: "https://example.com/start", finalUrl: "https://example.com/end", truncated: false });
 		expect(out.markdown).toContain("# Title");
+		expect(out.completeMarkdown).toBe("# Title\n\nBody");
 	});
 
 	it("caps markdown and marks the truncation", async () => {
@@ -71,6 +72,7 @@ describe("fetch page", () => {
 			fetch: fakeFetch(async () => response({ url: "https://example.com", markdown: "abcdefgh" })),
 		});
 		expect(out.truncated).toBe(true);
+		expect(out.completeMarkdown).toBe("abcdefgh");
 		expect(out.markdown).toContain("abcd");
 		expect(out.markdown).toContain("truncated at 4 chars");
 	});

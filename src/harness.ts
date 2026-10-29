@@ -8,6 +8,7 @@ import { workspaceMemoryExtension } from "./memory.ts";
 import { browserTools } from "./browser.ts";
 import { workspaceTools } from "./tools.ts";
 import { webTools } from "./web.ts";
+import { summarizeTools } from "./summarize.ts";
 import { workspaceEnv, type WorkspaceConnection } from "./workspace.ts";
 
 /** One QuickJS sandbox per process is enough: each execution gets its own VM and worker. */
@@ -23,7 +24,7 @@ export function codemodeSandbox(): CodemodeSandbox {
  * and the model is offered exactly one tool: `codemode`.
  */
 export function harnessExtensions(extraTools: readonly ToolRegistration[] = []): readonly Extension[] {
-	const harnessTools: ToolRegistration[] = [...extraTools, ...workspaceTools(), ...webTools(), ...browserTools()];
+	const harnessTools: ToolRegistration[] = [...extraTools, ...workspaceTools(), ...webTools(), ...browserTools(), ...summarizeTools()];
 	return [
 		createCodemodeExtension({ sandbox: codemodeSandbox() }) as Extension,
 		defineExtension({ name: "harness-tools", tools: harnessTools }),
