@@ -59,7 +59,8 @@ and the workspace's host key is the one the harness trusts. The archive holds th
 ## Workspace tools
 
 The `read`, `write`, `edit` and `bash` tools run in the workspace over SSH and start in the conversation's own
-working directory: a project's root, a Scratch thread's folder, or `/home/agent`. `bash` exposes the
+working directory: a project's root, a Scratch thread's folder, or `/home/agent`. On a project thread the prompt
+also carries that project's `AGENTS.md` after the global one. `bash` exposes the
 workspace's Node install on `PATH` when it exists; the workspace image also includes `jq`.
 
 ## Web tools

@@ -1,3 +1,4 @@
+import { join } from "node:path";
 import { defineExtension, section, type Extension } from "@earendil-works/pi-durable";
 
 /**
@@ -24,19 +25,21 @@ export interface WorkspaceMemoryOptions {
 
 /**
  * The workspace memory the model sees at the start of every request. The global
- * AGENTS.md is injected; USER.md is only referenced, because it is personal and a
- * project conversation usually does not need it. MEMORY.md is named in AGENTS.md
- * and read on demand. Project files are read on demand too.
+ * AGENTS.md and the active project's AGENTS.md are injected; USER.md is only
+ * referenced, because it is personal and a project conversation usually does
+ * not need it. MEMORY.md is named in AGENTS.md and read on demand. Other project
+ * files are read on demand too.
  *
  * The files live in the workspace, which is the execution environment; the
  * section reads them over pi-env SSH, the same route the tools use. A missing
  * or unreadable file is omitted rather than failing the request.
  */
+const HOME = "/home/agent";
 const FILES = [
-	{ label: "AGENTS.md", path: "/home/agent/AGENTS.md", mode: "content" },
+	{ label: "AGENTS.md", path: join(HOME, "AGENTS.md"), mode: "content" },
 	{
 		label: "USER.md",
-		path: "/home/agent/USER.md",
+		path: join(HOME, "USER.md"),
 		mode: "reference",
 		summary: "The user's stable profile: identity, communication style, and preferences",
 	},
@@ -55,8 +58,15 @@ export function workspaceMemoryExtension(options: WorkspaceMemoryOptions = {}): 
 				const env = input.env;
 				if (env === undefined) return undefined;
 				const parts: string[] = [`<workspace cwd="${env.cwd}"/>`];
+				// A project thread starts in its project root; inject its AGENTS.md after the global one. Scratch threads
+				// may have an AGENTS.md too, but only if the folder actually carries one.
+				const requestFiles: WorkspaceMemoryFile[] = [...files];
+				if (env.cwd !== HOME) {
+					const projectFile = join(env.cwd, "AGENTS.md");
+					requestFiles.splice(1, 0, { label: projectFile, path: projectFile, mode: "content" });
+				}
 				let used = 0;
-				for (const file of files) {
+				for (const file of requestFiles) {
 					const room = maxTotal - used;
 					if (room <= 0) break;
 
