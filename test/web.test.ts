@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { assertFetchableUrl, searchWeb, viewWeb, webTools } from "../src/web.ts";
+import { assertFetchableUrl, searchWeb, fetchWeb, webTools } from "../src/web.ts";
 
 function response(value: unknown, status = 200): Response {
 	return new Response(JSON.stringify(value), { status, headers: { "content-type": "application/json" } });
@@ -54,7 +54,7 @@ describe("web search", () => {
 describe("web view", () => {
 	it("reads markdown from the page reader and reports the final URL", async () => {
 		let body = "";
-		const out = await viewWeb("https://example.com/start", {
+		const out = await fetchWeb("https://example.com/start", {
 			fetch: fakeFetch(async (_input, init) => {
 				body = String(init?.body ?? "");
 				return response({ url: "https://example.com/end", markdown: "# Title\n\nBody" });
@@ -72,14 +72,14 @@ describe("web view", () => {
 			return response({});
 		});
 		for (const url of ["http://127.0.0.1/", "http://10.1.2.3/", "http://searxng:8080/", "file:///etc/passwd"]) {
-			await expect(viewWeb(url, { fetch: never })).rejects.toThrow();
+			await expect(fetchWeb(url, { fetch: never })).rejects.toThrow();
 		}
 		expect(called).toBe(false);
 	});
 
 	it("refuses a redirect into a private address", async () => {
 		await expect(
-			viewWeb("https://example.com", {
+			fetchWeb("https://example.com", {
 				fetch: fakeFetch(async () => response({ url: "http://127.0.0.1/", markdown: "# private" })),
 			}),
 		).rejects.toThrow(/private|internal/);
@@ -87,7 +87,7 @@ describe("web view", () => {
 
 	it("reports an empty page as an error", async () => {
 		await expect(
-			viewWeb("https://example.com", { fetch: fakeFetch(async () => response({ url: "https://example.com", markdown: " " })) }),
+			fetchWeb("https://example.com", { fetch: fakeFetch(async () => response({ url: "https://example.com", markdown: " " })) }),
 		).rejects.toThrow("no readable content");
 	});
 });
@@ -95,7 +95,7 @@ describe("web view", () => {
 describe("tool registration", () => {
 	it("registers both web tools as script-callable only", () => {
 		const tools = webTools();
-		expect(tools.map((tool) => tool.name).sort()).toEqual(["web_search", "web_view"]);
+		expect(tools.map((tool) => tool.name).sort()).toEqual(["web_fetch", "web_search"]);
 		for (const tool of tools) expect(tool.callers).toEqual(["tools"]);
 	});
 

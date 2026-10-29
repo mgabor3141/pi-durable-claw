@@ -58,26 +58,26 @@ and the workspace's host key is the one the harness trusts. The archive holds th
 
 ## Web tools
 
-The harness offers `web_search`, `web_view`, `summarize` and the `browser_*` tools to codemode scripts. They are local
+The harness offers `web_search`, `web_fetch`, `summarize` and the `browser_*` tools to codemode scripts. They are local
 services, not cloud APIs:
 
 - `web_search` calls a SearXNG JSON endpoint (`SEARXNG_URL`, default `http://searxng:8080`).
-- `web_view` calls a page-reader service (`READER_URL`, default `http://reader:8000`) and returns the complete page as main-content Markdown. There is no tool-level character limit; the codemode output limit decides what reaches the model.
+- `web_fetch` calls a page-reader service (`READER_URL`, default `http://reader:8000`) and returns the complete page as main-content Markdown. There is no tool-level character limit; the codemode output limit decides what reaches the model.
 - `summarize` makes one model call over supplied text or a workspace file; it is not a subagent and cannot run tools.
 - `browser_open`, `browser_act`, `browser_snapshot`, `browser_screenshot` and `browser_close` drive a
   Browserless Chromium pool (`BROWSERLESS_URL`, default `ws://browserless:3000/chromium`) over CDP. `BROWSERLESS_TOKEN`
   is optional in the default endpoint and becomes a `token` query parameter when set. `BROWSER_LOCAL_HOSTS` is an
   optional comma-separated allowlist for the browser only; a deployment can set `workspace` so the agent can open
-  its own local dev server. `web_view` never uses that allowlist.
+  its own local dev server. `web_fetch` never uses that allowlist.
 
 Point them at services the harness can reach; this repo does not run them. The
 reader accepts `POST /read` with `{"url":"..."}` and returns `markdown` and the final `url`.
-`web_view` accepts only `http` and `https`, refuses embedded credentials and private/internal addresses, and marks
+`web_fetch` accepts only `http` and `https`, refuses embedded credentials and private/internal addresses, and marks
 the result as untrusted data. The browser tools apply the same URL check to `browser_open` and `browser_act`'s
 `goto`, and wrap page text as untrusted data too. Backend calls are bounded in size and time. If a service is absent or
 the request fails, the tool returns the backend error instead of inventing a result.
 
-The browser is for interaction, not reading. `web_view` is the cheap, stateless path and should be the default;
+The browser is for interaction, not reading. `web_fetch` is the cheap, stateless path and should be the default;
 use the browser when a page needs clicks, typing, JavaScript, a screenshot, or a short interactive test. A
 screenshot result is an image block; call `image(shot)` in the same codemode script to attach it. One page
 is kept per conversation and closed after five idle minutes; Browserless closes it unconditionally after ten
@@ -104,7 +104,7 @@ needed.
 - A harness restart resumes a turn, but a command that was running in the workspace is cut off, not rerun; the
   agent sees it as interrupted.
 - Experimental: pi-durable and the T3 bridge are pre-release and pinned to specific commits.
-- `web_view` uses a local reader that extracts main content; JavaScript-heavy and anti-bot pages may still fail or return partial text. It returns the complete page; the codemode output limit decides how much the model sees.
+- `web_fetch` uses a local reader that extracts main content; JavaScript-heavy and anti-bot pages may still fail or return partial text. It returns the complete page; the codemode output limit decides how much the model sees.
 - The browser keeps no login profile. Live view and human takeover are available through T3's Browser panel
   when `BROWSERLESS_URL` is set; a CAPTCHA, 2FA prompt or payment step that needs you stays blocked.
 - The preview panel serves one page per tab and has no profile store, upload/download or file chooser.
