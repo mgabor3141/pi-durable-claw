@@ -56,6 +56,12 @@ Restore all of it together: the conversations (`harness/durable.db`) and the bri
 and the workspace's host key is the one the harness trusts. The archive holds the harness's SSH key and your
 `auth.json`, so treat it like your credentials.
 
+## Workspace tools
+
+The `read`, `write`, `edit` and `bash` tools run in the workspace over SSH and start in the conversation's own
+working directory: a project's root, a Scratch thread's folder, or `/home/agent`. `bash` also puts the bundled
+Node 22 on `PATH`, so scripts can call `node` and `jq` directly.
+
 ## Web tools
 
 The harness offers `web_search`, `web_fetch`, `summarize` and the `browser_*` tools to codemode scripts. They are local

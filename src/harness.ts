@@ -59,8 +59,9 @@ export async function openHarness(
 		{
 			models: options.models,
 			registry,
-			// Every tool call's environment is the workspace container over SSH.
-			env: () => workspaceEnv(options.workspace.connection, options.cwd ?? "/home/agent"),
+			// Every tool call's environment is the workspace container over SSH, starting where this conversation
+			// says it works: a project's root, a Scratch thread's own folder, or the home fallback.
+			env: (target) => workspaceEnv(options.workspace.connection, target.cwd ?? options.cwd ?? "/home/agent"),
 			settings: { toolExecution: "sequential" },
 		},
 		context,

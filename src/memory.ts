@@ -54,7 +54,7 @@ export function workspaceMemoryExtension(options: WorkspaceMemoryOptions = {}): 
 			section("workspace-memory", async (input, context) => {
 				const env = input.env;
 				if (env === undefined) return undefined;
-				const parts: string[] = [];
+				const parts: string[] = [`<workspace cwd="${env.cwd}"/>`];
 				let used = 0;
 				for (const file of files) {
 					const room = maxTotal - used;

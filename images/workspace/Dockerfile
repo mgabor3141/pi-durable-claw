@@ -3,7 +3,7 @@
 FROM debian:bookworm-slim
 
 RUN apt-get update \
-	&& apt-get install -y --no-install-recommends openssh-server python3 git curl ca-certificates \
+	&& apt-get install -y --no-install-recommends openssh-server python3 git curl ca-certificates jq \
 	&& rm -rf /var/lib/apt/lists/* \
 	&& mkdir -p /run/sshd /etc/ssh/host \
 	&& useradd -m -u 1000 -s /bin/bash -p '*' agent \

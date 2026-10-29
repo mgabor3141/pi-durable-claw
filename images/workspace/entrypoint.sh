@@ -10,4 +10,10 @@ for file in .profile .bashrc .bash_logout; do
 done
 
 [ -f /etc/ssh/host/ssh_host_ed25519_key ] || ssh-keygen -q -t ed25519 -N "" -f /etc/ssh/host/ssh_host_ed25519_key
+
+# Node lives in the persistent home; publish its binaries on PATH for every shell.
+for bin in node npm npx; do
+	[ -x "/home/agent/tools/node/bin/$bin" ] && ln -sf "/home/agent/tools/node/bin/$bin" "/usr/local/bin/$bin"
+done
+
 exec /usr/sbin/sshd -D -e
