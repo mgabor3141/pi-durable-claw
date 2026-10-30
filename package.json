@@ -17,7 +17,7 @@
     "@earendil-works/pi-codemode": "1.4.0",
     "@earendil-works/pi-durable": "1.4.0",
     "@earendil-works/pi-env": "1.4.0",
-    "@mgabor3141/pi-durable-t3": "github:mgabor3141/pi-durable-t3#7c695fa",
+    "@mgabor3141/pi-durable-t3": "github:mgabor3141/pi-durable-t3#e628932",
     "playwright-core": "1.64.1"
   },
   "devDependencies": {
