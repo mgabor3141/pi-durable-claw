@@ -1,0 +1,348 @@
+import type { Context } from "@earendil-works/chord";
+import type { AssistantMessage, Message, ModelThinkingLevel, SimpleStreamOptions } from "@earendil-works/pi-ai";
+import { serializeConversation } from "@earendil-works/pi-coding-agent";
+import {
+	CompactionTask,
+	defineExtension,
+	hook,
+	type CompactionHooks,
+	type EntryId,
+	type EntryRecord,
+	type Extension,
+	type HookApi,
+} from "@earendil-works/pi-durable";
+
+/**
+ * pi's compaction prompt, copied from the coding agent. The durable runtime already truncates tool results and omits
+ * thinking before serializing; this hook adds the parts the coding agent has and durable does not: an update prompt
+ * when a previous summary exists, the split-turn prefix summary, and cumulative read/modified file lists.
+ */
+const SYSTEM_PROMPT = `You are a context summarization assistant. Your task is to read a conversation between a user and an AI assistant, then produce a structured summary following the exact format specified.
+
+Do NOT continue the conversation. Do NOT respond to any questions in the conversation. ONLY output the structured summary.`;
+
+const SUMMARY_PROMPT = `The messages above are a conversation to summarize. Create a structured context checkpoint summary that another LLM will use to continue the work.
+
+Use this EXACT format:
+
+## Goal
+[What is the user trying to accomplish? Can be multiple items if the session covers different tasks.]
+
+## Constraints & Preferences
+- [Any constraints, preferences, or requirements mentioned by user]
+- [Or "(none)" if none were mentioned]
+
+## Progress
+### Done
+- [x] [Completed tasks/changes]
+
+### In Progress
+- [ ] [Current work]
+
+### Blocked
+- [Issues preventing progress, if any]
+
+## Key Decisions
+- **[Decision]**: [Brief rationale]
+
+## Next Steps
+1. [Ordered list of what should happen next]
+
+## Critical Context
+- [Any data, examples, or references needed to continue]
+- [Or "(none)" if not applicable]
+
+Keep each section concise. Preserve exact file paths, function names, and error messages.`;
+
+const UPDATE_PROMPT = `The messages above are NEW conversation messages to incorporate into the existing summary provided in <previous-summary> tags.
+
+Update the existing structured summary with new information. RULES:
+- PRESERVE all existing information from the previous summary
+- ADD new progress, decisions, and context from the new messages
+- UPDATE the Progress section: move items from "In Progress" to "Done" when completed
+- UPDATE "Next Steps" based on what was accomplished
+- PRESERVE exact file paths, function names, and error messages
+- If something is no longer relevant, you may remove it
+
+Use this EXACT format:
+
+## Goal
+[Preserve existing goals, add new ones if the task expanded]
+
+## Constraints & Preferences
+- [Preserve existing, add new ones discovered]
+
+## Progress
+### Done
+- [x] [Include previously done items AND newly completed items]
+
+### In Progress
+- [ ] [Current work - update based on progress]
+
+### Blocked
+- [Current blockers - remove if resolved]
+
+## Key Decisions
+- **[Decision]**: [Brief rationale] (preserve all previous, add new)
+
+## Next Steps
+1. [Update based on current state]
+
+## Critical Context
+- [Preserve important context, add new if needed]
+
+Keep each section concise. Preserve exact file paths, function names, and error messages.`;
+
+const TURN_PREFIX_PROMPT = `The messages above are earlier context from an ongoing conversation. Later messages are stored separately and do not need to be reconstructed.
+
+Create a concise checkpoint of the user's request and the progress shown above. This checkpoint will be placed before the later messages so the conversation can continue with the necessary context.
+
+## Original Request
+[What did the user ask for?]
+
+## Progress So Far
+- [Key decisions and work completed in these messages]
+
+## Context Needed to Continue
+- [Information from these messages needed to understand the later work]
+
+Only summarize information explicitly present above. Do not infer or recreate later messages.`;
+
+const SUMMARY_PREFIX = "The conversation history before this point was compacted into the following summary:\n\n<summary>\n";
+
+type FileOps = {
+	readonly read: Set<string>;
+	readonly written: Set<string>;
+	readonly edited: Set<string>;
+};
+
+type CompactionRuntime = HookApi & {
+	agent(context: Context): Promise<{ model?: { provider: string; modelId: string }; thinkingLevel: ModelThinkingLevel }>;
+	entry(id: EntryId, context: Context): Promise<EntryRecord | undefined>;
+};
+
+type SummaryRequest = {
+	readonly api: HookApi;
+	readonly context: Context;
+	readonly model: NonNullable<ReturnType<HookApi["models"]["getModel"]>>;
+	readonly thinkingLevel?: ModelThinkingLevel;
+};
+
+/** The exact summary text of a previous compaction, without durable's presentation wrapper. */
+export function previousSummary(entry: EntryRecord | undefined): string | undefined {
+	if (entry?.kind !== "pi.compaction") return undefined;
+	const wrapped = messageText(entry.model?.[0]);
+	const start = wrapped.indexOf("<summary>\n");
+	const end = wrapped.lastIndexOf("\n</summary>");
+	if (start < 0 || end < start) return undefined;
+	return wrapped.slice(start + "<summary>\n".length, end);
+}
+
+function messageText(message: Message | undefined): string {
+	if (message?.role !== "user") return "";
+	if (typeof message.content === "string") return message.content;
+	return message.content.flatMap((block) => (block.type === "text" ? [block.text] : [])).join("");
+}
+
+/** File operations are carried forward in the summary tags, so a summary keeps its cumulative lists. */
+export function previousFileOps(summary: string | undefined): FileOps {
+	const ops: FileOps = { read: new Set(), written: new Set(), edited: new Set() };
+	if (summary !== undefined) {
+		for (const path of tagEntries(summary, "read-files")) ops.read.add(path);
+		for (const path of tagEntries(summary, "modified-files")) ops.edited.add(path);
+	}
+	return ops;
+}
+
+function tagEntries(text: string, tag: string): string[] {
+	const match = new RegExp(`<${tag}>\\n([\\s\\S]*?)\\n</${tag}>`).exec(text);
+	return match?.[1]?.split("\n").filter((path) => path.length > 0) ?? [];
+}
+
+/** Strip the file tags before passing the summary back as prose; the merged lists are appended once at the end. */
+function prose(summary: string): string {
+	return summary
+		.replace(/\n\n<read-files>[\s\S]*?<\/modified-files>/g, "")
+		.replace(/\n\n<read-files>[\s\S]*?<\/read-files>/g, "")
+		.replace(/\n\n<modified-files>[\s\S]*?<\/modified-files>/g, "")
+		.trim();
+}
+
+/** Collect file operations from tool calls, including the calls a codemode script made. */
+export function collectFileOps(messages: readonly Message[]): FileOps {
+	const ops: FileOps = { read: new Set(), written: new Set(), edited: new Set() };
+	for (const message of messages) {
+		if (message.role === "assistant") {
+			for (const block of message.content) {
+				if (block.type === "toolCall") addFileOp(block.name, block.arguments, ops);
+			}
+		} else if (message.role === "toolResult") {
+			const nested = (message as Message & { nestedCalls?: { calls?: readonly { name: string; arguments?: unknown }[] } }).nestedCalls;
+			for (const call of nested?.calls ?? []) addFileOp(call.name, call.arguments, ops);
+		}
+	}
+	return ops;
+}
+
+function addFileOp(name: string, args: unknown, ops: FileOps): void {
+	const path =
+		typeof args === "object" && args !== null && "path" in args && typeof args.path === "string" ? args.path : undefined;
+	if (path === undefined) return;
+	if (name === "read") ops.read.add(path);
+	else if (name === "write") ops.written.add(path);
+	else if (name === "edit") ops.edited.add(path);
+}
+
+function mergeFileOps(...ops: readonly FileOps[]): { readFiles: string[]; modifiedFiles: string[] } {
+	const read = new Set(ops.flatMap((op) => [...op.read]));
+	const modified = new Set(ops.flatMap((op) => [...op.written, ...op.edited]));
+	return {
+		readFiles: [...read].filter((path) => !modified.has(path)).sort(),
+		modifiedFiles: [...modified].sort(),
+	};
+}
+
+function fileTags(ops: readonly FileOps[]): string {
+	const merged = mergeFileOps(...ops);
+	const blocks: string[] = [];
+	if (merged.readFiles.length > 0) blocks.push(`<read-files>\n${merged.readFiles.join("\n")}\n</read-files>`);
+	if (merged.modifiedFiles.length > 0) blocks.push(`<modified-files>\n${merged.modifiedFiles.join("\n")}\n</modified-files>`);
+	return blocks.length === 0 ? "" : `\n\n${blocks.join("\n\n")}`;
+}
+
+function withFocus(prompt: string, instructions: string | undefined): string {
+	return instructions === undefined ? prompt : `${prompt}\n\nAdditional focus: ${instructions}`;
+}
+
+function promptFor(messages: readonly Message[], prior: string | undefined, instructions: string | undefined): string {
+	const previous = prior === undefined ? "" : `<previous-summary>\n${prior}\n</previous-summary>\n\n`;
+	return `<conversation>\n${serializeConversation([...messages])}\n</conversation>\n\n${previous}${withFocus(prior === undefined ? SUMMARY_PROMPT : UPDATE_PROMPT, instructions)}`;
+}
+
+function turnPrefixPrompt(messages: readonly Message[], instructions: string | undefined): string {
+	return `# Conversation\n${serializeConversation([...messages])}\n\n# Instructions\n${withFocus(TURN_PREFIX_PROMPT, instructions)}`;
+}
+
+function lastUserIndex(messages: readonly Message[]): number {
+	for (let index = messages.length - 1; index >= 0; index--) {
+		if (messages[index]?.role === "user") return index;
+	}
+	return -1;
+}
+
+/** A cut after a non-user entry is inside a user turn, as in the coding agent's split-turn path. */
+async function isSplitTurn(compaction: Parameters<CompactionHooks["beforeCompact"]>[0], api: CompactionRuntime, context: Context): Promise<boolean> {
+	try {
+		const firstKept = await api.entry(compaction.firstKept, context);
+		const role = firstKept?.model?.at(0)?.role;
+		return role !== undefined && role !== "user";
+	} catch {
+		return false;
+	}
+}
+
+async function summaryModel(api: CompactionRuntime, context: Context): Promise<{ model: NonNullable<ReturnType<HookApi["models"]["getModel"]>>; thinkingLevel?: ModelThinkingLevel } | undefined> {
+	const agent = await api.agent(context);
+	if (agent.model === undefined) return undefined;
+	const model = api.models.getModel(agent.model.provider, agent.model.modelId);
+	return model === undefined ? undefined : { model, thinkingLevel: agent.thinkingLevel };
+}
+
+function textOf(message: AssistantMessage): string | undefined {
+	if (message.stopReason !== "stop") return undefined;
+	if (message.content.some((block) => block.type === "toolCall")) return undefined;
+	const text = message.content
+		.flatMap((block) => (block.type === "text" ? [block.text] : []))
+		.join("\n")
+		.trim();
+	return text.length === 0 ? undefined : text;
+}
+
+async function complete(request: SummaryRequest, prompt: string): Promise<string | undefined> {
+	const options: SimpleStreamOptions = {
+		cacheRetention: "none",
+		signal: request.context.abortSignal,
+		...(request.thinkingLevel === undefined || request.thinkingLevel === "off" ? {} : { reasoning: request.thinkingLevel }),
+	};
+	const response = await request.api.models.completeSimple(
+		request.model,
+		{
+			messages: [
+				{ role: "system", content: SYSTEM_PROMPT, timestamp: Date.now() },
+				{ role: "user", content: [{ type: "text", text: prompt }], timestamp: Date.now() },
+			],
+		},
+		options,
+	);
+	return textOf(response);
+}
+
+/** Strip a previous summary's head message before serialization: it is passed as `<previous-summary>` instead. */
+function withoutHeadSummary(messages: readonly Message[], previous: string | undefined): readonly Message[] {
+	if (previous === undefined || messages.length === 0) return messages;
+	const first = messages[0];
+	if (first?.role !== "user") return messages;
+	const text =
+		typeof first.content === "string"
+			? first.content
+			: first.content.flatMap((block) => (block.type === "text" ? [block.text] : [])).join("");
+	return text.startsWith(SUMMARY_PREFIX) ? messages.slice(1) : messages;
+}
+
+async function summarize(
+	compaction: Parameters<CompactionHooks["beforeCompact"]>[0],
+	api: HookApi,
+	context: Context,
+): Promise<{ summary: string } | undefined> {
+	const runtime = api as CompactionRuntime;
+	const model = await summaryModel(runtime, context);
+	if (model === undefined) return undefined;
+	const previous = previousSummary(compaction.entries[0]);
+	const prior = previous === undefined ? undefined : prose(previous);
+	const messages = withoutHeadSummary(compaction.messages, previous);
+	const request: SummaryRequest = { api: runtime, context, model: model.model, thinkingLevel: model.thinkingLevel };
+
+	let summary: string | undefined;
+	if (messages.length === 0) {
+		summary = prior;
+	} else if (await isSplitTurn(compaction, runtime, context)) {
+		const split = lastUserIndex(messages);
+		const history = split < 0 ? messages : messages.slice(0, split);
+		const prefix = split < 0 ? [] : messages.slice(split);
+		const historySummary =
+			history.length === 0
+				? prior ?? "No prior history."
+				: await complete(request, promptFor(history, prior, compaction.instructions));
+		if (historySummary === undefined) return undefined;
+		if (prefix.length === 0) {
+			summary = historySummary;
+		} else {
+			const prefixSummary = await complete(request, turnPrefixPrompt(prefix, compaction.instructions));
+			if (prefixSummary === undefined) return undefined;
+			summary = `${historySummary}\n\n---\n\n**Turn Context (split turn):**\n\n${prefixSummary}`;
+		}
+	} else {
+		summary = await complete(request, promptFor(messages, prior, compaction.instructions));
+	}
+	if (summary === undefined) return undefined;
+
+	return { summary: `${summary}${fileTags([previousFileOps(previous), collectFileOps(messages)])}` };
+}
+
+export function compactionExtension(): Extension {
+	return defineExtension({
+		name: "compaction",
+		hooks: [
+			hook(CompactionTask, {
+				beforeCompact: async (compaction, api, context) => {
+					try {
+						return await summarize(compaction, api, context);
+					} catch {
+						// A failed custom summary falls back to the durable task's own summarizer.
+						return undefined;
+					}
+				},
+			}),
+		],
+	});
+}

@@ -63,6 +63,14 @@ working directory: a project's root, a Scratch thread's folder, or `/home/agent`
 also carries that project's `AGENTS.md` after the global one. `bash` exposes the
 workspace's Node install on `PATH` when it exists; the workspace image also includes `jq`.
 
+## Compaction
+
+When a conversation reaches the model window, compaction keeps the recent tail and replaces the older prefix with a
+structured summary. This harness uses pi's coding-agent summary prompt: a previous summary is updated through
+`<previous-summary>`, a cut inside a user turn gets a separate turn-prefix summary, and the summary carries
+cumulative read/modified file lists. Automatic thresholds and `/compact` come from pi-durable; the summary is stored
+as the durable `pi.compaction` entry and shown as a completed item in T3.
+
 ## Web tools
 
 The harness offers `web_search`, `web_fetch`, `summarize` and the `browser_*` tools to codemode scripts. They are local
