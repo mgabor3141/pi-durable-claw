@@ -1,8 +1,9 @@
 import type { Context } from "@earendil-works/chord";
-import type { AssistantMessage, Message, ModelThinkingLevel, SimpleStreamOptions } from "@earendil-works/pi-ai";
+import type { AssistantMessage, Message, ModelThinkingLevel, SimpleStreamOptions, Usage } from "@earendil-works/pi-ai";
 import { serializeConversation } from "@earendil-works/pi-coding-agent";
 import {
 	CompactionTask,
+	UsageDoc,
 	defineExtension,
 	hook,
 	type CompactionHooks,
@@ -119,6 +120,7 @@ type FileOps = {
 type CompactionRuntime = HookApi & {
 	agent(context: Context): Promise<{ model?: { provider: string; modelId: string }; thinkingLevel: ModelThinkingLevel }>;
 	entry(id: EntryId, context: Context): Promise<EntryRecord | undefined>;
+	commit(change: (tx: any) => unknown, context: Context): Promise<void>;
 };
 
 type SummaryRequest = {
@@ -258,6 +260,37 @@ function textOf(message: AssistantMessage): string | undefined {
 	return text.length === 0 ? undefined : text;
 }
 
+function addUsage(total: Usage, usage: Usage): void {
+	total.input += usage.input;
+	total.output += usage.output;
+	total.cacheRead += usage.cacheRead;
+	total.cacheWrite += usage.cacheWrite;
+	total.totalTokens += usage.totalTokens;
+	if (usage.cacheWrite1h !== undefined) total.cacheWrite1h = (total.cacheWrite1h ?? 0) + usage.cacheWrite1h;
+	if (usage.reasoning !== undefined) total.reasoning = (total.reasoning ?? 0) + usage.reasoning;
+	total.cost.input += usage.cost.input;
+	total.cost.output += usage.cost.output;
+	total.cost.cacheRead += usage.cost.cacheRead;
+	total.cost.cacheWrite += usage.cost.cacheWrite;
+	total.cost.total += usage.cost.total;
+}
+
+/** Summaries are spend, not conversation entries: record them in the conversation's `pi.usage` like durable does. */
+async function recordUsage(request: SummaryRequest, response: AssistantMessage): Promise<void> {
+	const runtime = request.api as CompactionRuntime;
+	try {
+		await runtime.commit(async (tx) => {
+			const state = await tx.doc(UsageDoc, runtime.conversationId);
+			const key = `${response.provider}/${response.model}`;
+			const total = Object.hasOwn(state.models, key) ? state.models[key] : undefined;
+			if (total === undefined) state.models[key] = JSON.parse(JSON.stringify(response.usage));
+			else addUsage(total, response.usage);
+		}, request.context);
+	} catch {
+		// The summary is still useful if the ledger write loses a race with a closing task.
+	}
+}
+
 async function complete(request: SummaryRequest, prompt: string): Promise<string | undefined> {
 	const options: SimpleStreamOptions = {
 		cacheRetention: "none",
@@ -274,7 +307,9 @@ async function complete(request: SummaryRequest, prompt: string): Promise<string
 		},
 		options,
 	);
-	return textOf(response);
+	const text = textOf(response);
+	if (text !== undefined) await recordUsage(request, response);
+	return text;
 }
 
 /** Strip a previous summary's head message before serialization: it is passed as `<previous-summary>` instead. */
