@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { AssistantMessage, Message } from "@earendil-works/pi-ai";
-import { compactionExtension, collectFileOps, previousFileOps, previousSummary } from "../src/compaction.ts";
+import { compactionExtension, previousSummary } from "../src/compaction.ts";
 
 const model = { provider: "fake", id: "fake", api: "fake", maxTokens: 8192 } as never;
 
@@ -21,32 +21,17 @@ function user(text: string): Message {
 	return { role: "user", content: text, timestamp: 0 };
 }
 
-function assistant(text: string, calls: readonly { name: string; path: string }[] = []): Message {
+function assistant(text: string): Message {
 	return {
 		role: "assistant",
-		content: [
-			{ type: "text", text },
-			...calls.map((call, index) => ({ type: "toolCall" as const, id: `call-${index}`, name: call.name, arguments: { path: call.path } })),
-		],
+		content: [{ type: "text", text }],
 		api: "fake" as never,
 		provider: "fake" as never,
 		model: "fake",
 		usage: { input: 1, output: 1, cacheRead: 0, cacheWrite: 0, totalTokens: 2, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } },
-		stopReason: "toolUse",
+		stopReason: "stop",
 		timestamp: 0,
 	};
-}
-
-function toolResult(calls: readonly { name: string; path: string }[]): Message {
-	return {
-		role: "toolResult",
-		toolCallId: "call-0",
-		toolName: "codemode",
-		content: [{ type: "text", text: "done" }],
-		isError: false,
-		timestamp: 0,
-		nestedCalls: { calls: calls.map((call) => ({ id: "nested", name: call.name, arguments: { path: call.path } })) },
-	} as never;
 }
 
 function entry(id: string, kind: string, messages: readonly Message[]) {
@@ -77,22 +62,20 @@ async function run(compaction: unknown, api: unknown): Promise<{ summary: string
 }
 
 describe("compaction", () => {
-	it("uses pi's summary prompt and appends cumulative file lists", async () => {
-		const messages = [user("fix the tests"), assistant("reading", [{ name: "read", path: "/a.ts" }, { name: "write", path: "/b.ts" }, { name: "edit", path: "/b.ts" }]), toolResult([{ name: "read", path: "/a.ts" }])];
+	it("uses pi's summary prompt and asks for relevant files", async () => {
+		const messages = [user("fix the tests"), assistant("done")];
 		const { api, prompts } = fakeApi("## Goal\nfix the tests");
 		const result = await run({ firstKept: "keep", instructions: undefined, entries: [entry("u", "pi.user", [user("fix")])], messages }, api);
 
 		expect(prompts).toHaveLength(1);
 		expect(prompts[0]).toContain("## Goal");
 		expect(prompts[0]).toContain("## Critical Context");
+		expect(prompts[0]).toContain("Relevant files: exact paths and why they matter");
 		expect(result?.summary).toContain("## Goal");
-		expect(result?.summary).toContain("<read-files>\n/a.ts\n</read-files>");
-		expect(result?.summary).toContain("<modified-files>\n/b.ts\n</modified-files>");
-		expect(result?.summary).not.toContain("<read-files>\n/a.ts\n/b.ts");
 	});
 
-	it("folds a previous summary through the update prompt and carries its file lists", async () => {
-		const wrapped = "The conversation history before this point was compacted into the following summary:\n\n<summary>\n## Goal\nold\n\n<read-files>\n/old.ts\n</read-files>\n</summary>";
+	it("folds a previous summary through the update prompt", async () => {
+		const wrapped = "The conversation history before this point was compacted into the following summary:\n\n<summary>\n## Goal\nold\n</summary>";
 		const messages = [user(wrapped), user("next"), assistant("done")];
 		const { api, prompts } = fakeApi("## Goal\nnew");
 		const result = await run(
@@ -103,7 +86,7 @@ describe("compaction", () => {
 		expect(prompts).toHaveLength(1);
 		expect(prompts[0]).toContain("<previous-summary>");
 		expect(prompts[0]).toContain("Update the existing structured summary");
-		expect(result?.summary).toContain("<read-files>\n/old.ts\n</read-files>");
+		expect(result?.summary).toContain("## Goal\nnew");
 	});
 
 	it("summarizes the prefix of a split turn separately", async () => {
@@ -121,10 +104,8 @@ describe("compaction", () => {
 		expect(result?.summary).toContain("No prior history.");
 	});
 
-	it("keeps the helpers usable independently", () => {
+	it("keeps the previous-summary helper usable independently", () => {
 		expect(previousSummary(entry("c", "pi.compaction", [user("x<summary>\nhi\n</summary>")]))).toBe("hi");
 		expect(previousSummary(entry("u", "pi.user", [user("hi")]))).toBeUndefined();
-		expect([...previousFileOps("<read-files>\n/a\n</read-files>\n<modified-files>\n/b\n</modified-files>").read]).toEqual(["/a"]);
-		expect([...collectFileOps([assistant("x", [{ name: "read", path: "/a" }]), toolResult([{ name: "write", path: "/b" }])]).written]).toEqual(["/b"]);
 	});
 });

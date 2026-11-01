@@ -51,6 +51,7 @@ Use this EXACT format:
 
 ## Critical Context
 - [Any data, examples, or references needed to continue]
+- [Relevant files: exact paths and why they matter]
 - [Or "(none)" if not applicable]
 
 Keep each section concise. Preserve exact file paths, function names, and error messages.`;
@@ -91,6 +92,7 @@ Use this EXACT format:
 
 ## Critical Context
 - [Preserve important context, add new if needed]
+- [Relevant files: exact paths and why they matter]
 
 Keep each section concise. Preserve exact file paths, function names, and error messages.`;
 
@@ -110,12 +112,6 @@ Create a concise checkpoint of the user's request and the progress shown above. 
 Only summarize information explicitly present above. Do not infer or recreate later messages.`;
 
 const SUMMARY_PREFIX = "The conversation history before this point was compacted into the following summary:\n\n<summary>\n";
-
-type FileOps = {
-	readonly read: Set<string>;
-	readonly written: Set<string>;
-	readonly edited: Set<string>;
-};
 
 type CompactionRuntime = HookApi & {
 	agent(context: Context): Promise<{ model?: { provider: string; modelId: string }; thinkingLevel: ModelThinkingLevel }>;
@@ -146,70 +142,13 @@ function messageText(message: Message | undefined): string {
 	return message.content.flatMap((block) => (block.type === "text" ? [block.text] : [])).join("");
 }
 
-/** File operations are carried forward in the summary tags, so a summary keeps its cumulative lists. */
-export function previousFileOps(summary: string | undefined): FileOps {
-	const ops: FileOps = { read: new Set(), written: new Set(), edited: new Set() };
-	if (summary !== undefined) {
-		for (const path of tagEntries(summary, "read-files")) ops.read.add(path);
-		for (const path of tagEntries(summary, "modified-files")) ops.edited.add(path);
-	}
-	return ops;
-}
-
-function tagEntries(text: string, tag: string): string[] {
-	const match = new RegExp(`<${tag}>\\n([\\s\\S]*?)\\n</${tag}>`).exec(text);
-	return match?.[1]?.split("\n").filter((path) => path.length > 0) ?? [];
-}
-
-/** Strip the file tags before passing the summary back as prose; the merged lists are appended once at the end. */
+/** Strip legacy file tags from a previous summary; new summaries name their own relevant files. */
 function prose(summary: string): string {
 	return summary
 		.replace(/\n\n<read-files>[\s\S]*?<\/modified-files>/g, "")
 		.replace(/\n\n<read-files>[\s\S]*?<\/read-files>/g, "")
 		.replace(/\n\n<modified-files>[\s\S]*?<\/modified-files>/g, "")
 		.trim();
-}
-
-/** Collect file operations from tool calls, including the calls a codemode script made. */
-export function collectFileOps(messages: readonly Message[]): FileOps {
-	const ops: FileOps = { read: new Set(), written: new Set(), edited: new Set() };
-	for (const message of messages) {
-		if (message.role === "assistant") {
-			for (const block of message.content) {
-				if (block.type === "toolCall") addFileOp(block.name, block.arguments, ops);
-			}
-		} else if (message.role === "toolResult") {
-			const nested = (message as Message & { nestedCalls?: { calls?: readonly { name: string; arguments?: unknown }[] } }).nestedCalls;
-			for (const call of nested?.calls ?? []) addFileOp(call.name, call.arguments, ops);
-		}
-	}
-	return ops;
-}
-
-function addFileOp(name: string, args: unknown, ops: FileOps): void {
-	const path =
-		typeof args === "object" && args !== null && "path" in args && typeof args.path === "string" ? args.path : undefined;
-	if (path === undefined) return;
-	if (name === "read") ops.read.add(path);
-	else if (name === "write") ops.written.add(path);
-	else if (name === "edit") ops.edited.add(path);
-}
-
-function mergeFileOps(...ops: readonly FileOps[]): { readFiles: string[]; modifiedFiles: string[] } {
-	const read = new Set(ops.flatMap((op) => [...op.read]));
-	const modified = new Set(ops.flatMap((op) => [...op.written, ...op.edited]));
-	return {
-		readFiles: [...read].filter((path) => !modified.has(path)).sort(),
-		modifiedFiles: [...modified].sort(),
-	};
-}
-
-function fileTags(ops: readonly FileOps[]): string {
-	const merged = mergeFileOps(...ops);
-	const blocks: string[] = [];
-	if (merged.readFiles.length > 0) blocks.push(`<read-files>\n${merged.readFiles.join("\n")}\n</read-files>`);
-	if (merged.modifiedFiles.length > 0) blocks.push(`<modified-files>\n${merged.modifiedFiles.join("\n")}\n</modified-files>`);
-	return blocks.length === 0 ? "" : `\n\n${blocks.join("\n\n")}`;
 }
 
 function withFocus(prompt: string, instructions: string | undefined): string {
@@ -361,7 +300,7 @@ async function summarize(
 	}
 	if (summary === undefined) return undefined;
 
-	return { summary: `${summary}${fileTags([previousFileOps(previous), collectFileOps(messages)])}` };
+	return { summary };
 }
 
 export function compactionExtension(): Extension {
