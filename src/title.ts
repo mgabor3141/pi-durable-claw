@@ -8,33 +8,9 @@ import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
 import type { Models } from "@earendil-works/pi-ai";
 import type { Harness } from "@earendil-works/pi-durable";
 import type { TitleThread } from "@mgabor3141/pi-durable-t3";
+import { TITLE_ASK, TITLE_SYSTEM_PROMPT, titleContext, titlePrompt, titleRegenerateAsk } from "./prompts.ts";
 
-const MAX_CONTEXT = 8_000;
-const MAX_MESSAGE = 2_000;
-
-/** The middle goes first: a message's opening and its end say the most. */
-const clip = (text: string, budget: number): string =>
-	text.length <= budget ? text : `${text.slice(0, Math.ceil(budget / 2))}\n[…]\n${text.slice(text.length - Math.floor(budget / 2))}`;
-
-/** The transcript as text, within the budget, oldest first. */
-export function titleContext(messages: readonly { role: string; content: unknown }[]): string {
-	const sections = messages.flatMap((message) => {
-		if (message.role !== "user" && message.role !== "assistant") return [];
-		const content = message.content;
-		const text = (typeof content === "string" ? content : Array.isArray(content) ? content.flatMap((block: { type?: string; text?: string }) => (block.type === "text" && block.text ? [block.text] : [])).join("\n") : "").trim();
-		return text === "" ? [] : [`${message.role.toUpperCase()}:\n${clip(text, MAX_MESSAGE)}`];
-	});
-	const first = sections.findIndex((section) => section.startsWith("USER:"));
-	const kept = new Set<number>(first === -1 ? [] : [first]);
-	let used = first === -1 ? 0 : sections[first]!.length;
-	for (let index = sections.length - 1; index >= 0; index--) {
-		if (kept.has(index) || used + sections[index]!.length > MAX_CONTEXT) continue;
-		kept.add(index);
-		used += sections[index]!.length;
-	}
-	const text = sections.filter((_, index) => kept.has(index)).join("\n\n");
-	return kept.size < sections.length ? `[Earlier content left out]\n\n${text}` : text;
-}
+export { titleContext } from "./prompts.ts";
 
 export function titleThread(harness: Harness, models: Models): TitleThread {
 	return async ({ conversationId, at, reason, previousTitle, signal }) => {
@@ -45,15 +21,12 @@ export function titleThread(harness: Harness, models: Models): TitleThread {
 		const model = ref === undefined ? undefined : models.getModel(ref.provider, ref.modelId);
 		if (model === undefined) return undefined;
 		const { messages } = await conversation.context(ctx, { at });
-		const ask =
-			reason === "regenerate"
-				? `Write a better title for this conversation than "${previousTitle ?? ""}".`
-				: "Write a title for this conversation.";
+		const ask = reason === "regenerate" ? titleRegenerateAsk(previousTitle) : TITLE_ASK;
 		const reply = await models.completeSimple(
 			model,
 			{
-				systemPrompt: "You name chat threads. Reply with the title only: at most 6 words, no quotes, no trailing period.",
-				messages: [{ role: "user", content: `${titleContext(messages)}\n\n${ask}`, timestamp: Date.now() }],
+				systemPrompt: TITLE_SYSTEM_PROMPT,
+				messages: [{ role: "user", content: titlePrompt(titleContext(messages), ask), timestamp: Date.now() }],
 			},
 			{ signal },
 		);

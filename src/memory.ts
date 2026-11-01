@@ -1,5 +1,6 @@
 import { join } from "node:path";
 import { defineExtension, section, type Extension } from "@earendil-works/pi-durable";
+import { MEMORY_DEFAULT_REFERENCE_SUMMARY, MEMORY_TRUNCATED, USER_REFERENCE_SUMMARY, memoryFile, memoryReferenceFile, workspaceTag } from "./prompts.ts";
 
 /**
  * One file in the workspace memory prompt. `content` files are injected; `reference`
@@ -41,7 +42,7 @@ const FILES = [
 		label: "USER.md",
 		path: join(HOME, "USER.md"),
 		mode: "reference",
-		summary: "The user's stable profile: identity, communication style, and preferences",
+		summary: USER_REFERENCE_SUMMARY,
 	},
 ] as const satisfies readonly WorkspaceMemoryFile[];
 
@@ -57,7 +58,7 @@ export function workspaceMemoryExtension(options: WorkspaceMemoryOptions = {}): 
 			section("workspace-memory", async (input, context) => {
 				const env = input.env;
 				if (env === undefined) return undefined;
-				const parts: string[] = [`<workspace cwd="${env.cwd}"/>`];
+				const parts: string[] = [workspaceTag(env.cwd)];
 				// A project thread starts in its project root; inject its AGENTS.md after the global one. Scratch threads
 				// may have an AGENTS.md too, but only if the folder actually carries one.
 				const requestFiles: WorkspaceMemoryFile[] = [...files];
@@ -73,7 +74,7 @@ export function workspaceMemoryExtension(options: WorkspaceMemoryOptions = {}): 
 					if ((file.mode ?? "content") === "reference") {
 						const exists = await env.exists(file.path, context);
 						if (!exists.ok || !exists.value) continue;
-						const note = `<file path="${file.label}" mode="reference">\nNot loaded. ${file.summary ?? "A workspace file"}. Read ${file.path} with the read tool only when the task needs it.\n</file>`;
+						const note = memoryReferenceFile(file.label, file.summary ?? MEMORY_DEFAULT_REFERENCE_SUMMARY, file.path);
 						if (note.length > room) break;
 						parts.push(note);
 						used += note.length;
@@ -84,8 +85,8 @@ export function workspaceMemoryExtension(options: WorkspaceMemoryOptions = {}): 
 					if (!result.ok) continue;
 					const text = result.value.trim();
 					if (text.length === 0) continue;
-					const body = text.length > room ? `${text.slice(0, room)}\n[truncated]` : text;
-					parts.push(`<file path="${file.label}">\n${body}\n</file>`);
+					const body = text.length > room ? `${text.slice(0, room)}\n${MEMORY_TRUNCATED}` : text;
+					parts.push(memoryFile(file.label, body));
 					used += body.length;
 				}
 				return parts.length > 0 ? parts.join("\n\n") : undefined;

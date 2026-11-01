@@ -71,6 +71,12 @@ structured summary. This harness uses pi's coding-agent summary prompt: a previo
 relevant files. Automatic thresholds and `/compact` come from pi-durable; the summary is stored
 as the durable `pi.compaction` entry and shown as a completed item in T3.
 
+## Prompt text
+
+All model-facing prompts and tool copy this harness authors — system prompts, user-prompt templates, XML wrappers,
+tool descriptions and short tool output notes — lives in `src/prompts.ts`. Tool descriptions inherited from pi-durable's coding and
+codemode tools are not duplicated there.
+
 ## Web tools
 
 The harness offers `web_search`, `web_fetch`, `summarize` and the `browser_*` tools to codemode scripts. They are local
