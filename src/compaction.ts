@@ -51,7 +51,7 @@ Use this EXACT format:
 
 ## Critical Context
 - [Any data, examples, or references needed to continue]
-- [Relevant files: exact paths and why they matter]
+- [Relevant files]
 - [Or "(none)" if not applicable]
 
 Keep each section concise. Preserve exact file paths, function names, and error messages.`;
@@ -92,7 +92,7 @@ Use this EXACT format:
 
 ## Critical Context
 - [Preserve important context, add new if needed]
-- [Relevant files: exact paths and why they matter]
+- [Relevant files]
 
 Keep each section concise. Preserve exact file paths, function names, and error messages.`;
 

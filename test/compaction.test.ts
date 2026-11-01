@@ -70,7 +70,7 @@ describe("compaction", () => {
 		expect(prompts).toHaveLength(1);
 		expect(prompts[0]).toContain("## Goal");
 		expect(prompts[0]).toContain("## Critical Context");
-		expect(prompts[0]).toContain("Relevant files: exact paths and why they matter");
+		expect(prompts[0]).toContain("Relevant files");
 		expect(result?.summary).toContain("## Goal");
 	});
 

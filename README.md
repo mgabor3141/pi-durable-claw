@@ -68,7 +68,7 @@ workspace's Node install on `PATH` when it exists; the workspace image also incl
 When a conversation reaches the model window, compaction keeps the recent tail and replaces the older prefix with a
 structured summary. This harness uses pi's coding-agent summary prompt: a previous summary is updated through
 `<previous-summary>`, a cut inside a user turn gets a separate turn-prefix summary, and Critical Context asks for the
-relevant files and why they matter. Automatic thresholds and `/compact` come from pi-durable; the summary is stored
+relevant files. Automatic thresholds and `/compact` come from pi-durable; the summary is stored
 as the durable `pi.compaction` entry and shown as a completed item in T3.
 
 ## Web tools
