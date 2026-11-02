@@ -65,6 +65,7 @@ interface BrowserSession {
 	readonly context: BrowserContext | undefined;
 	readonly page: Page;
 	readonly closeShared: (() => Promise<void>) | undefined;
+	readonly touchShared: (() => void) | undefined;
 	readonly logs: string[];
 	readonly createdAt: number;
 	idleTimer: NodeJS.Timeout | undefined;
@@ -76,6 +77,7 @@ interface BrowserSession {
 export interface SharedBrowserPage {
 	readonly id: string;
 	readonly page: Page;
+	touch(): void;
 	close(): Promise<void>;
 }
 
@@ -141,6 +143,7 @@ export class BrowserSessions {
 			context,
 			page,
 			closeShared: shared?.close,
+			touchShared: shared?.touch,
 			logs: [],
 			createdAt: Date.now(),
 			idleTimer: undefined,
@@ -253,6 +256,7 @@ export class BrowserSessions {
 	}
 
 	private touch(session: BrowserSession): void {
+		session.touchShared?.();
 		if (session.closeShared !== undefined) return;
 		if (session.idleTimer !== undefined) clearTimeout(session.idleTimer);
 		session.idleTimer = setTimeout(() => void this.closeSession(session), IDLE_TIMEOUT_MS);
