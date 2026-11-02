@@ -123,7 +123,8 @@ export class BrowserSessions {
 		options: { url?: string; html?: string; waitMs?: number; maxChars?: number },
 	): Promise<BrowserSnapshot> {
 		await this.closeConversation(conversationId);
-		const shared = options.url === undefined || this.shared === undefined ? undefined : await this.shared(conversationId, options.url);
+		const targetUrl = options.url === undefined ? undefined : browserUrl(options.url);
+		const shared = targetUrl === undefined || this.shared === undefined ? undefined : await this.shared(conversationId, targetUrl);
 		let browser: Browser | undefined;
 		let context: BrowserContext | undefined;
 		let page: Page;
@@ -174,7 +175,7 @@ export class BrowserSessions {
 				if (options.html.length > MAX_HTML_CHARS) throw new Error(`html is too large (${options.html.length} chars)`);
 				await page.setContent(options.html, { waitUntil: "domcontentloaded", timeout: NAVIGATION_TIMEOUT_MS });
 			} else if (options.url !== undefined) {
-				if (shared === undefined) await page.goto(browserUrl(options.url), { waitUntil: "domcontentloaded", timeout: NAVIGATION_TIMEOUT_MS });
+				if (shared === undefined) await page.goto(targetUrl!, { waitUntil: "domcontentloaded", timeout: NAVIGATION_TIMEOUT_MS });
 			} else {
 				throw new Error("browser_open needs either url or html");
 			}
