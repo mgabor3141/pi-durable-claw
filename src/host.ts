@@ -102,7 +102,7 @@ async function main(): Promise<void> {
 	}
 
 	// Agent `browser_open` pages ride T3's preview browser when this conversation is a thread's head. A fallback private
-	// Browserless browser remains for subagents and HTML snapshots (no T3 tab to show there).
+	// Browserless browser remains for conversations with no T3 thread.
 	if (t3.previewBrowser !== undefined) {
 		setSharedBrowser((conversationId, url) => t3.previewBrowser!.open(conversationId, url));
 	}

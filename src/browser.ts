@@ -41,7 +41,6 @@ const NAVIGATION_TIMEOUT_MS = 45_000;
 const ACTION_TIMEOUT_MS = 15_000;
 const IDLE_TIMEOUT_MS = 900_000;
 const MAX_SESSION_AGE_MS = 1_800_000;
-const MAX_HTML_CHARS = 2_000_000;
 const MAX_MESSAGE_CHARS = 10_000;
 const MAX_SNAPSHOT_CHARS = 20_000;
 const MAX_CONSOLE_LINES = 30;
@@ -120,11 +119,11 @@ export class BrowserSessions {
 
 	async open(
 		conversationId: ConversationId,
-		options: { url?: string; html?: string; waitMs?: number; maxChars?: number },
+		options: { url: string; waitMs?: number; maxChars?: number },
 	): Promise<BrowserSnapshot> {
 		await this.closeConversation(conversationId);
-		const targetUrl = options.url === undefined ? undefined : browserUrl(options.url);
-		const shared = targetUrl === undefined || this.shared === undefined ? undefined : await this.shared(conversationId, targetUrl);
+		const targetUrl = browserUrl(options.url);
+		const shared = this.shared === undefined ? undefined : await this.shared(conversationId, targetUrl);
 		let browser: Browser | undefined;
 		let context: BrowserContext | undefined;
 		let page: Page;
@@ -171,14 +170,7 @@ export class BrowserSessions {
 				this.forget(session);
 			});
 
-			if (options.html !== undefined) {
-				if (options.html.length > MAX_HTML_CHARS) throw new Error(`html is too large (${options.html.length} chars)`);
-				await page.setContent(options.html, { waitUntil: "domcontentloaded", timeout: NAVIGATION_TIMEOUT_MS });
-			} else if (options.url !== undefined) {
-				if (shared === undefined) await page.goto(targetUrl!, { waitUntil: "domcontentloaded", timeout: NAVIGATION_TIMEOUT_MS });
-			} else {
-				throw new Error("browser_open needs either url or html");
-			}
+			if (shared === undefined) await page.goto(targetUrl, { waitUntil: "domcontentloaded", timeout: NAVIGATION_TIMEOUT_MS });
 			if (options.waitMs !== undefined && options.waitMs > 0) await page.waitForTimeout(Math.min(options.waitMs, 10_000));
 
 			this.sessions.set(session.id, session);
@@ -407,18 +399,15 @@ export function browserTools(): ToolRegistration[] {
 			name: "browser_open",
 			description: BROWSER_OPEN_TOOL_DESCRIPTION,
 			parameters: Type.Object({
-				url: Type.Optional(Type.String({ minLength: 1, maxLength: 4_000 })),
-				html: Type.Optional(Type.String({ maxLength: MAX_HTML_CHARS })),
+				url: Type.String({ minLength: 1, maxLength: 4_000 }),
 				wait_ms: Type.Optional(Type.Integer({ minimum: 0, maximum: 10_000 })),
 				max_chars: Type.Optional(Type.Integer({ minimum: 1, maximum: 100_000 })),
 			}),
 			structuredOutputSchema: SnapshotSchema,
 			callers: ["tools"],
 			async execute(args, api) {
-				if ((args.url === undefined) === (args.html === undefined)) throw new Error("browser_open needs exactly one of url or html");
 				const snapshot = await sessions.open(api.conversationId, {
-					...(args.url === undefined ? {} : { url: args.url }),
-					...(args.html === undefined ? {} : { html: args.html }),
+					url: args.url,
 					...(args.wait_ms === undefined ? {} : { waitMs: args.wait_ms }),
 					...(args.max_chars === undefined ? {} : { maxChars: args.max_chars }),
 				});

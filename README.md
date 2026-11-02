@@ -109,15 +109,14 @@ The browser is for interaction, not reading. `web_fetch` is the cheap, stateless
 use the browser when a page needs clicks, typing, JavaScript, a screenshot, or a short interactive test. A
 screenshot result is an image block; call `image(shot)` in the same codemode script to attach it. One page
 is kept per conversation; a private one is closed after fifteen idle minutes, while a T3 preview tab
-stays until closed. Browserless enforces a thirty-minute hard cap on either. Local HTML can be opened with `browser_open({ html })` and stays in a private browser.
+stays until closed. Browserless enforces a thirty-minute hard cap on either. Local HTML is served from the workspace (for example `python3 -m http.server`) and opened by URL like any other page.
 
 When `BROWSERLESS_URL` is set, the bridge also offers T3's in-app Browser panel: it advertises
 `serverBrowser`, implements `preview.*` and `subscribePreviewEvents`, and serves `/api/preview-stream/ws`
 from the same Browserless Chromium. T3's panel opens a tab, receives JPEG frames and forwards pointer and
 keyboard input, so the same browser is visible and controllable from the web or mobile client. A URL passed to
-`browser_open` is opened in that same T3 preview tab and marked for reveal, so the agent's page appears in the
-panel or floating over the chat; the agent and the user operate one page. Inline HTML and subagent conversations
-fall back to a private browser. This is a live view, not a page reader. Preview tabs share a durable storageState profile (cookies and origins' localStorage, kept at the bridge's stateDir/browser-profile.json); inline HTML and subagent pages stay ephemeral. A preview tab has no
+`browser_open` is opened in that same T3 preview tab; the tab is visible in the Browser panel. The agent and the user operate one page. Subagent conversations without a T3 thread
+fall back to a private browser. This is a live view, not a page reader. Preview tabs share a durable storageState profile (cookies and origins' localStorage, kept at the bridge's stateDir/browser-profile.json); subagent pages stay ephemeral. A preview tab has no
 upload/download or file chooser; closing the panel closes its tab. The URL is reached from Browserless, not from
 the device, so no host forwarder or proxy is needed.
 
