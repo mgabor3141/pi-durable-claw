@@ -117,7 +117,7 @@ from the same Browserless Chromium. T3's panel opens a tab, receives JPEG frames
 keyboard input, so the same browser is visible and controllable from the web or mobile client. A URL passed to
 `browser_open` is opened in that same T3 preview tab and marked for reveal, so the agent's page appears in the
 panel or floating over the chat; the agent and the user operate one page. Inline HTML and subagent conversations
-fall back to a private browser. This is a live view, not a page reader. A preview tab has no profile store,
+fall back to a private browser. This is a live view, not a page reader. Preview tabs share a durable storageState profile (cookies and origins' localStorage, kept at the bridge's stateDir/browser-profile.json); inline HTML and subagent pages stay ephemeral. A preview tab has no
 upload/download or file chooser; closing the panel closes its tab. The URL is reached from Browserless, not from
 the device, so no host forwarder or proxy is needed.
 
