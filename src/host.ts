@@ -15,6 +15,7 @@ import { ModelRuntime } from "@earendil-works/pi-coding-agent";
 import { openHarness } from "./harness.ts";
 import { connectWorkspace, ensureKeypair, workspaceEnv } from "./workspace.ts";
 import { attachT3, mintPairingCode } from "@mgabor3141/pi-durable-t3";
+import { setSharedBrowser } from "./browser.ts";
 import { installShutdown } from "./shutdown.ts";
 import { titleThread } from "./title.ts";
 
@@ -98,6 +99,12 @@ async function main(): Promise<void> {
 		console.error(`failed to listen on http://${LISTEN.host}:${LISTEN.port}: ${(error as NodeJS.ErrnoException).code ?? "unknown"} (${(error as Error).message ?? ""})`);
 		await harness.close(BACKGROUND_CONTEXT);
 		process.exit(1);
+	}
+
+	// Agent `browser_open` pages ride T3's preview browser when this conversation is a thread's head. A fallback private
+	// Browserless browser remains for subagents and HTML snapshots (no T3 tab to show there).
+	if (t3.previewBrowser !== undefined) {
+		setSharedBrowser((conversationId, url) => t3.previewBrowser!.open(conversationId, url));
 	}
 
 	// Crash resume: the caller resumes AFTER the attach resolved (the bridge's contract). An interrupted codemode call

@@ -39,8 +39,8 @@ const LOCAL_HOSTS = (process.env.BROWSER_LOCAL_HOSTS ?? "")
 const CONNECT_TIMEOUT_MS = 30_000;
 const NAVIGATION_TIMEOUT_MS = 45_000;
 const ACTION_TIMEOUT_MS = 15_000;
-const IDLE_TIMEOUT_MS = 300_000;
-const MAX_SESSION_AGE_MS = 540_000;
+const IDLE_TIMEOUT_MS = 900_000;
+const MAX_SESSION_AGE_MS = 1_800_000;
 const MAX_HTML_CHARS = 2_000_000;
 const MAX_MESSAGE_CHARS = 10_000;
 const MAX_SNAPSHOT_CHARS = 20_000;
@@ -62,15 +62,26 @@ export interface BrowserSnapshot {
 interface BrowserSession {
 	readonly id: string;
 	readonly conversationId: ConversationId;
-	readonly browser: Browser;
-	readonly context: BrowserContext;
+	readonly browser: Browser | undefined;
+	readonly context: BrowserContext | undefined;
 	readonly page: Page;
+	readonly closeShared: (() => Promise<void>) | undefined;
 	readonly logs: string[];
 	readonly createdAt: number;
 	idleTimer: NodeJS.Timeout | undefined;
 	maxTimer: NodeJS.Timeout | undefined;
 	closed: boolean;
 }
+
+/** A page owned elsewhere (T3's preview browser) and a way to close it. */
+export interface SharedBrowserPage {
+	readonly id: string;
+	readonly page: Page;
+	close(): Promise<void>;
+}
+
+/** Resolve a conversation's URL to a page shared with the user's T3 preview, or undefined to use a private browser. */
+export type SharedBrowserProvider = (conversationId: ConversationId, url: string) => Promise<SharedBrowserPage | undefined>;
 
 function browserUrl(value: string): string {
 	return assertFetchableUrl(value, { allowHosts: LOCAL_HOSTS });
@@ -100,29 +111,43 @@ function recordLog(session: BrowserSession, line: string): void {
 export class BrowserSessions {
 	private readonly sessions = new Map<string, BrowserSession>();
 	private readonly byConversation = new Map<ConversationId, string>();
+	private shared: SharedBrowserProvider | undefined;
+
+	/** Use a page owned by the T3 preview, when one is available for the conversation. */
+	useShared(provider: SharedBrowserProvider | undefined): void {
+		this.shared = provider;
+	}
 
 	async open(
 		conversationId: ConversationId,
 		options: { url?: string; html?: string; waitMs?: number; maxChars?: number },
 	): Promise<BrowserSnapshot> {
 		await this.closeConversation(conversationId);
-		const browser = await chromium.connectOverCDP(endpoint(), { timeout: CONNECT_TIMEOUT_MS });
+		const shared = options.url === undefined || this.shared === undefined ? undefined : await this.shared(conversationId, options.url);
+		let browser: Browser | undefined;
 		let context: BrowserContext | undefined;
-		try {
+		let page: Page;
+		if (shared === undefined) {
+			browser = await chromium.connectOverCDP(endpoint(), { timeout: CONNECT_TIMEOUT_MS });
 			context = browser.contexts()[0] ?? (await browser.newContext());
-			const page = context.pages()[0] ?? (await context.newPage());
-			const session: BrowserSession = {
-				id: randomUUID(),
-				conversationId,
-				browser,
-				context,
-				page,
-				logs: [],
-				createdAt: Date.now(),
-				idleTimer: undefined,
-				maxTimer: undefined,
-				closed: false,
-			};
+			page = context.pages()[0] ?? (await context.newPage());
+		} else {
+			page = shared.page;
+		}
+		const session: BrowserSession = {
+			id: shared?.id ?? randomUUID(),
+			conversationId,
+			browser,
+			context,
+			page,
+			closeShared: shared?.close,
+			logs: [],
+			createdAt: Date.now(),
+			idleTimer: undefined,
+			maxTimer: undefined,
+			closed: false,
+		};
+		try {
 			page.setDefaultTimeout(ACTION_TIMEOUT_MS);
 			page.on("console", (message) => {
 				if (message.type() === "error" || message.type() === "warning") recordLog(session, `${message.type()}: ${message.text()}`);
@@ -132,7 +157,13 @@ export class BrowserSessions {
 				recordLog(session, `dialog (${dialog.type()}): ${dialog.message()}`);
 				void dialog.dismiss().catch(() => undefined);
 			});
-			browser.on("disconnected", () => {
+			page.on("close", () => {
+				session.closed = true;
+				if (session.idleTimer !== undefined) clearTimeout(session.idleTimer);
+				if (session.maxTimer !== undefined) clearTimeout(session.maxTimer);
+				this.forget(session);
+			});
+			browser?.on("disconnected", () => {
 				session.closed = true;
 				if (session.idleTimer !== undefined) clearTimeout(session.idleTimer);
 				if (session.maxTimer !== undefined) clearTimeout(session.maxTimer);
@@ -143,7 +174,7 @@ export class BrowserSessions {
 				if (options.html.length > MAX_HTML_CHARS) throw new Error(`html is too large (${options.html.length} chars)`);
 				await page.setContent(options.html, { waitUntil: "domcontentloaded", timeout: NAVIGATION_TIMEOUT_MS });
 			} else if (options.url !== undefined) {
-				await page.goto(browserUrl(options.url), { waitUntil: "domcontentloaded", timeout: NAVIGATION_TIMEOUT_MS });
+				if (shared === undefined) await page.goto(browserUrl(options.url), { waitUntil: "domcontentloaded", timeout: NAVIGATION_TIMEOUT_MS });
 			} else {
 				throw new Error("browser_open needs either url or html");
 			}
@@ -154,7 +185,8 @@ export class BrowserSessions {
 			this.armTimers(session);
 			return this.snapshot(session, options.maxChars);
 		} catch (error) {
-			await browser.close().catch(() => undefined);
+			if (browser !== undefined) await browser.close().catch(() => undefined);
+			else if (shared !== undefined) await shared.close().catch(() => undefined);
 			throw error;
 		}
 	}
@@ -245,7 +277,8 @@ export class BrowserSessions {
 		this.forget(session);
 		if (session.closed) return;
 		session.closed = true;
-		await session.browser.close().catch(() => undefined);
+		if (session.closeShared !== undefined) await session.closeShared().catch(() => undefined);
+		else await session.browser?.close().catch(() => undefined);
 	}
 
 	private forget(session: BrowserSession): void {
@@ -358,8 +391,14 @@ function snapshotStructured(snapshot: BrowserSnapshot): JsonValue {
 	} as unknown as JsonValue;
 }
 
+const sessions = new BrowserSessions();
+
+/** Let agent browser pages use T3's preview browser (set once the T3 bridge has been attached). */
+export function setSharedBrowser(provider: SharedBrowserProvider | undefined): void {
+	sessions.useShared(provider);
+}
+
 export function browserTools(): ToolRegistration[] {
-	const sessions = new BrowserSessions();
 	return [
 		defineTool({
 			name: "browser_open",
