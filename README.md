@@ -77,6 +77,13 @@ All model-facing prompts and tool copy this harness authors — system prompts, 
 tool descriptions and short tool output notes — lives in `src/prompts.ts`. Tool descriptions inherited from pi-durable's coding and
 codemode tools are not duplicated there.
 
+## Attachments
+
+T3 image attachments reach the model inline when the selected model accepts images. File attachments are uploaded
+through the bridge, copied to `/home/agent/attachments/` in the workspace, and named by path in the prompt, so the
+agent can read them with its normal workspace tools. The T3 thread shows the file chip, not the injected path line.
+Uploads are capped at 50 MiB.
+
 ## Web tools
 
 The harness offers `web_search`, `web_fetch`, `summarize` and the `browser_*` tools to codemode scripts. They are local
