@@ -254,12 +254,14 @@ export class BrowserSessions {
 	}
 
 	private armTimers(session: BrowserSession): void {
-		this.touch(session);
+		// A T3 preview tab has a human viewer; only the agent's private pages get an idle timer.
+		if (session.closeShared === undefined) this.touch(session);
 		session.maxTimer = setTimeout(() => void this.closeSession(session), MAX_SESSION_AGE_MS);
 		session.maxTimer.unref();
 	}
 
 	private touch(session: BrowserSession): void {
+		if (session.closeShared !== undefined) return;
 		if (session.idleTimer !== undefined) clearTimeout(session.idleTimer);
 		session.idleTimer = setTimeout(() => void this.closeSession(session), IDLE_TIMEOUT_MS);
 		session.idleTimer.unref();

@@ -108,8 +108,8 @@ the request fails, the tool returns the backend error instead of inventing a res
 The browser is for interaction, not reading. `web_fetch` is the cheap, stateless path and should be the default;
 use the browser when a page needs clicks, typing, JavaScript, a screenshot, or a short interactive test. A
 screenshot result is an image block; call `image(shot)` in the same codemode script to attach it. One page
-is kept per conversation and closed after fifteen idle minutes; Browserless closes it unconditionally after thirty
-minutes. Local HTML can be opened with `browser_open({ html })` and stays in a private browser.
+is kept per conversation; a private one is closed after fifteen idle minutes, while a T3 preview tab
+stays until closed. Browserless enforces a thirty-minute hard cap on either. Local HTML can be opened with `browser_open({ html })` and stays in a private browser.
 
 When `BROWSERLESS_URL` is set, the bridge also offers T3's in-app Browser panel: it advertises
 `serverBrowser`, implements `preview.*` and `subscribePreviewEvents`, and serves `/api/preview-stream/ws`
