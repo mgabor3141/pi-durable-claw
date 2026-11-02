@@ -109,7 +109,7 @@ The browser is for interaction, not reading. `web_fetch` is the cheap, stateless
 use the browser when a page needs clicks, typing, JavaScript, a screenshot, or a short interactive test. A
 screenshot result is an image block; call `image(shot)` in the same codemode script to attach it. One page
 is kept per conversation; a private one is closed after fifteen idle minutes, while a T3 preview tab
-stays while viewed. The bridge sweeps tabs with no viewer after thirty minutes when an agent opened them, or twenty-four hours when the user did; a viewed tab is kept. Browserless's session timer is effectively off, and the shared preview browser closes after fifteen minutes with no tabs. Local HTML is served from the workspace (for example `python3 -m http.server`) and opened by URL like any other page.
+stays while viewed. The bridge sweeps tabs with no viewer after thirty minutes when an agent opened them, or twenty-four hours when the user did; a viewed tab is kept. Browserless's session timer is effectively off, and the shared preview browser closes after three days with no tabs. Local HTML is served from the workspace (for example `python3 -m http.server`) and opened by URL like any other page.
 
 When `BROWSERLESS_URL` is set, the bridge also offers T3's in-app Browser panel: it advertises
 `serverBrowser`, implements `preview.*` and `subscribePreviewEvents`, and serves `/api/preview-stream/ws`
