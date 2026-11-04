@@ -127,8 +127,9 @@ the device, so no host forwarder or proxy is needed.
 ## MCP servers
 
 MCP is supported over streamable HTTP only. Put the operator-owned configuration at
-`data/harness/mcp.json` (`/data/mcp.json` in the harness, mode 0600). It is never read from the
-workspace, so the agent cannot add a server or a credential to it.
+`data/harness/mcp.json` (`/data/mcp.json` in the harness, mode 0600); `CLAW_MCP_CONFIG` can name
+another path. It is never read from the workspace, so the agent cannot add a server or a
+credential to it.
 
 ```json
 {
