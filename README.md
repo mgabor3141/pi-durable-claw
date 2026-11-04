@@ -59,9 +59,10 @@ and the workspace's host key is the one the harness trusts. The archive holds th
 ## Workspace tools
 
 The `read`, `write`, `edit` and `bash` tools run in the workspace over SSH and start in the conversation's own
-working directory: a project's root, a Scratch thread's folder, or `/home/agent`. On a project thread the prompt
-also carries that project's `AGENTS.md` after the global one. The agent owns its tools under `/home/agent`; the
-workspace image reads `PATH` from `~/.ssh/environment` and includes `jq`.
+working directory: a project's root, a Scratch thread's folder, or `/home/agent`. The prompt carries the global
+`AGENTS.md` and global skills from `~/.agents/skills`, then the working directory, the project's `AGENTS.md` and
+its `.agents/skills`, and the local time when the conversation started. The agent owns its tools under
+`/home/agent`; the workspace image reads `PATH` from `~/.ssh/environment` and includes `jq`.
 
 ## Compaction
 

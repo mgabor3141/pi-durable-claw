@@ -5,6 +5,7 @@ import { createCodemodeExtension } from "@earendil-works/pi-durable/codemode";
 import { openNodeSqliteStorage } from "@earendil-works/pi-durable/storage/sqlite/node";
 import { CodemodeSandbox } from "@earendil-works/pi-codemode";
 import { workspaceMemoryExtension } from "./memory.ts";
+import { preambleExtension } from "./preamble.ts";
 import { compactionExtension } from "./compaction.ts";
 import { browserTools } from "./browser.ts";
 import { workspaceTools } from "./tools.ts";
@@ -27,6 +28,7 @@ export function codemodeSandbox(): CodemodeSandbox {
 export function harnessExtensions(extraTools: readonly ToolRegistration[] = []): readonly Extension[] {
 	const harnessTools: ToolRegistration[] = [...extraTools, ...workspaceTools(), ...webTools(), ...browserTools(), ...summarizeTools()];
 	return [
+		preambleExtension(),
 		createCodemodeExtension({ sandbox: codemodeSandbox() }) as Extension,
 		defineExtension({ name: "harness-tools", tools: harnessTools }),
 		workspaceMemoryExtension(),

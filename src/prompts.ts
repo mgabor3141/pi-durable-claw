@@ -4,7 +4,7 @@
  * tool output notes.
  *
  * Not included: inherited tool copy from `@earendil-works/pi-durable` (the
- * coding tools and codemode) and workspace data such as AGENTS.md and USER.md.
+ * coding tools and codemode) and workspace data such as AGENTS.md and skills.
  * Keep this file the single place to review what the model is told.
  */
 
@@ -128,23 +128,57 @@ export function splitTurnSummary(history: string, prefix: string): string {
 }
 
 /* -------------------------------------------------------------------------- */
-/* Workspace memory                                                           */
+/* System prompt                                                              */
 /* -------------------------------------------------------------------------- */
 
-export const MEMORY_DEFAULT_REFERENCE_SUMMARY = "A workspace file";
-export const USER_REFERENCE_SUMMARY = "The user's stable profile: identity, communication style, and preferences";
-export const MEMORY_TRUNCATED = "[truncated to fit the workspace prompt]";
+export const HARNESS_PREAMBLE =
+	"You are a personal agent operating in a persistent Linux workspace. You act through codemode: write JavaScript that calls the tools it offers. Work from evidence, report what actually happened, and keep replies concise.";
 
-export function workspaceTag(cwd: string): string {
-	return `<workspace cwd="${cwd}"/>`;
+export const LOCAL_PRECEDENCE =
+	"Local instructions take precedence over global instructions where they conflict.";
+
+export function agentsSection(scope: "global" | "local", path: string, body: string, note?: string): string {
+	const tag = scope === "global" ? "global-agents" : "local-agents";
+	const prefix = note === undefined ? "" : note + "\n\n";
+	return "<" + tag + ' path="' + escapeXml(path) + '">\n' + prefix + body + "\n</" + tag + ">";
 }
 
-export function memoryFile(label: string, body: string): string {
-	return `<file path="${label}">\n${body}\n</file>`;
+export function cwdSection(cwd: string): string {
+	return "<cwd>\n" + cwd + "\n</cwd>";
 }
 
-export function memoryReferenceFile(label: string, summary: string, path: string): string {
-	return `<file path="${label}" mode="reference">\nNot loaded. ${summary}. Read ${path} only if the task needs it.\n</file>`;
+export interface SkillListing {
+	readonly name: string;
+	readonly description: string;
+	readonly path: string;
+}
+
+export function skillsSection(scope: "global" | "local", skills: readonly SkillListing[]): string | undefined {
+	if (skills.length === 0) return undefined;
+	const lines = [
+		"The following skills provide specialized instructions for specific tasks.",
+		"Use codemode to read a skill's file when the task matches its description.",
+		"When a skill file references a relative path, resolve it against the skill directory and use that absolute path in tool commands.",
+		"",
+		'<available-skills scope="' + scope + '">',
+	];
+	for (const skill of skills) {
+		lines.push("  <skill>");
+		lines.push("    <name>" + escapeXml(skill.name) + "</name>");
+		lines.push("    <description>" + escapeXml(skill.description) + "</description>");
+		lines.push("    <location>" + escapeXml(skill.path) + "</location>");
+		lines.push("  </skill>");
+	}
+	lines.push("</available-skills>");
+	return lines.join("\n");
+}
+
+export function conversationTimeSection(value: string): string {
+	return "<conversation-time>\nLocal time when this conversation started: " + value + "\n</conversation-time>";
+}
+
+export function escapeXml(value: string): string {
+	return value.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&apos;");
 }
 
 /* -------------------------------------------------------------------------- */

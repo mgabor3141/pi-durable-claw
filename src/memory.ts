@@ -1,96 +1,121 @@
 import { join } from "node:path";
+import type { Context } from "@earendil-works/chord";
 import { defineExtension, section, type Extension } from "@earendil-works/pi-durable";
-import { MEMORY_DEFAULT_REFERENCE_SUMMARY, MEMORY_TRUNCATED, USER_REFERENCE_SUMMARY, memoryFile, memoryReferenceFile, workspaceTag } from "./prompts.ts";
+import type { ExecutionEnv } from "@earendil-works/pi-durable/env";
+import { loadSkills } from "./skills.ts";
+import { LOCAL_PRECEDENCE, agentsSection, conversationTimeSection, cwdSection, skillsSection } from "./prompts.ts";
 
-/**
- * One file in the workspace memory prompt. `content` files are injected; `reference`
- * files only contribute a short note (name, roughly what they hold, how to read
- * them), so a conversation does not carry personal context until it is needed.
- */
-export interface WorkspaceMemoryFile {
-	/** The label shown to the model. */
-	readonly label: string;
-	/** Absolute path in the workspace. */
-	readonly path: string;
-	/** Default: `content`. */
-	readonly mode?: "content" | "reference";
-	/** One line for a reference: roughly what the file holds. */
-	readonly summary?: string;
-}
+const DEFAULT_HOME = "/home/agent";
 
 export interface WorkspaceMemoryOptions {
-	readonly files?: readonly WorkspaceMemoryFile[];
-	/** Total character budget for the section. */
-	readonly maxTotal?: number;
+	/** The workspace home. Default `/home/agent`; tests override it. */
+	readonly home?: string;
+	/** The clock used for the conversation-start time. Default `new Date()`. */
+	readonly now?: () => Date;
 }
 
 /**
- * The workspace memory the model sees at the start of every request. The global
- * AGENTS.md and the active project's AGENTS.md are injected; USER.md is only
- * referenced, because it is personal and a project conversation usually does
- * not need it. MEMORY.md is named in AGENTS.md and read on demand. Other project
- * files are read on demand too.
+ * The system context after the preamble and tools: the global AGENTS.md, the
+ * global skills, the working directory, the project's AGENTS.md and skills,
+ * and the local time when the conversation started. A missing or unreadable
+ * file is omitted; the prompt is never truncated.
  *
- * The files live in the workspace, which is the execution environment; the
- * section reads them over pi-env SSH, the same route the tools use. A missing
- * or unreadable file is omitted rather than failing the request.
+ * The files live in the workspace, so every read goes through pi-env over SSH.
  */
-const HOME = "/home/agent";
-const FILES = [
-	{ label: "AGENTS.md", path: join(HOME, "AGENTS.md"), mode: "content" },
-	{
-		label: "USER.md",
-		path: join(HOME, "USER.md"),
-		mode: "reference",
-		summary: USER_REFERENCE_SUMMARY,
-	},
-] as const satisfies readonly WorkspaceMemoryFile[];
-
-/** Total character budget for the section. The per-file cap is the remaining room. */
-const MAX_TOTAL = 24_000;
-
 export function workspaceMemoryExtension(options: WorkspaceMemoryOptions = {}): Extension {
-	const files: readonly WorkspaceMemoryFile[] = options.files ?? FILES;
-	const maxTotal = options.maxTotal ?? MAX_TOTAL;
+	const home = options.home ?? DEFAULT_HOME;
+	const now = options.now ?? (() => new Date());
+
 	return defineExtension({
-		name: "workspace-memory",
+		name: "workspace-context",
 		sections: [
-			section("workspace-memory", async (input, context) => {
-				const env = input.env;
-				if (env === undefined) return undefined;
-				const parts: string[] = [workspaceTag(env.cwd)];
-				// A project thread starts in its project root; inject its AGENTS.md after the global one. Scratch threads
-				// may have an AGENTS.md too, but only if the folder actually carries one.
-				const requestFiles: WorkspaceMemoryFile[] = [...files];
-				if (env.cwd !== HOME) {
-					const projectFile = join(env.cwd, "AGENTS.md");
-					requestFiles.splice(1, 0, { label: projectFile, path: projectFile, mode: "content" });
-				}
-				let used = 0;
-				for (const file of requestFiles) {
-					const room = maxTotal - used;
-					if (room <= 0) break;
+			section(
+				"global-agents",
+				async (input, context) => {
+					const env = input.env;
+					if (env === undefined) return undefined;
+					const path = join(home, "AGENTS.md");
+					const body = await readBody(env, path, context);
+					return body === undefined ? undefined : agentsSection("global", path, body);
+				},
+				{ tag: false },
+			),
 
-					if ((file.mode ?? "content") === "reference") {
-						const exists = await env.exists(file.path, context);
-						if (!exists.ok || !exists.value) continue;
-						const note = memoryReferenceFile(file.label, file.summary ?? MEMORY_DEFAULT_REFERENCE_SUMMARY, file.path);
-						if (note.length > room) break;
-						parts.push(note);
-						used += note.length;
-						continue;
-					}
+			section(
+				"global-skills",
+				async (input, context) => {
+					const env = input.env;
+					if (env === undefined) return undefined;
+					const global = await loadSkills(env, join(home, ".agents", "skills"), context);
+					const local = env.cwd === home ? [] : await loadSkills(env, join(env.cwd, ".agents", "skills"), context);
+					const shadows = new Set(local.map((skill) => skill.name));
+					return skillsSection("global", global.filter((skill) => !shadows.has(skill.name)));
+				},
+				{ tag: false },
+			),
 
-					const result = await env.readTextFile(file.path, context);
-					if (!result.ok) continue;
-					const text = result.value.trim();
-					if (text.length === 0) continue;
-					const body = text.length > room ? `${text.slice(0, room)}\n${MEMORY_TRUNCATED}` : text;
-					parts.push(memoryFile(file.label, body));
-					used += body.length;
-				}
-				return parts.length > 0 ? parts.join("\n\n") : undefined;
-			}),
+			section("cwd", (input) => (input.env === undefined ? undefined : cwdSection(input.env.cwd)), { tag: false }),
+
+			section(
+				"local-agents",
+				async (input, context) => {
+					const env = input.env;
+					if (env === undefined || env.cwd === home) return undefined;
+					const path = join(env.cwd, "AGENTS.md");
+					const body = await readBody(env, path, context);
+					return body === undefined ? undefined : agentsSection("local", path, body, LOCAL_PRECEDENCE);
+				},
+				{ tag: false },
+			),
+
+			section(
+				"local-skills",
+				async (input, context) => {
+					const env = input.env;
+					if (env === undefined || env.cwd === home) return undefined;
+					return skillsSection("local", await loadSkills(env, join(env.cwd, ".agents", "skills"), context));
+				},
+				{ tag: false },
+			),
+
+			section(
+				"conversation-time",
+				(input) => {
+					const prior = input.shown["conversation-time"];
+					if (prior !== undefined) return prior;
+					return conversationTimeSection(formatLocalTime(now()));
+				},
+				{ tag: false },
+			),
 		],
 	});
+}
+
+async function readBody(env: ExecutionEnv, path: string, context: Context): Promise<string | undefined> {
+	const result = await env.readTextFile(path, context);
+	if (!result.ok) return undefined;
+	const body = result.value.trim();
+	return body.length === 0 ? undefined : body;
+}
+
+function formatLocalTime(date: Date): string {
+	const zone = process.env.TZ?.trim() || Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC";
+	try {
+		const local = new Intl.DateTimeFormat("sv-SE", {
+			timeZone: zone,
+			year: "numeric",
+			month: "2-digit",
+			day: "2-digit",
+			hour: "2-digit",
+			minute: "2-digit",
+			hourCycle: "h23",
+		}).format(date);
+		const offset = new Intl.DateTimeFormat("en-US", { timeZone: zone, timeZoneName: "shortOffset" })
+			.formatToParts(date)
+			.find((part) => part.type === "timeZoneName")
+			?.value.replace(/^GMT/, "UTC");
+		return offset === undefined ? `${local} ${zone}` : `${local} ${zone} (${offset})`;
+	} catch {
+		return date.toISOString();
+	}
 }
