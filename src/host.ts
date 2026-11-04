@@ -13,6 +13,7 @@ import { join } from "node:path";
 import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
 import { ModelRuntime } from "@earendil-works/pi-coding-agent";
 import { openHarness } from "./harness.ts";
+import { McpManager } from "./mcp/manager.ts";
 import { connectWorkspace, ensureKeypair, workspaceEnv } from "./workspace.ts";
 import { attachT3, mintPairingCode } from "@mgabor3141/pi-durable-t3";
 import { setSharedBrowser } from "./browser.ts";
@@ -76,7 +77,28 @@ async function main(): Promise<void> {
 		process.exit(1);
 	}
 
-	const harness = await openHarness({ storagePath: join(root, "durable.db"), workspace, models });
+	const mcp = new McpManager({
+		configPath: process.env.CLAW_MCP_CONFIG?.trim() || join(root, "mcp.json"),
+		logger: log,
+	});
+	try {
+		await mcp.load();
+	} catch (error) {
+		console.error(`cannot load MCP configuration: ${(error as Error).message}`);
+		process.exit(1);
+	}
+
+	const harness = await openHarness({
+		storagePath: join(root, "durable.db"),
+		workspace,
+		models,
+		mcpNamespaces: mcp.namespaces(),
+		toolSearch: mcp.hasIndirectTools(),
+		extraExtensions: [mcp.extension()],
+		onRegistry: (registry) => mcp.attach(registry),
+	});
+	// Connect MCP servers before the T3 bridge accepts input, so the first prompt sees their tools.
+	await mcp.start();
 
 	let t3;
 	try {
@@ -97,6 +119,7 @@ async function main(): Promise<void> {
 		});
 	} catch (error) {
 		console.error(`failed to listen on http://${LISTEN.host}:${LISTEN.port}: ${(error as NodeJS.ErrnoException).code ?? "unknown"} (${(error as Error).message ?? ""})`);
+		await mcp.close();
 		await harness.close(BACKGROUND_CONTEXT);
 		process.exit(1);
 	}
@@ -123,6 +146,7 @@ async function main(): Promise<void> {
 	console.log("\n  Pair a device: docker compose exec harness claw pair\n");
 
 	installShutdown(async () => {
+		await mcp.close();
 		await t3.close();
 		await harness.close(BACKGROUND_CONTEXT);
 	});

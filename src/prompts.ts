@@ -134,6 +134,10 @@ export function splitTurnSummary(history: string, prefix: string): string {
 export const HARNESS_PREAMBLE =
 	"You are a personal agent operating in a persistent Linux workspace. You act through codemode: write JavaScript that calls the tools it offers. Work from evidence, report what actually happened, and keep replies concise.";
 
+export const TOOL_SEARCH_PREAMBLE =
+	HARNESS_PREAMBLE +
+	" Tools that are not offered yet, including MCP tools, are found with tool_search; loaded tools are available from your next call.";
+
 export const LOCAL_PRECEDENCE =
 	"Local instructions take precedence over global instructions where they conflict.";
 

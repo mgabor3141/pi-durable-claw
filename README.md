@@ -3,15 +3,16 @@
 An always-on personal agent on [pi-durable](https://github.com/earendil-works/pi): coding, research, calendar,
 watching for things, running on your server 24/7 and reachable from T3 Code on desktop, web and phone.
 
-Unofficial; not affiliated with Earendil or T3. Working title. Experimental: what runs today is the codemode-only
-assistant (a harness plus a workspace container) served to T3 Code; the rest of the design is not built yet.
+Unofficial; not affiliated with Earendil or T3. Working title. Experimental: what runs today is the codemode
+assistant (a harness plus a workspace container, with optional HTTP MCP servers and tool search) served to T3 Code;
+the rest of the design is not built yet.
 
 ## The idea in one rule
 
 **Agent-written code never runs where the keys are.**
 
-- The **harness container** runs the agent loop and holds your keys and MCP servers. The agent reaches them only
-  through codemode, a sandbox with no file system or network: it can call your tools, never read their keys.
+- The **harness container** runs the agent loop, holds your keys, and connects to your HTTP MCP servers. The agent
+  reaches them only through codemode (or a tool it has loaded with `tool_search`), never their keys.
 - **Execution containers** are where the agent runs bash, Python and its own scripts. They hold no keys, so they need
   no permission system.
 
@@ -62,7 +63,8 @@ The `read`, `write`, `edit` and `bash` tools run in the workspace over SSH and s
 working directory: a project's root, a Scratch thread's folder, or `/home/agent`. The prompt carries the global
 `AGENTS.md` and global skills from `~/.agents/skills`, then the working directory, the project's `AGENTS.md` and
 its `.agents/skills`, and the local time when the conversation started. The agent owns its tools under
-`/home/agent`; the workspace image reads `PATH` from `~/.ssh/environment` and includes `jq`.
+`/home/agent`; the workspace image reads `PATH` from `~/.ssh/environment` and includes `jq`. The model tool list is
+`codemode`, plus `tool_search` when MCP servers with deferred tools are configured.
 
 ## Compaction
 
@@ -76,7 +78,8 @@ as the durable `pi.compaction` entry and shown as a completed item in T3.
 
 All model-facing prompts and tool copy this harness authors — system prompts, user-prompt templates, XML wrappers,
 tool descriptions and short tool output notes — lives in `src/prompts.ts`. Tool descriptions inherited from pi-durable's coding and
-codemode tools are not duplicated there.
+codemode tools are not duplicated there. MCP tool descriptions come from the server and are shown only when
+`tool_search` loads them (or in a script's on-demand `describeTool()`).
 
 ## Attachments
 
@@ -121,9 +124,46 @@ fall back to a private browser. This is a live view, not a page reader. Preview 
 upload/download or file chooser; closing the panel closes its tab. The URL is reached from Browserless, not from
 the device, so no host forwarder or proxy is needed.
 
+## MCP servers
+
+MCP is supported over streamable HTTP only. Put the operator-owned configuration at
+`data/harness/mcp.json` (`/data/mcp.json` in the harness, mode 0600). It is never read from the
+workspace, so the agent cannot add a server or a credential to it.
+
+```json
+{
+  "mcpServers": {
+    "docs": {
+      "url": "https://mcp.example.com/mcp",
+      "headers": { "Authorization": "Bearer ${DOCS_TOKEN}" },
+      "description": "Search and read the product documentation",
+      "exposure": "deferred"
+    }
+  }
+}
+```
+
+`${NAME}` in a header is resolved from the harness environment. Stdio entries
+(`command`, `args`, `env`, `cwd`) are rejected: a server runs as its own container and holds
+only its own key.
+
+Exposure, per server or per tool with `toolExposure`:
+
+- `deferred` (default): the tool is not in the first model request. `tool_search` loads it, and
+  the model can then call it directly; codemode scripts can call it at any time.
+- `codemode`: script-only. It is not offered to the model and `tool_search` cannot load it.
+- `direct`: offered to the model immediately, and callable from scripts.
+- `hidden`: not reachable.
+
+`mcp_servers` lists the configured indirect servers and how to reach them. `describeNamespace()`
+and `searchTools()` see the `mcp__<server>` namespaces. A successful connect installs the
+server's tools; a failed one is logged and retried on the next call. OAuth is not implemented
+yet.
+
 ### Known limitations
 
-- No account integrations yet (calendar, email, MCP servers): web search, page view and the browser are the only connectors.
+- No account integrations are configured by default. HTTP MCP servers can be added as above; OAuth, stdio and MCP
+  resources are not implemented. Web search, page view and the browser are the built-in connectors.
 - Scheduled tasks run on intervals or fixed times; there are no webhook triggers.
 - T3 projects do not map to containers: use "No project" threads. The project picker, file panel and search go
   through the workspace execution environment, so a project must live under the workspace's `/home/agent` (the

@@ -37,7 +37,7 @@ Two kinds of people use it, as with Home Assistant or Immich:
 ┌─────────────────────────┴──────────────────────────┐
 │ harness container (server)                         │
 │   pi-durable: conversations, storage, schedules    │
-│   keys · MCP servers (one process each) · codemode │
+│   keys · MCP clients (HTTP) · codemode            │
 └───────┬───────────────────────────┬────────────────┘
         │ SSH (pi-env)              │ SSH (pi-env), only from a host conversation
 ┌───────┴─────────────────────┐   ┌─┴───────────────────────────┐
@@ -51,8 +51,8 @@ Two kinds of people use it, as with Home Assistant or Immich:
 ### Harness container
 
 - pi-durable with SQLite storage; pi-durable-t3 serves T3's web app and its API from the same origin.
-- Holds the model keys and every integration key. Each key-bearing MCP server runs as its own process holding only
-  its own key, so a bad server exposes one key, not all of them.
+- Holds the model keys and every integration key. Each key-bearing MCP server runs as its own container, reached
+  over streamable HTTP and holding only its own key, so a bad server exposes one key, not all of them.
 - The agent has **no execution environment on the server**. No tool runs a command or touches a file there.
 - Keys live in a root-only file or systemd credentials. A passphrase-unlocked vault would block unattended restarts,
   which self-release depends on; it may be offered for laptop installs.
@@ -70,9 +70,11 @@ workspace; the key does not.
 pi-durable ships it: `@earendil-works/pi-durable/codemode`'s `createCodemodeExtension({ sandbox })`. A script's
 `tools.<name>(args)` calls are nested `pi.tool` tasks of the codemode call, so a crash is a **resume, not a rerun**:
 the tool is replay-safe — after a restart the script is replayed deterministically from a journal of the results it
-already got, completed nested calls never run twice, and the script continues live. Tools the model must never see
-(MCP tools, the workspace's `read`/`write`/`bash`) are registered with `callers: ["tools"]`, so only scripts call
-them; the agent's `modelTools` selects what a conversation offers the model — for the assistant, exactly `codemode`.
+already got, completed nested calls never run twice, and the script continues live. The workspace's
+`read`/`write`/`bash` are registered with `callers: ["tools"]`, so only scripts call them. MCP tools default to
+`deferred` with `callers: ["model", "tools"]`: scripts call them directly, and `tool_search` loads them into the
+model's tool list for direct calls. The agent's `modelTools` selects what a conversation offers — for the assistant,
+`codemode` plus `tool_search` when MCP servers with deferred tools are configured.
 **Verified (spike):** upstream's extension runs a model script whose only capabilities are the conversation's
 script-callable tools — a key-bearing harness tool and the workspace's `read`/`write`/`bash`, pi-durable's own coding
 tools over pi-env — with the key never reaching the container and the model offered exactly `[codemode]`; after a
@@ -124,12 +126,13 @@ code. Verified in T3's web app (playwright + chromium, screenshots in `.memory/`
 
 | Profile | Tools (what the model is offered) |
 |---|---|
-| assistant | codemode — MCP tools, workspace read/write/bash, orchestration and schedules are `callers: ["tools"]`: scripts call them, the model is not offered them |
+| assistant | codemode, plus tool_search when MCP servers are configured — workspace read/write/bash are `callers: ["tools"]`; MCP tools are deferred and loaded by tool_search, or called from scripts |
 | dev project | read/write/edit/bash on the project's devcontainer, plus codemode |
 | host conversation | read/write/edit/bash on the operator's computer |
 
-- Profiles are expressed with `ToolRegistration.callers` and the agent's `modelTools`: key-bearing and workspace tools
-  are script-callable only, so a request offers exactly the tools in the column above.
+- Profiles are expressed with `ToolRegistration.callers` and the agent's `modelTools`: workspace tools are
+  script-callable only; MCP tools are deferred and loaded by tool_search. A request offers exactly the tools in the
+  column above.
 
 - **Web research** is split by job: `web_search` reads SearXNG JSON, `web_fetch` reads one page through the
   stateless reader, and the `browser_*` tools drive an interactive Browserless pool. All live in the harness because
@@ -212,7 +215,7 @@ custom app on T3's client runtime. **To check:** the pi mobile UI mentioned on t
 2. Done: a pi-durable codemode tool with the workspace's read/write/bash injected over pi-env to an sshd container.
 3. Done (v0): harness and workspace images and a compose file for a fresh machine. The T3 bridge installs as a package
    from git; the harness's SSH public key reaches the workspace through a small shared volume.
-4. Key-bearing MCP servers, one process each; tool exposure defaults.
+4. Key-bearing MCP servers, one container each; HTTP-only manager with deferred tools and tool_search — done (stdio and OAuth deferred).
 5. Orchestration (T3's orchestrator MCP) and dev-project devcontainers.
 6. Memory and the nightly consolidation; spending caps; ntfy.
 7. Release flow: store snapshot, deploy, health check, rollback.

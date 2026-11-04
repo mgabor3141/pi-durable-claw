@@ -1,7 +1,8 @@
 import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
 import type { Context } from "@earendil-works/chord";
-import { createRegistry, defineExtension, Harness, type Extension, type HarnessOptions, type ToolRegistration } from "@earendil-works/pi-durable";
-import { createCodemodeExtension } from "@earendil-works/pi-durable/codemode";
+import { createRegistry, defineExtension, Harness, type Extension, type HarnessOptions, type Registry, type ToolRegistration } from "@earendil-works/pi-durable";
+import { createCodemodeExtension, type CodemodeNamespace } from "@earendil-works/pi-durable/codemode";
+import { createToolSearchExtension } from "@earendil-works/pi-durable/tool-search";
 import { openNodeSqliteStorage } from "@earendil-works/pi-durable/storage/sqlite/node";
 import { CodemodeSandbox } from "@earendil-works/pi-codemode";
 import { workspaceMemoryExtension } from "./memory.ts";
@@ -19,32 +20,52 @@ export function codemodeSandbox(): CodemodeSandbox {
 	return (sharedSandbox ??= new CodemodeSandbox());
 }
 
+export interface HarnessExtensionOptions {
+	/** More script-callable tools (`callers: ["tools"]`), e.g. integrations. */
+	readonly extraTools?: readonly ToolRegistration[];
+	/** Extensions installed after the built-in tools, such as the MCP server section. */
+	readonly extraExtensions?: readonly Extension[];
+	/** Namespaces of MCP servers, for codemode's `describeNamespace()` and tool search. */
+	readonly mcpNamespaces?: readonly CodemodeNamespace[];
+	/** Offer `tool_search` when deferred tools (normally MCP tools) are configured. */
+	readonly toolSearch?: boolean;
+}
+
 /**
- * The extensions of the assistant conversation: upstream's durable `codemode` extension, and the harness's own tools —
- * the workspace's `read`/`write`/`bash` (pi-durable's coding tools over the call's `ExecutionEnv`, i.e. pi-env SSH to
- * the workspace container; plus any `extraTools`) — all with `callers: ["tools"]`, so only codemode scripts call them
- * and the model is offered exactly one tool: `codemode`.
+ * The extensions of the assistant conversation: the preamble, upstream's durable `codemode` extension, the optional
+ * `tool_search` tool for deferred tools, and the harness's own tools — the workspace's `read`/`write`/`bash`
+ * (pi-durable's coding tools over the call's `ExecutionEnv`, i.e. pi-env SSH to the workspace container; plus any
+ * `extraTools`) — all with `callers: ["tools"]`, so only codemode scripts call them. MCP tools are registered
+ * separately by the MCP manager and are deferred by default.
  */
-export function harnessExtensions(extraTools: readonly ToolRegistration[] = []): readonly Extension[] {
-	const harnessTools: ToolRegistration[] = [...extraTools, ...workspaceTools(), ...webTools(), ...browserTools(), ...summarizeTools()];
+export function harnessExtensions(options: HarnessExtensionOptions = {}): readonly Extension[] {
+	const harnessTools: ToolRegistration[] = [
+		...(options.extraTools ?? []),
+		...workspaceTools(),
+		...webTools(),
+		...browserTools(),
+		...summarizeTools(),
+	];
 	return [
-		preambleExtension(),
-		createCodemodeExtension({ sandbox: codemodeSandbox() }) as Extension,
+		preambleExtension({ toolSearch: options.toolSearch }),
+		createCodemodeExtension({ sandbox: codemodeSandbox(), namespaces: options.mcpNamespaces ?? [] }) as Extension,
+		...(options.toolSearch === true ? [createToolSearchExtension() as Extension] : []),
 		defineExtension({ name: "harness-tools", tools: harnessTools }),
+		...(options.extraExtensions ?? []),
 		workspaceMemoryExtension(),
 		compactionExtension(),
 	];
 }
 
-export interface HarnessConfig {
+export interface HarnessConfig extends HarnessExtensionOptions {
 	storagePath: string;
 	/** The workspace connection the workspace tools' read/write/bash go to. */
 	workspace: WorkspaceConnection;
 	/** The model catalog. */
 	models: HarnessOptions["models"];
-	/** More script-callable tools (`callers: ["tools"]`), e.g. integrations. */
-	extraTools?: readonly ToolRegistration[];
 	cwd?: string;
+	/** Called with the registry before the harness opens, so integrations can install dynamic extensions. */
+	onRegistry?: (registry: Registry) => void;
 }
 
 /**
@@ -56,7 +77,8 @@ export async function openHarness(
 	context: Context = BACKGROUND_CONTEXT,
 ): Promise<Harness> {
 	const registry = createRegistry();
-	for (const extension of harnessExtensions(options.extraTools)) registry.install(extension);
+	for (const extension of harnessExtensions(options)) registry.install(extension);
+	options.onRegistry?.(registry);
 	const storage = await openNodeSqliteStorage(options.storagePath);
 	return Harness.open(
 		storage,

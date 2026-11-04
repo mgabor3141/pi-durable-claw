@@ -26,6 +26,9 @@ importers:
       '@earendil-works/pi-env':
         specifier: 1.4.0
         version: 1.4.0(@aws-sdk/credential-provider-node@3.972.88)(@smithy/signature-v4@5.7.4)(undici@8.12.3)(ws@8.22.0)
+      '@earendil-works/pi-mcp':
+        specifier: 1.4.0
+        version: 1.4.0
       '@mgabor3141/pi-durable-t3':
         specifier: github:mgabor3141/pi-durable-t3#4198a852191e10903e3ee7794a6a422a111f2b85
         version: https://codeload.github.com/mgabor3141/pi-durable-t3/tar.gz/4198a852191e10903e3ee7794a6a422a111f2b85(@earendil-works/chord@1.4.0)(@earendil-works/pi-ai@1.4.0(@aws-sdk/credential-provider-node@3.972.88)(@smithy/signature-v4@5.7.4)(undici@8.12.3)(ws@8.22.0))(@earendil-works/pi-durable@1.4.0(@aws-sdk/credential-provider-node@3.972.88)(@smithy/signature-v4@5.7.4)(undici@8.12.3)(ws@8.22.0))(redis@6.3.0)
