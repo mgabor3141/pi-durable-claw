@@ -98,10 +98,20 @@ function endpoint(): string {
 	return url.toString();
 }
 
+function timeoutError(what: string, ms: number): Error {
+	const error = new Error(`${what} timed out after ${String(ms)} ms`);
+	error.name = "TimeoutError";
+	return error;
+}
+
+function isToolTimeout(error: unknown): boolean {
+	return error instanceof Error && error.name === "TimeoutError";
+}
+
 /** A dead browser target can leave a Playwright promise pending forever; bound every public tool call. */
 function withTimeout<T>(promise: Promise<T>, ms: number, what: string): Promise<T> {
 	return new Promise<T>((resolve, reject) => {
-		const timer = setTimeout(() => reject(new Error(`${what} timed out after ${String(ms)} ms`)), ms);
+		const timer = setTimeout(() => reject(timeoutError(what, ms)), ms);
 		timer.unref();
 		promise.then(
 			(value) => {
@@ -238,7 +248,9 @@ export class BrowserSessions {
 		try {
 			return await withTimeout(this.#act(conversationId, sessionId, actions, maxChars), TOOL_TIMEOUT_MS, "browser_act");
 		} catch (error) {
-			void withTimeout(this.closeConversation(conversationId), CLOSE_TIMEOUT_MS, "browser session close").catch(() => undefined);
+			// An action timeout is a normal page result; the session is still usable. Only a hard tool timeout
+			// means the page may be wedged enough to close it.
+			if (isToolTimeout(error)) void withTimeout(this.closeConversation(conversationId), CLOSE_TIMEOUT_MS, "browser session close").catch(() => undefined);
 			throw error;
 		}
 	}
@@ -269,7 +281,7 @@ export class BrowserSessions {
 		try {
 			return await withTimeout(this.#read(conversationId, sessionId, maxChars), TOOL_TIMEOUT_MS, "browser_snapshot");
 		} catch (error) {
-			void withTimeout(this.closeConversation(conversationId), CLOSE_TIMEOUT_MS, "browser session close").catch(() => undefined);
+			if (isToolTimeout(error)) void withTimeout(this.closeConversation(conversationId), CLOSE_TIMEOUT_MS, "browser session close").catch(() => undefined);
 			throw error;
 		}
 	}
@@ -284,7 +296,7 @@ export class BrowserSessions {
 		try {
 			return await withTimeout(this.#screenshot(conversationId, sessionId), TOOL_TIMEOUT_MS, "browser_screenshot");
 		} catch (error) {
-			void withTimeout(this.closeConversation(conversationId), CLOSE_TIMEOUT_MS, "browser session close").catch(() => undefined);
+			if (isToolTimeout(error)) void withTimeout(this.closeConversation(conversationId), CLOSE_TIMEOUT_MS, "browser session close").catch(() => undefined);
 			throw error;
 		}
 	}
@@ -299,7 +311,7 @@ export class BrowserSessions {
 		try {
 			await withTimeout(this.#close(conversationId, sessionId), CLOSE_TIMEOUT_MS, "browser_close");
 		} catch (error) {
-			void withTimeout(this.closeConversation(conversationId), CLOSE_TIMEOUT_MS, "browser session close").catch(() => undefined);
+			if (isToolTimeout(error)) void withTimeout(this.closeConversation(conversationId), CLOSE_TIMEOUT_MS, "browser session close").catch(() => undefined);
 			throw error;
 		}
 	}
