@@ -39,6 +39,10 @@ const LOCAL_HOSTS = (process.env.BROWSER_LOCAL_HOSTS ?? "")
 const CONNECT_TIMEOUT_MS = 30_000;
 const NAVIGATION_TIMEOUT_MS = 45_000;
 const ACTION_TIMEOUT_MS = 15_000;
+const OPEN_TIMEOUT_MS = 75_000;
+const TOOL_TIMEOUT_MS = 60_000;
+const SHARED_OPEN_TIMEOUT_MS = 50_000;
+const CLOSE_TIMEOUT_MS = 10_000;
 const IDLE_TIMEOUT_MS = 900_000;
 const MAX_SESSION_AGE_MS = 1_800_000;
 const MAX_MESSAGE_CHARS = 10_000;
@@ -94,6 +98,24 @@ function endpoint(): string {
 	return url.toString();
 }
 
+/** A dead browser target can leave a Playwright promise pending forever; bound every public tool call. */
+function withTimeout<T>(promise: Promise<T>, ms: number, what: string): Promise<T> {
+	return new Promise<T>((resolve, reject) => {
+		const timer = setTimeout(() => reject(new Error(`${what} timed out after ${String(ms)} ms`)), ms);
+		timer.unref();
+		promise.then(
+			(value) => {
+				clearTimeout(timer);
+				resolve(value);
+			},
+			(error: unknown) => {
+				clearTimeout(timer);
+				reject(error);
+			},
+		);
+	});
+}
+
 function clip(value: string, max: number): { text: string; truncated: boolean } {
 	return value.length > max ? { text: `${value.slice(0, max)}\n\n${browserTruncationNote(max, value.length)}`, truncated: true } : { text: value, truncated: false };
 }
@@ -123,9 +145,29 @@ export class BrowserSessions {
 		conversationId: ConversationId,
 		options: { url: string; waitMs?: number; maxChars?: number },
 	): Promise<BrowserSnapshot> {
-		await this.closeConversation(conversationId);
+		try {
+			return await withTimeout(this.#open(conversationId, options), OPEN_TIMEOUT_MS, "browser_open");
+		} catch (error) {
+			void withTimeout(this.closeConversation(conversationId), CLOSE_TIMEOUT_MS, "browser session close").catch(() => undefined);
+			throw error;
+		}
+	}
+
+	async #open(
+		conversationId: ConversationId,
+		options: { url: string; waitMs?: number; maxChars?: number },
+	): Promise<BrowserSnapshot> {
+		await withTimeout(this.closeConversation(conversationId), CLOSE_TIMEOUT_MS, "browser session close").catch(() => undefined);
 		const targetUrl = browserUrl(options.url);
-		const shared = this.shared === undefined ? undefined : await this.shared(conversationId, targetUrl);
+		let shared: SharedBrowserPage | undefined;
+		if (this.shared !== undefined) {
+			try {
+				shared = await withTimeout(this.shared(conversationId, targetUrl), SHARED_OPEN_TIMEOUT_MS, "T3 preview browser open");
+			} catch {
+				// A wedged T3 preview target must not take the agent's browser down with it; use a private Browserless page.
+				shared = undefined;
+			}
+		}
 		let browser: Browser | undefined;
 		let context: BrowserContext | undefined;
 		let page: Page;
@@ -193,6 +235,20 @@ export class BrowserSessions {
 		actions: readonly BrowserAction[],
 		maxChars?: number,
 	): Promise<BrowserSnapshot> {
+		try {
+			return await withTimeout(this.#act(conversationId, sessionId, actions, maxChars), TOOL_TIMEOUT_MS, "browser_act");
+		} catch (error) {
+			void withTimeout(this.closeConversation(conversationId), CLOSE_TIMEOUT_MS, "browser session close").catch(() => undefined);
+			throw error;
+		}
+	}
+
+	async #act(
+		conversationId: ConversationId,
+		sessionId: string,
+		actions: readonly BrowserAction[],
+		maxChars?: number,
+	): Promise<BrowserSnapshot> {
 		const session = this.require(conversationId, sessionId);
 		this.touch(session);
 		const evaluated: string[] = [];
@@ -210,18 +266,45 @@ export class BrowserSessions {
 	}
 
 	async read(conversationId: ConversationId, sessionId: string, maxChars?: number): Promise<BrowserSnapshot> {
+		try {
+			return await withTimeout(this.#read(conversationId, sessionId, maxChars), TOOL_TIMEOUT_MS, "browser_snapshot");
+		} catch (error) {
+			void withTimeout(this.closeConversation(conversationId), CLOSE_TIMEOUT_MS, "browser session close").catch(() => undefined);
+			throw error;
+		}
+	}
+
+	async #read(conversationId: ConversationId, sessionId: string, maxChars?: number): Promise<BrowserSnapshot> {
 		const session = this.require(conversationId, sessionId);
 		this.touch(session);
 		return this.snapshot(session, maxChars);
 	}
 
 	async screenshot(conversationId: ConversationId, sessionId: string): Promise<Buffer> {
+		try {
+			return await withTimeout(this.#screenshot(conversationId, sessionId), TOOL_TIMEOUT_MS, "browser_screenshot");
+		} catch (error) {
+			void withTimeout(this.closeConversation(conversationId), CLOSE_TIMEOUT_MS, "browser session close").catch(() => undefined);
+			throw error;
+		}
+	}
+
+	async #screenshot(conversationId: ConversationId, sessionId: string): Promise<Buffer> {
 		const session = this.require(conversationId, sessionId);
 		this.touch(session);
 		return session.page.screenshot({ type: "png", fullPage: true });
 	}
 
 	async close(conversationId: ConversationId, sessionId: string): Promise<void> {
+		try {
+			await withTimeout(this.#close(conversationId, sessionId), CLOSE_TIMEOUT_MS, "browser_close");
+		} catch (error) {
+			void withTimeout(this.closeConversation(conversationId), CLOSE_TIMEOUT_MS, "browser session close").catch(() => undefined);
+			throw error;
+		}
+	}
+
+	async #close(conversationId: ConversationId, sessionId: string): Promise<void> {
 		const session = this.sessions.get(sessionId);
 		if (session === undefined || session.conversationId !== conversationId) throw new Error(`no browser session ${sessionId}`);
 		await this.closeSession(session);
@@ -276,8 +359,11 @@ export class BrowserSessions {
 		this.forget(session);
 		if (session.closed) return;
 		session.closed = true;
-		if (session.closeShared !== undefined) await session.closeShared().catch(() => undefined);
-		else await session.browser?.close().catch(() => undefined);
+		if (session.closeShared !== undefined) {
+			await withTimeout(session.closeShared(), CLOSE_TIMEOUT_MS, "T3 preview tab close").catch(() => undefined);
+		} else if (session.browser !== undefined) {
+			await withTimeout(session.browser.close(), CLOSE_TIMEOUT_MS, "browser close").catch(() => undefined);
+		}
 	}
 
 	private forget(session: BrowserSession): void {
