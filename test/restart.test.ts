@@ -185,4 +185,16 @@ describe("restart tool", () => {
 		const extension = restart.extension();
 		expect(extension.hooks?.[0]?.task).toBe("pi.generation");
 	});
+
+	it("answers Restarted", async () => {
+		const path = await markerPath();
+		let exited: number | undefined;
+		const { restart } = coordinator(path, { exit: (code) => { exited = code; } });
+		restart.attach(fakeHarness([]));
+		const [tool] = restart.extension().tools ?? [];
+		const result = await tool!.execute!({}, {} as never, BACKGROUND_CONTEXT);
+		expect(result.output).toEqual([{ type: "text", text: "Restarted" }]);
+		await delay(10);
+		expect(exited).toBe(0);
+	});
 });

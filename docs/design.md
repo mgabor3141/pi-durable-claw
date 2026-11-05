@@ -105,7 +105,7 @@ same harness and the same T3 window. The assistant cannot launch or prompt it. O
 
 `restart_harness` is a standalone model tool, never callable from codemode. A request writes
 `<root>/restart.json`, then waits until every other live agent is held at its `GenerationTask.afterTools` boundary,
-where the round's tool results are already durable. The requesting tool returns `Restarting...` after the others are
+where the round's tool results are already durable. The requesting tool returns `Restarted` after the others are
 safe; its own `afterTools` hook then holds too. The host closes MCP, T3 and the harness and exits 0; the compose
 restart policy starts the next process, which consumes the marker and resumes. A second request while draining is
 accepted at once and pauses at its own boundary, so two restarts cannot deadlock. The drain timeout forces the

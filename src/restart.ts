@@ -61,7 +61,8 @@ const delay = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve,
  * The restart controller shared by the host and the model-facing tool.
  *
  * A restart request pauses every live agent after its current tool results are stored. The requesting tool waits
- * synchronously until the others are paused, then returns "Restarting..."; its own afterTools hook then pauses too.
+ * synchronously until the others are paused, then returns "Restarted"; its own afterTools hook then pauses too. The model
+ * sees that result in the next process, after the restart has actually happened.
  * The host closes the harness, which leaves the paused tasks pending, and exits; the supervisor (the compose
  * restart policy) starts the next process. The next process consumes the marker and resumes.
  */
@@ -121,7 +122,7 @@ export class RestartCoordinator {
 	/**
 	 * Request a restart. The first caller owns the drain and resolves when the other agents are paused or the timeout
 	 * forces the restart; later callers return at once, because their own afterTools is the only pause they need.
-	 * Every path says "Restarting..." to the model: a restart is successful once accepted, even if another request is
+	 * Every path says "Restarted" to the model: the model sees the result after the restart, even if another request was
 	 * already in progress.
 	 */
 	async request(reason: string, taskId: TaskId): Promise<void> {
@@ -184,7 +185,7 @@ export class RestartCoordinator {
 			replay: "unsafe",
 			async execute(args, api) {
 				await coordinator.request(args.reason ?? "agent request", api.taskId);
-				return { output: [{ type: "text", text: "Restarting..." }] };
+				return { output: [{ type: "text", text: "Restarted" }] };
 			},
 		});
 		return defineExtension({

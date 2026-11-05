@@ -165,7 +165,7 @@ yet.
 
 `restart_harness` is the one standalone model-facing tool. It writes `data/harness/restart.json`, waits until every
 other live agent is paused after its tool results are stored, closes the harness and exits 0; the compose restart
-policy starts the next process, which consumes the marker and resumes. The tool always answers `Restarting...`; a
+policy starts the next process, which consumes the marker and resumes. The tool always answers `Restarted`; a
 second request during a drain is accepted and pauses at its own tool boundary, so two requests cannot deadlock.
 `CLAW_RESTART_DRAIN_MS` (default 60000) caps the wait and a timeout still restarts; `CLAW_RESTART_CLOSE_GRACE_MS`
 (default 5000) caps close. It applies startup-only configuration such as MCP servers; it does not rebuild the image,
