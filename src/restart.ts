@@ -79,6 +79,7 @@ export class RestartCoordinator {
 	#draining = false;
 	#stopping = false;
 	#forced = false;
+	#deadline: number | undefined;
 	#reason = "agent request";
 	/** Live generation tasks paused at afterTools. */
 	readonly #held = new Set<TaskId>();
@@ -130,6 +131,7 @@ export class RestartCoordinator {
 		if (this.#shutdown === undefined) throw new Error("restart is not ready: the host has not installed its shutdown");
 
 		this.#draining = true;
+		this.#deadline = Date.now() + this.#drainTimeoutMs;
 		this.#reason = reason.trim().slice(0, MAX_REASON_CHARS) || "agent request";
 		try {
 			writeRestartMarker(this.#markerPath, { requestedAt: new Date().toISOString(), pid: process.pid, reason: this.#reason });
@@ -199,7 +201,7 @@ export class RestartCoordinator {
 	}
 
 	async #waitUntilSafe(): Promise<boolean> {
-		const deadline = Date.now() + this.#drainTimeoutMs;
+		const deadline = this.#deadline ?? Date.now() + this.#drainTimeoutMs;
 		while (Date.now() < deadline) {
 			const live = await this.#liveRecords();
 			this.#rememberRestartOwners(live);
@@ -216,7 +218,7 @@ export class RestartCoordinator {
 	async #waitUntilPaused(forced: boolean): Promise<void> {
 		// The requesting tool must return and commit its result before stop. Wait for its task to leave running, then
 		// for the pause to be stable. A forced drain gets a short settle window; a normal drain gets the full timeout.
-		const deadline = Date.now() + (forced ? this.#forcedSettleMs : this.#drainTimeoutMs);
+		const deadline = forced ? Date.now() + this.#forcedSettleMs : (this.#deadline ?? Date.now() + this.#drainTimeoutMs);
 		let stable = 0;
 		while (Date.now() < deadline) {
 			const live = await this.#liveRecords();
