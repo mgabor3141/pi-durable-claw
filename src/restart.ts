@@ -49,7 +49,7 @@ export interface RestartCoordinatorOptions {
 	readonly onStop?: () => void;
 }
 
-const DEFAULT_DRAIN_TIMEOUT_MS = 60_000;
+const DEFAULT_DRAIN_TIMEOUT_MS = 30 * 60_000;
 const DEFAULT_CLOSE_GRACE_MS = 5_000;
 const DEFAULT_POLL_INTERVAL_MS = 100;
 const FORCED_SETTLE_MS = 1_000;

@@ -92,7 +92,7 @@ async function main(): Promise<void> {
 	const restart = new RestartCoordinator({
 		markerPath: join(root, "restart.json"),
 		log,
-		drainTimeoutMs: envMs("CLAW_RESTART_DRAIN_MS", 60_000),
+		drainTimeoutMs: envMs("CLAW_RESTART_DRAIN_MS", 30 * 60_000),
 		closeGraceMs: envMs("CLAW_RESTART_CLOSE_GRACE_MS", 5_000),
 		onStop: () => {
 			restarting = true;
