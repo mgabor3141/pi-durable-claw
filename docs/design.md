@@ -37,7 +37,7 @@ Two kinds of people use it, as with Home Assistant or Immich:
 ┌─────────────────────────┴──────────────────────────┐
 │ harness container (server)                         │
 │   pi-durable: conversations, storage, schedules    │
-│   keys · MCP clients (HTTP) · codemode            │
+│   keys · MCP clients (HTTP) · restart_harness     │
 └───────┬───────────────────────────┬────────────────┘
         │ SSH (pi-env)              │ SSH (pi-env), only from a host conversation
 ┌───────┴─────────────────────┐   ┌─┴───────────────────────────┐
@@ -74,7 +74,7 @@ already got, completed nested calls never run twice, and the script continues li
 `read`/`write`/`bash` are registered with `callers: ["tools"]`, so only scripts call them. MCP tools default to
 `deferred` with `callers: ["model", "tools"]`: scripts call them directly, and `tool_search` loads them into the
 model's tool list for direct calls. The agent's `modelTools` selects what a conversation offers — for the assistant,
-`codemode` plus `tool_search` when MCP servers with deferred tools are configured.
+`codemode` and `restart_harness`, plus `tool_search` when MCP servers with deferred tools are configured.
 **Verified (spike):** upstream's extension runs a model script whose only capabilities are the conversation's
 script-callable tools — a key-bearing harness tool and the workspace's `read`/`write`/`bash`, pi-durable's own coding
 tools over pi-env — with the key never reaching the container and the model offered exactly `[codemode]`; after a
@@ -101,9 +101,20 @@ Reachable only from a **host conversation** that the operator starts: bash on th
 same harness and the same T3 window. The assistant cannot launch or prompt it. Optionally, a few read-only tools
 (logs, a screenshot, current activity) may be offered to the assistant.
 
+## Restart
+
+`restart_harness` is a standalone model tool, never callable from codemode. A request writes
+`<root>/restart.json`, then waits until every other live agent is held at its `GenerationTask.afterTools` boundary,
+where the round's tool results are already durable. The requesting tool returns `Restarting...` after the others are
+safe; its own `afterTools` hook then holds too. The host closes MCP, T3 and the harness and exits 0; the compose
+restart policy starts the next process, which consumes the marker and resumes. A second request while draining is
+accepted at once and pauses at its own boundary, so two restarts cannot deadlock. The drain timeout forces the
+restart if another agent will not reach a boundary; close is bounded too. This applies startup-only configuration
+(MCP); it does not rebuild the image or deploy code.
+
 ## Working from T3 (bridge-attach)
 
-`node src/host.ts` serves the codemode-only assistant through `attachT3`; `node src/host.ts pair` mints a pairing
+`node src/host.ts` serves the codemode-first assistant, with `restart_harness`, through `attachT3`; `node src/host.ts pair` mints a pairing
 code. Verified in T3's web app (playwright + chromium, screenshots in `.memory/`):
 
 - **The bridge is a package.** `@mgabor3141/pi-durable-t3` is a git dependency at a pinned commit (not on npm yet);
@@ -126,7 +137,7 @@ code. Verified in T3's web app (playwright + chromium, screenshots in `.memory/`
 
 | Profile | Tools (what the model is offered) |
 |---|---|
-| assistant | codemode, plus tool_search when MCP servers are configured — workspace read/write/bash are `callers: ["tools"]`; MCP tools are deferred and loaded by tool_search, or called from scripts |
+| assistant | codemode and restart_harness, plus tool_search when MCP servers are configured — workspace read/write/bash are `callers: ["tools"]`; MCP tools are deferred and loaded by tool_search, or called from scripts |
 | dev project | read/write/edit/bash on the project's devcontainer, plus codemode |
 | host conversation | read/write/edit/bash on the operator's computer |
 

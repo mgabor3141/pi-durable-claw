@@ -36,7 +36,8 @@ export interface HarnessExtensionOptions {
  * `tool_search` tool for deferred tools, and the harness's own tools — the workspace's `read`/`write`/`bash`
  * (pi-durable's coding tools over the call's `ExecutionEnv`, i.e. pi-env SSH to the workspace container; plus any
  * `extraTools`) — all with `callers: ["tools"]`, so only codemode scripts call them. MCP tools are registered
- * separately by the MCP manager and are deferred by default.
+ * separately by the MCP manager and are deferred by default. The host adds the model-facing restart_harness tool as
+ * an extra extension.
  */
 export function harnessExtensions(options: HarnessExtensionOptions = {}): readonly Extension[] {
 	const harnessTools: ToolRegistration[] = [

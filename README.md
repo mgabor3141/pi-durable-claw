@@ -64,7 +64,7 @@ working directory: a project's root, a Scratch thread's folder, or `/home/agent`
 `AGENTS.md` and global skills from `~/.agents/skills`, then the working directory, the project's `AGENTS.md` and
 its `.agents/skills`, and the local time when the conversation started. The agent owns its tools under
 `/home/agent`; the workspace image reads `PATH` from `~/.ssh/environment` and includes `jq`. The model tool list is
-`codemode`, plus `tool_search` when MCP servers with deferred tools are configured.
+`codemode` and `restart_harness`, plus `tool_search` when MCP servers with deferred tools are configured.
 
 ## Compaction
 
@@ -161,6 +161,16 @@ and `searchTools()` see the `mcp__<server>` namespaces. A successful connect ins
 server's tools; a failed one is logged and retried on the next call. OAuth is not implemented
 yet.
 
+## Restart
+
+`restart_harness` is the one standalone model-facing tool. It writes `data/harness/restart.json`, waits until every
+other live agent is paused after its tool results are stored, closes the harness and exits 0; the compose restart
+policy starts the next process, which consumes the marker and resumes. The tool always answers `Restarting...`; a
+second request during a drain is accepted and pauses at its own tool boundary, so two requests cannot deadlock.
+`CLAW_RESTART_DRAIN_MS` (default 60000) caps the wait and a timeout still restarts; `CLAW_RESTART_CLOSE_GRACE_MS`
+(default 5000) caps close. It applies startup-only configuration such as MCP servers; it does not rebuild the image,
+so a code release still needs the operator.
+
 ### Known limitations
 
 - No account integrations are configured by default. HTTP MCP servers can be added as above; OAuth, stdio and MCP
@@ -186,7 +196,7 @@ yet.
 T3 Code (desktop · web · mobile) ── harness container ── execution containers (hako, devcontainers)
                                     pi-durable, bridge,      bash, files, scripts; no keys
                                     keys, MCP servers,
-                                    codemode, schedules
+                                    codemode, restart_harness, schedules
 ```
 
 See [docs/design.md](docs/design.md) for the decisions and why.

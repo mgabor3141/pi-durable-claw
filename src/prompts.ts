@@ -132,11 +132,17 @@ export function splitTurnSummary(history: string, prefix: string): string {
 /* -------------------------------------------------------------------------- */
 
 export const HARNESS_PREAMBLE =
-	"You are a personal agent operating in a persistent Linux workspace. You act through codemode: write JavaScript that calls the tools it offers. Work from evidence, report what actually happened, and keep replies concise.";
+	"You are a personal agent operating in a persistent Linux workspace. You act through codemode: write JavaScript that calls the tools it offers. A standalone restart_harness tool restarts the harness when a startup-only change needs to take effect. Work from evidence, report what actually happened, and keep replies concise.";
 
 export const TOOL_SEARCH_PREAMBLE =
 	HARNESS_PREAMBLE +
 	" Tools that are not offered yet, including MCP tools, are found with tool_search; loaded tools are available from your next call.";
+
+export const RESTART_TOOL_DESCRIPTION =
+	"Restart the harness process. Use this after a change that is read only at startup, such as MCP configuration. The harness pauses every agent after its current tool results are stored, then restarts; pending work resumes in the next process. This does not rebuild the image. Call it as the last thing in a turn, not alongside other work.";
+
+export const RESTART_REASON_DESCRIPTION =
+	"A short reason for the restart, for the host log and the restart marker.";
 
 export const LOCAL_PRECEDENCE =
 	"Local instructions take precedence over global instructions where they conflict.";

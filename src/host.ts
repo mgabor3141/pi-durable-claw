@@ -1,4 +1,5 @@
-// The always-on assistant: the codemode-only harness (workspace read/write/bash over pi-env SSH) behind the T3 bridge
+// The always-on assistant: the codemode-first harness (workspace read/write/bash over pi-env SSH, plus restart_harness)
+// behind the T3 bridge
 // (`attachT3` from @mgabor3141/pi-durable-t3, which serves T3's web app), plus the title hook and shutdown copied from
 // the bridge's example agent.
 //
@@ -18,6 +19,7 @@ import { connectWorkspace, ensureKeypair, workspaceEnv } from "./workspace.ts";
 import { attachT3, mintPairingCode } from "@mgabor3141/pi-durable-t3";
 import { setSharedBrowser } from "./browser.ts";
 import { installShutdown } from "./shutdown.ts";
+import { RestartCoordinator, consumeRestartMarker } from "./restart.ts";
 import { titleThread } from "./title.ts";
 
 const PORT = Number(process.env.CLAW_PORT ?? 3775);
@@ -28,6 +30,12 @@ const log = {
 	info: (message: string, fields?: Record<string, unknown>) => console.log(JSON.stringify({ t: new Date().toISOString(), level: "info", message, ...fields })),
 	warn: (message: string, fields?: Record<string, unknown>) => console.log(JSON.stringify({ t: new Date().toISOString(), level: "warn", message, ...fields })),
 };
+
+/** A positive millisecond setting, or the fallback. */
+function envMs(name: string, fallback: number): number {
+	const value = Number(process.env[name]);
+	return Number.isFinite(value) && value > 0 ? value : fallback;
+}
 
 /** The value after `--root`, if any (undefined at the end or before another flag). */
 function rootFromArgv(argv: readonly string[]): string | undefined {
@@ -46,6 +54,9 @@ async function main(): Promise<void> {
 	}
 	const stateDir = join(root, "t3");
 	const scratchDir = process.env.CLAW_SCRATCH_DIR?.trim() || "/home/agent/scratch";
+	const priorRestart = consumeRestartMarker(join(root, "restart.json"));
+	if (priorRestart.marker !== undefined) log.info("previous restart marker consumed", { ...priorRestart.marker });
+	else if (priorRestart.error !== undefined) log.warn("previous restart marker was unreadable", { error: priorRestart.error });
 
 	// `pair`: mint a code against the state dir's auth store and exit; the running host reads the store per attempt.
 	if (argv[0] === "pair") {
@@ -77,6 +88,16 @@ async function main(): Promise<void> {
 		process.exit(1);
 	}
 
+	let restarting = false;
+	const restart = new RestartCoordinator({
+		markerPath: join(root, "restart.json"),
+		log,
+		drainTimeoutMs: envMs("CLAW_RESTART_DRAIN_MS", 60_000),
+		closeGraceMs: envMs("CLAW_RESTART_CLOSE_GRACE_MS", 5_000),
+		onStop: () => {
+			restarting = true;
+		},
+	});
 	const mcp = new McpManager({
 		configPath: process.env.CLAW_MCP_CONFIG?.trim() || join(root, "mcp.json"),
 		logger: log,
@@ -94,9 +115,10 @@ async function main(): Promise<void> {
 		models,
 		mcpNamespaces: mcp.namespaces(),
 		toolSearch: mcp.hasIndirectTools(),
-		extraExtensions: [mcp.extension()],
+		extraExtensions: [mcp.extension(), restart.extension()],
 		onRegistry: (registry) => mcp.attach(registry),
 	});
+	restart.attach(harness);
 	// Connect MCP servers before the T3 bridge accepts input, so the first prompt sees their tools.
 	await mcp.start();
 
@@ -130,11 +152,21 @@ async function main(): Promise<void> {
 		setSharedBrowser((conversationId, url) => t3.previewBrowser!.open(conversationId, url));
 	}
 
+	const shutdown = async () => {
+		await mcp.close();
+		await t3.close();
+		await harness.close(BACKGROUND_CONTEXT);
+	};
+	restart.setShutdown(shutdown);
+
 	// Crash resume: the caller resumes AFTER the attach resolved (the bridge's contract). An interrupted codemode call
 	// replays its journal: completed nested calls do not run twice.
 	harness.resume();
-	// A facet that stops serving on its own cannot answer a paired client again: fatal, per the example's policy.
-	void t3.closed.then(() => process.exit(1));
+	// A facet that stops serving on its own cannot answer a paired client again: fatal, per the example's policy. A
+	// restart closes it deliberately; the restart flag keeps that close from looking like a failure.
+	void t3.closed.then(() => {
+		if (!restarting) process.exit(1);
+	});
 
 	log.info("pi-durable-claw host ready", {
 		address: `http://${LISTEN.host}:${LISTEN.port}`,
@@ -145,11 +177,7 @@ async function main(): Promise<void> {
 	});
 	console.log("\n  Pair a device: docker compose exec harness claw pair\n");
 
-	installShutdown(async () => {
-		await mcp.close();
-		await t3.close();
-		await harness.close(BACKGROUND_CONTEXT);
-	});
+	installShutdown(shutdown);
 }
 
 try {
