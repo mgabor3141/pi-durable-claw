@@ -7,9 +7,10 @@
 //   node src/host.ts pair                  mint a single-use pairing code and print the link
 //
 // Configuration (all CLAW_*): ROOT, HOST (listen address, default 127.0.0.1), PORT (3775), PUBLIC_URL (what `pair`
-// prints; default http://127.0.0.1:PORT), WORKSPACE_HOST (workspace), WORKSPACE_PORT (22), PUBKEY_DIR (where to
-// publish the harness's public key for the workspace; unset: not published), SCRATCH_DIR (T3's scratch project root,
-// an absolute path in the workspace environment; default /home/agent/scratch). Models: <root>/pi/auth.json (and models.json).
+// prints; default http://127.0.0.1:PORT), LABEL (the T3 environment label; default claw), WORKSPACE_HOST (workspace),
+// WORKSPACE_PORT (22), PUBKEY_DIR (where to publish the harness's public key for the workspace; unset: not published),
+// SCRATCH_DIR (T3's scratch project root, an absolute path in the workspace environment; default /home/agent/scratch).
+// Models: <root>/pi/auth.json (and models.json).
 import { join } from "node:path";
 import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
 import { ModelRuntime } from "@earendil-works/pi-coding-agent";
@@ -25,6 +26,7 @@ import { titleThread } from "./title.ts";
 const PORT = Number(process.env.CLAW_PORT ?? 3775);
 const LISTEN = { host: process.env.CLAW_HOST ?? "127.0.0.1", port: PORT };
 const PUBLIC_URL = (process.env.CLAW_PUBLIC_URL ?? `http://127.0.0.1:${PORT}`).replace(/\/+$/, "");
+const LABEL = process.env.CLAW_LABEL?.trim() || "claw";
 
 const log = {
 	info: (message: string, fields?: Record<string, unknown>) => console.log(JSON.stringify({ t: new Date().toISOString(), level: "info", message, ...fields })),
@@ -132,7 +134,7 @@ async function main(): Promise<void> {
 			// environment path, and there is no harness-filesystem fallback.
 			env: workspaceEnv(workspace.connection, "/"),
 			listen: LISTEN,
-			label: "claw",
+			label: LABEL,
 			titleThread: titleThread(harness, models),
 			...(process.env.BROWSERLESS_URL === undefined || process.env.BROWSERLESS_URL.trim() === ""
 				? {}

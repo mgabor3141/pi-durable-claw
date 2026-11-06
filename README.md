@@ -32,7 +32,8 @@ Requirements: a Linux server with Docker (Compose v2) and git, and a model provi
    is not up, `docker compose logs harness` says why; with no usable credentials the harness restarts in a loop.
 4. **Pair:** `docker compose exec harness claw pair` prints a link. Open it in a browser, or paste the
    code into T3's desktop app (Add computer). If you reach the server by another address, set `CLAW_PUBLIC_URL` so
-   the link matches. T3 then shows a first-run wizard; skip the project import.
+   the link matches. Set `CLAW_LABEL` to name the T3 environment (default `claw`). T3 then shows a first-run wizard;
+   skip the project import.
 5. **Set the default model:** T3 → Settings → General → New threads → Model. T3 defaults new threads to the first
    model in the catalog, which may not be one you can use.
 
