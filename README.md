@@ -174,7 +174,9 @@ taking the harness down. A script also ends after 5 minutes, tool calls included
 `restart_harness` is the one standalone model-facing tool. It writes `data/harness/restart.json`, waits until every
 other live agent is paused after its tool results are stored, closes the harness and exits 0; the compose restart
 policy starts the next process, which consumes the marker and resumes. The tool always answers `Restarted`; a
-second request during a drain is accepted and pauses at its own tool boundary, so two requests cannot deadlock.
+second request during a drain is accepted and pauses at its own tool boundary, so two requests cannot deadlock. A
+tool that waits on work it started (a subagent's conversation) never reaches a boundary itself; it counts as paused
+once all of that work is.
 `CLAW_RESTART_DRAIN_MS` (default 1800000, 30 minutes) caps the wait and a timeout still restarts; `CLAW_RESTART_CLOSE_GRACE_MS`
 (default 5000) caps close. It applies startup-only configuration such as MCP servers; it does not rebuild the image,
 so a code release still needs the operator.
