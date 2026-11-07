@@ -163,6 +163,13 @@ server's tools. A server that fails to connect, or drops later, is logged and re
 background (after 5 s, 15 s, 1 min, then every 5 min); its tools appear once it is back. OAuth is not
 implemented yet.
 
+## Subagents
+
+`subagent` is a standalone model-facing tool: it hands a self-contained task to a fresh conversation that the call owns,
+waits, and returns the child's last answer. The child has the same model, workspace and tools, except `subagent` (no
+recursion) and `restart_harness`. Stopping the parent's turn stops the child. T3 shows the call as a subagent card,
+and the child's own transcript as a read-only thread under its parent.
+
 ## Codemode limits
 
 Each codemode script runs in its own QuickJS VM, in a worker thread of the harness process. A script may allocate at

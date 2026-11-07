@@ -16,6 +16,7 @@ import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
 import { ModelRuntime } from "@earendil-works/pi-coding-agent";
 import { openHarness } from "./harness.ts";
 import { McpManager } from "./mcp/manager.ts";
+import { subagentExtension } from "./subagent.ts";
 import { connectWorkspace, ensureKeypair, workspaceEnv } from "./workspace.ts";
 import { attachT3, mintPairingCode } from "@mgabor3141/pi-durable-t3";
 import { setSharedBrowser } from "./browser.ts";
@@ -111,13 +112,14 @@ async function main(): Promise<void> {
 		process.exit(1);
 	}
 
+	const restartExtension = restart.extension();
 	const harness = await openHarness({
 		storagePath: join(root, "durable.db"),
 		workspace,
 		models,
 		mcpNamespaces: mcp.namespaces(),
 		toolSearch: mcp.hasIndirectTools(),
-		extraExtensions: [mcp.extension(), restart.extension()],
+		extraExtensions: [mcp.extension(), restartExtension, subagentExtension({ without: [restartExtension] })],
 		onRegistry: (registry) => mcp.attach(registry),
 	});
 	restart.attach(harness);
