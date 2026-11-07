@@ -238,7 +238,8 @@ here runs at full access, so a client approved below that can only read.
 
 Each codemode script runs in its own QuickJS VM, in a worker thread of the harness process. A script may allocate at
 most 256 MiB (`CLAW_CODEMODE_MEMORY_MB`); past that it fails with `out of memory` and the turn goes on, instead of
-taking the harness down. A script also ends after 5 minutes, tool calls included.
+taking the harness down. A script has no time limit unless it sets one: a first line `// @options: {"timeout_ms": 60000}`
+ends it after that long (pi-durable's codemode; it does not use the sandbox's 5-minute default).
 
 ## Restart
 
