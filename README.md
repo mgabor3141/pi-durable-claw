@@ -170,6 +170,13 @@ waits, and returns the child's last answer. The child has the same model, worksp
 recursion) and `restart_harness`. Stopping the parent's turn stops the child. T3 shows the call as a subagent card,
 and the child's own transcript as a read-only thread under its parent.
 
+## Threads that drive each other
+
+Scripts can reach the other T3 threads with T3's own thread tools: `t3_thread_list`, `t3_thread_read`,
+`t3_thread_send`, `t3_thread_wait`, `t3_thread_interrupt`, `create_threads` and `t3_thread_update`. A call acts as
+the thread the conversation belongs to, so a message it sends shows in the other thread as coming from it. The same
+tools are served to outside MCP clients at the bridge's `/mcp`.
+
 ## Codemode limits
 
 Each codemode script runs in its own QuickJS VM, in a worker thread of the harness process. A script may allocate at

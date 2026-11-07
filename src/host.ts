@@ -13,6 +13,7 @@
 // Models: <root>/pi/auth.json (and models.json).
 import { join } from "node:path";
 import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
+import type { Registry } from "@earendil-works/pi-durable";
 import { ModelRuntime } from "@earendil-works/pi-coding-agent";
 import { openHarness } from "./harness.ts";
 import { McpManager } from "./mcp/manager.ts";
@@ -113,6 +114,7 @@ async function main(): Promise<void> {
 	}
 
 	const restartExtension = restart.extension();
+	let toolRegistry: Registry | undefined;
 	const harness = await openHarness({
 		storagePath: join(root, "durable.db"),
 		workspace,
@@ -120,7 +122,10 @@ async function main(): Promise<void> {
 		mcpNamespaces: mcp.namespaces(),
 		toolSearch: mcp.hasIndirectTools(),
 		extraExtensions: [mcp.extension(), restartExtension, subagentExtension({ without: [restartExtension] })],
-		onRegistry: (registry) => mcp.attach(registry),
+		onRegistry: (registry) => {
+			mcp.attach(registry);
+			toolRegistry = registry;
+		},
 	});
 	restart.attach(harness);
 	// Connect MCP servers before the T3 bridge accepts input, so the first prompt sees their tools.
@@ -149,6 +154,10 @@ async function main(): Promise<void> {
 		await harness.close(BACKGROUND_CONTEXT);
 		process.exit(1);
 	}
+
+	// T3's thread tools for scripts (`t3_thread_list`, `t3_thread_read`, `t3_thread_send`, …): a conversation that is a
+	// thread's head acts as that thread. Installed once the bridge exists, before anything resumes.
+	toolRegistry?.install(t3.threadTools({ callers: ["tools"] }));
 
 	// Agent `browser_open` pages ride T3's preview browser when this conversation is a thread's head. A fallback private
 	// Browserless browser remains for conversations with no T3 thread.
