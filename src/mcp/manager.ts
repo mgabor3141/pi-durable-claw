@@ -46,6 +46,8 @@ export interface McpManagerOptions {
 	readonly connectTimeoutMs?: number;
 	/** Waits before each reconnect attempt of a failed or dropped server; the last repeats. */
 	readonly retryDelaysMs?: readonly number[];
+	/** Applied to every tool registration the manager installs (the harness resolves and scrubs secrets with it). */
+	readonly wrapTool?: (tool: ToolRegistration) => ToolRegistration;
 }
 
 type McpState = {
@@ -342,15 +344,16 @@ export class McpManager {
 			const name = createMcpToolName(state.entry.name, tool.name, (candidate) => used.has(candidate));
 			used.add(name);
 			names.push(name);
+			const wrap = this.options.wrapTool ?? ((registration: ToolRegistration) => registration);
 			tools.push(
-				createMcpToolRegistration({
+				wrap(createMcpToolRegistration({
 					server: state.entry.name,
 					tool,
 					name,
 					exposure,
 					timeoutMs: (state.entry.config.timeout ?? 60) * 1000,
 					getClient: () => this.clientFor(state.entry.name),
-				}),
+				})),
 			);
 		}
 		state.registeredNames = names;

@@ -13,6 +13,9 @@ import { workspaceTools } from "./tools.ts";
 import { webTools } from "./web.ts";
 import { summarizeTools } from "./summarize.ts";
 import { workspaceEnv, type WorkspaceConnection } from "./workspace.ts";
+import { type SecretStore, secretsTool, withSecrets } from "./secrets.ts";
+
+type SecretsLogger = Parameters<typeof withSecrets>[2];
 
 /**
  * What one codemode script's VM may allocate (`CLAW_CODEMODE_MEMORY_MB`, default 256 MiB). The VMs run in worker threads
@@ -39,6 +42,8 @@ export interface HarnessExtensionOptions {
 	readonly mcpNamespaces?: readonly CodemodeNamespace[];
 	/** Offer `tool_search` when deferred tools (normally MCP tools) are configured. */
 	readonly toolSearch?: boolean;
+	/** The harness's secrets: every harness tool resolves and scrubs them (`secrets.ts`), and scripts get the `secrets` tool. */
+	readonly secrets?: { readonly store: SecretStore; readonly log: SecretsLogger };
 }
 
 /**
@@ -50,13 +55,15 @@ export interface HarnessExtensionOptions {
  * an extra extension.
  */
 export function harnessExtensions(options: HarnessExtensionOptions = {}): readonly Extension[] {
-	const harnessTools: ToolRegistration[] = [
+	const tools: ToolRegistration[] = [
 		...(options.extraTools ?? []),
 		...workspaceTools(),
 		...webTools(),
 		...browserTools(),
 		...summarizeTools(),
 	];
+	const secrets = options.secrets;
+	const harnessTools = secrets === undefined ? tools : [...tools.map((tool) => withSecrets(tool, secrets.store, secrets.log)), secretsTool(secrets.store)];
 	return [
 		preambleExtension({ toolSearch: options.toolSearch }),
 		createCodemodeExtension({ sandbox: codemodeSandbox(), namespaces: options.mcpNamespaces ?? [] }) as Extension,

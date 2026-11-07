@@ -170,6 +170,20 @@ waits, and returns the child's last answer. The child has the same model, worksp
 recursion) and `restart_harness`. Stopping the parent's turn stops the child. T3 shows the call as a subagent card,
 and the child's own transcript as a read-only thread under its parent.
 
+## Secrets
+
+The harness keeps named secrets in `data/harness/secrets.json` (owner-only, outside `durable.db`). The agent asks for
+one with `request_secret`: T3 shows a private card in the thread, the value you enter is saved under the name the agent
+chose (`GITHUB_TOKEN`), and it never enters the chat. Scripts can also `list`, `set` (a value the agent already has) and
+`delete` secrets with the `secrets` tool.
+
+The agent uses a secret by writing `${NAME}` (or `${NAME:-default}`) where the value goes: tool arguments, MCP config,
+browser form fields. A shell command uses `$NAME`: the secrets it names are exported to it. The value is substituted only
+inside the running tool, so the recorded call keeps the placeholder, and any value that appears in a tool's output comes
+back as `${NAME}`. This keeps secrets out of the model's context and the transcript; it is not a wall between the agent
+and its secrets (a transformed value is not recognised, and the agent may read a secret on purpose). Each use is logged
+by name.
+
 ## Threads that drive each other
 
 Scripts can reach the other T3 threads with T3's own thread tools: `t3_thread_list`, `t3_thread_read`,

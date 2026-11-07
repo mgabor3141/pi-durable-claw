@@ -18,6 +18,7 @@ import { ModelRuntime } from "@earendil-works/pi-coding-agent";
 import { openHarness } from "./harness.ts";
 import { McpManager } from "./mcp/manager.ts";
 import { subagentExtension } from "./subagent.ts";
+import { SecretStore, withSecrets } from "./secrets.ts";
 import { connectWorkspace, ensureKeypair, workspaceEnv } from "./workspace.ts";
 import { attachT3, mintPairingCode } from "@mgabor3141/pi-durable-t3";
 import { setSharedBrowser } from "./browser.ts";
@@ -102,9 +103,12 @@ async function main(): Promise<void> {
 			restarting = true;
 		},
 	});
+	// The harness's secrets, beside its data and outside `durable.db` (`secrets.ts`).
+	const secrets = new SecretStore(join(root, "secrets.json"));
 	const mcp = new McpManager({
 		configPath: process.env.CLAW_MCP_CONFIG?.trim() || join(root, "mcp.json"),
 		logger: log,
+		wrapTool: (tool) => withSecrets(tool, secrets, log),
 	});
 	try {
 		await mcp.load();
@@ -121,6 +125,7 @@ async function main(): Promise<void> {
 		models,
 		mcpNamespaces: mcp.namespaces(),
 		toolSearch: mcp.hasIndirectTools(),
+		secrets: { store: secrets, log },
 		extraExtensions: [mcp.extension(), restartExtension, subagentExtension({ without: [restartExtension] })],
 		onRegistry: (registry) => {
 			mcp.attach(registry);
@@ -158,6 +163,8 @@ async function main(): Promise<void> {
 	// T3's thread tools for scripts (`t3_thread_list`, `t3_thread_read`, `t3_thread_send`, …): a conversation that is a
 	// thread's head acts as that thread. Installed once the bridge exists, before anything resumes.
 	toolRegistry?.install(t3.threadTools({ callers: ["tools"] }));
+	// T3's secret card: `request_secret` asks the user in the thread and saves the answer to the harness's secrets.
+	toolRegistry?.install(t3.secretRequests({ save: (name, value) => secrets.save(name, value) }));
 
 	// Agent `browser_open` pages ride T3's preview browser when this conversation is a thread's head. A fallback private
 	// Browserless browser remains for conversations with no T3 thread.
