@@ -222,7 +222,10 @@ by name.
 Scripts can reach the other T3 threads with T3's own thread tools: `t3_thread_list`, `t3_thread_read`,
 `t3_thread_send`, `t3_thread_wait`, `t3_thread_interrupt`, `create_threads` and `t3_thread_update`. A call acts as
 the thread the conversation belongs to, so a message it sends shows in the other thread as coming from it. The same
-tools are served to outside MCP clients at the bridge's `/mcp`.
+tools are served to outside MCP clients at `<CLAW_PUBLIC_URL>/mcp`. A client signs in over OAuth as it would to T3:
+it opens T3's approval page, where you choose its access and approve with a pairing code (`claw pair`) or in one click
+from a signed-in browser. It then appears under Settings → Sharing & access, where it can be revoked. Every thread
+here runs at full access, so a client approved below that can only read.
 
 ## Codemode limits
 
