@@ -281,8 +281,11 @@ export function titleContext(messages: readonly { role: string; content: unknown
 	return kept.size < sections.length ? `${TITLE_EARLIER_CONTENT_LEFT_OUT}\n\n${text}` : text;
 }
 
-export function titlePrompt(context: string, ask: string): string {
-	return `${context}\n\n${ask}`;
+/** The title request: the conversation, the ask, and then the user's own title instructions (T3's Settings), last so
+ * they shape the answer, under the header T3 uses. */
+export function titlePrompt(context: string, ask: string, instructions?: string): string {
+	const extra = instructions?.trim();
+	return extra ? `${context}\n\n${ask}\n\nAdditional instructions:\n${extra}` : `${context}\n\n${ask}`;
 }
 
 /* -------------------------------------------------------------------------- */

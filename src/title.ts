@@ -14,7 +14,7 @@ import { TITLE_ASK, TITLE_SYSTEM_PROMPT, titleContext, titlePrompt, titleRegener
 export { titleContext } from "./prompts.ts";
 
 export function titleThread(harness: Harness, models: Models): TitleThread {
-	return async ({ conversationId, at, reason, previousTitle, signal, model: configured }) => {
+	return async ({ conversationId, at, reason, previousTitle, signal, model: configured, instructions }) => {
 		const ctx = BACKGROUND_CONTEXT;
 		const conversation = await harness.conversation(conversationId, ctx);
 		if (conversation === undefined) return undefined;
@@ -28,7 +28,7 @@ export function titleThread(harness: Harness, models: Models): TitleThread {
 			model,
 			{
 				systemPrompt: TITLE_SYSTEM_PROMPT,
-				messages: [{ role: "user", content: titlePrompt(titleContext(messages), ask), timestamp: Date.now() }],
+				messages: [{ role: "user", content: titlePrompt(titleContext(messages), ask, instructions), timestamp: Date.now() }],
 			},
 			{ signal, ...(reasoning === undefined || reasoning === "off" ? {} : { reasoning: reasoning as never }) },
 		);
