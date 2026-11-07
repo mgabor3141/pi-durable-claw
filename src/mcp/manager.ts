@@ -57,6 +57,8 @@ export interface McpManagerOptions {
 	readonly connectTimeoutMs?: number;
 	/** Waits before each reconnect attempt of a failed or dropped server; the last repeats. */
 	readonly retryDelaysMs?: readonly number[];
+	/** Namespaces that are not MCP servers', always listed first (the harness's own tool groups, such as `thread_`). */
+	readonly baseNamespaces?: readonly CodemodeNamespace[];
 	/** Applied to every tool registration the manager installs (the harness resolves and scrubs secrets with it). */
 	readonly wrapTool?: (tool: ToolRegistration) => ToolRegistration;
 }
@@ -118,11 +120,12 @@ export class McpManager {
 	private configErrors: string[] = [];
 	private reloading: Promise<void> | undefined;
 	/** The namespaces codemode sees: one array, updated in place, since codemode reads it at each use. */
-	private readonly liveNamespaces: CodemodeNamespace[] = [];
+	private readonly liveNamespaces: CodemodeNamespace[];
 	private toolSearch: Extension | undefined;
 
 	constructor(options: McpManagerOptions) {
 		this.options = options;
+		this.liveNamespaces = [...(options.baseNamespaces ?? [])];
 	}
 
 	/** Read the configuration. A broken file or entry is reported (log, prompt section), never thrown. */
@@ -264,7 +267,7 @@ export class McpManager {
 			this.install(state);
 			if (this.started && enabled(entry.config)) void this.connect(entry.name);
 		}
-		this.liveNamespaces.splice(0, this.liveNamespaces.length, ...this.currentNamespaces());
+		this.liveNamespaces.splice(0, this.liveNamespaces.length, ...(this.options.baseNamespaces ?? []), ...this.currentNamespaces());
 		this.updateToolSearch();
 	}
 

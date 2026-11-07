@@ -19,7 +19,6 @@ import { openHarness } from "./harness.ts";
 import { McpManager } from "./mcp/manager.ts";
 import { workspaceSource } from "./mcp/config.ts";
 import { McpOAuth } from "./mcp/oauth.ts";
-import { subagentExtension } from "./subagent.ts";
 import { SecretStore, withSecrets } from "./secrets.ts";
 import { connectWorkspace, ensureKeypair, workspaceEnv } from "./workspace.ts";
 import { attachT3, mintPairingCode } from "@mgabor3141/pi-durable-t3";
@@ -45,6 +44,13 @@ function envMs(name: string, fallback: number): number {
 	const value = Number(process.env[name]);
 	return Number.isFinite(value) && value > 0 ? value : fallback;
 }
+
+/** The thread tools, grouped in codemode's listing. */
+const THREAD_NAMESPACE = {
+	name: "thread",
+	prefix: "thread_",
+	description: "Other agents' threads: start a child or follow up (thread_prompt), wait for, read, search, list and stop threads",
+};
 
 /** Where an OAuth sign-in returns (a public route on T3's listener; its `state` is the check). */
 const OAUTH_CALLBACK_PATH = "/host/oauth/callback";
@@ -141,6 +147,7 @@ async function main(): Promise<void> {
 		logger: log,
 		secrets,
 		oauth,
+		baseNamespaces: [THREAD_NAMESPACE],
 		wrapTool: (tool) => withSecrets(tool, secrets, log),
 	});
 	secrets.subscribe(() => void mcp.secretsChanged());
@@ -155,7 +162,7 @@ async function main(): Promise<void> {
 		mcpNamespaces: mcp.namespaces(),
 		toolSearch: () => mcp.hasIndirectTools(),
 		secrets: { store: secrets, log },
-		extraExtensions: [mcp.extension(), restartExtension, subagentExtension({ without: [restartExtension] })],
+		extraExtensions: [mcp.extension(), restartExtension],
 		onRegistry: (registry) => {
 			mcp.attach(registry);
 			toolRegistry = registry;
@@ -176,6 +183,9 @@ async function main(): Promise<void> {
 			env: workspaceEnv(workspace.connection, "/"),
 			listen: LISTEN,
 			label: LABEL,
+			// A restart's drain ends the thread tools' waits, so a waiting script returns and its turn pauses; the report
+			// of the work it waited on reaches its thread when that work settles.
+			waitSignal: () => restart.drainSignal,
 			routes: [{ method: "GET", path: OAUTH_CALLBACK_PATH, handle: (request) => oauthCallback(mcp, request) }],
 			titleThread: titleThread(harness, models),
 			...(process.env.BROWSERLESS_URL === undefined || process.env.BROWSERLESS_URL.trim() === ""
@@ -190,8 +200,9 @@ async function main(): Promise<void> {
 		process.exit(1);
 	}
 
-	// T3's thread tools for scripts (`t3_thread_list`, `t3_thread_read`, `t3_thread_send`, …): a conversation that is a
-	// thread's head acts as that thread. Installed once the bridge exists, before anything resumes.
+	// The thread tools for scripts (`thread_prompt`, `thread_wait`, `thread_read`, `thread_search`, `thread_list`,
+	// `thread_cancel`): a conversation that is a thread's head acts as that thread. Installed once the bridge exists,
+	// before anything resumes.
 	toolRegistry?.install(t3.threadTools({ callers: ["tools"] }));
 	// T3's secret card: `request_secret` asks the user in the thread and saves the answer to the harness's secrets.
 	toolRegistry?.install(t3.secretRequests({ save: (name, value) => secrets.save(name, value) }));

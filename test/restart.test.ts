@@ -30,18 +30,12 @@ const running = (value: string, owner?: string, conversationId = 1) =>
 		state: { kind: "running" },
 	}) as unknown as TaskInspection;
 
-/** `conversationOwners`: the task that created each conversation (a subagent tool owns its child's conversation). */
-function fakeHarness(tasks: TaskInspection[], conversationOwners: Record<number, string> = {}): Pick<Harness, "inspect" | "commit"> {
+function fakeHarness(tasks: TaskInspection[]): Pick<Harness, "inspect"> {
 	return {
 		async inspect() {
 			return { scheduling: "running", tasks: [...tasks], submissions: [] };
 		},
-		async commit(run: (tx: unknown) => unknown) {
-			return run({
-				conversation: async (id: number) => ({ id, ...(conversationOwners[id] === undefined ? {} : { owner: { conversationId: 1, taskId: taskId(conversationOwners[id]!) } }) }),
-			});
-		},
-	} as unknown as Pick<Harness, "inspect" | "commit">;
+	} as unknown as Pick<Harness, "inspect">;
 }
 
 function coordinator(path: string, options: { exit?: (code: number) => void; shutdown?: () => Promise<void> } = {}) {
@@ -106,26 +100,13 @@ describe("restart coordinator", () => {
 		expect(await heldResult).toBeInstanceOf(Error);
 	});
 
-	it("counts a tool task as paused once the work it started is paused (a subagent's child generation)", async () => {
+	it("aborts the drain signal when a drain starts, so waiting thread tools return", async () => {
 		const path = await markerPath();
-		// A generation runs a subagent tool; the tool waits on its child conversation (2), whose generation is live.
-		const tasks: TaskInspection[] = [running("generation"), running("subagent-tool", "generation"), running("child", undefined, 2)];
-		let exited: number | undefined;
-		const { restart, logs } = coordinator(path, { exit: (code) => { exited = code; } });
-		restart.attach(fakeHarness(tasks, { 2: "subagent-tool" }));
-		const cancel = withCancel(BACKGROUND_CONTEXT);
-
-		const request = restart.request("config change", taskId("restart-tool"));
-		await delay(10);
-		expect(exited, "the child has not paused yet").toBeUndefined();
-		// The child reaches its tool boundary and pauses: the tool and its generation can do nothing more.
-		const held = restart.afterTools(taskId("child"), cancel.context).catch(() => {});
-		await request;
-		await delay(20);
-		expect(exited).toBe(0);
-		expect(logs).not.toContain("restart drain timed out; forcing");
-		cancel.cancel();
-		await held;
+		const { restart } = coordinator(path, { exit: () => {} });
+		restart.attach(fakeHarness([]));
+		expect(restart.drainSignal.aborted).toBe(false);
+		await restart.request("config change", taskId("restart-tool"));
+		expect(restart.drainSignal.aborted).toBe(true);
 	});
 
 	it("pauses a generation at afterTools and releases it on abort", async () => {

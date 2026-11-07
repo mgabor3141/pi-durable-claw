@@ -120,8 +120,8 @@ When `BROWSERLESS_URL` is set, the bridge also offers T3's in-app Browser panel:
 `serverBrowser`, implements `preview.*` and `subscribePreviewEvents`, and serves `/api/preview-stream/ws`
 from the same Browserless Chromium. T3's panel opens a tab, receives JPEG frames and forwards pointer and
 keyboard input, so the same browser is visible and controllable from the web or mobile client. A URL passed to
-`browser_open` is opened in that same T3 preview tab; the tab is visible in the Browser panel. The agent and the user operate one page. Subagent conversations without a T3 thread
-fall back to a private browser. This is a live view, not a page reader. Preview tabs share a durable storageState profile (cookies and origins' localStorage, kept at the bridge's stateDir/browser-profile.json); subagent pages stay ephemeral. A preview tab has no
+`browser_open` is opened in that same T3 preview tab; the tab is visible in the Browser panel. The agent and the user operate one page. When the preview browser is not configured or does not answer,
+the agent gets a private browser instead. This is a live view, not a page reader. Preview tabs share a durable storageState profile (cookies and origins' localStorage, kept at the bridge's stateDir/browser-profile.json); private pages stay ephemeral. A preview tab has no
 upload/download or file chooser; closing the panel closes its tab. The URL is reached from Browserless, not from
 the device, so no host forwarder or proxy is needed.
 
@@ -196,13 +196,6 @@ used: the redirect URI is always the host's. Register `<CLAW_PUBLIC_URL>/host/oa
 a pre-registered client. Many authorization servers accept plain `http` only on loopback, so with a non-loopback
 `CLAW_PUBLIC_URL`, use `https` (Tailscale Serve) or the paste fallback.
 
-## Subagents
-
-`subagent` is a standalone model-facing tool: it hands a self-contained task to a fresh conversation that the call owns,
-waits, and returns the child's last answer. The child has the same model, workspace and tools, except `subagent` (no
-recursion) and `restart_harness`. Stopping the parent's turn stops the child. T3 shows the call as a subagent card,
-and the child's own transcript as a read-only thread under its parent.
-
 ## Secrets
 
 The harness keeps named secrets in `data/harness/secrets.json` (owner-only, outside `durable.db`). The agent asks for
@@ -219,10 +212,24 @@ by name.
 
 ## Threads that drive each other
 
-Scripts can reach the other T3 threads with T3's own thread tools: `t3_thread_list`, `t3_thread_read`,
-`t3_thread_send`, `t3_thread_wait`, `t3_thread_interrupt`, `create_threads` and `t3_thread_update`. A call acts as
-the thread the conversation belongs to, so a message it sends shows in the other thread as coming from it. The same
-tools are served to outside MCP clients at `<CLAW_PUBLIC_URL>/mcp`. A client signs in over OAuth as it would to T3:
+Every agent works in a thread, and scripts drive other threads with six tools. A call acts as the thread the
+conversation belongs to, so a message it sends shows in the other thread as coming from it.
+
+- `thread_prompt` starts a child thread (`new`, optionally `fork` to give it the caller's history) or follows up on any
+  thread (`mode`: auto, followUp, steer, or notify to add to its context without starting work). By default it waits
+  and returns the activity's report: every message that entered the work, its tool-call count and the final answer,
+  with a verdict (completed, interrupted, failed, or active when the wait ran out). With `wait: false` it returns at
+  once, and the report is posted into the caller's thread when the work settles, starting its next turn if it is
+  idle. A wait that runs out, or a restart, turns into the same delivery.
+- `thread_wait` waits for several threads and returns their reports with the worst verdict.
+- `thread_read` reads a thread's exchanges, the caller's own included, back past any compaction.
+- `thread_search` searches every thread's messages; `thread_list` lists threads (`parent: "self"` for children).
+- `thread_cancel` stops a thread and, by default, its children; nobody gets reports of the stopped work.
+
+A child nests under its parent in T3: the parent's run shows it as a subagent card, and the child is a full thread
+you can open and write to. Children nest at most 3 deep, and at most 10 children of one thread work at once.
+
+T3's own thread tools are served to outside MCP clients at `<CLAW_PUBLIC_URL>/mcp`. A client signs in over OAuth as it would to T3:
 it opens T3's approval page, where you choose its access and approve with a pairing code (`claw pair`) or in one click
 from a signed-in browser. It then appears under Settings → Sharing & access, where it can be revoked. Every thread
 here runs at full access, so a client approved below that can only read.
@@ -239,8 +246,8 @@ taking the harness down. A script also ends after 5 minutes, tool calls included
 other live agent is paused after its tool results are stored, closes the harness and exits 0; the compose restart
 policy starts the next process, which consumes the marker and resumes. The tool always answers `Restarted`; a
 second request during a drain is accepted and pauses at its own tool boundary, so two requests cannot deadlock. A
-tool that waits on work it started (a subagent's conversation) never reaches a boundary itself; it counts as paused
-once all of that work is.
+thread tool waiting on another thread returns when the drain starts, so its turn pauses; the report of the work it
+waited on reaches its thread when that work settles.
 `CLAW_RESTART_DRAIN_MS` (default 1800000, 30 minutes) caps the wait and a timeout still restarts; `CLAW_RESTART_CLOSE_GRACE_MS`
 (default 5000) caps close. It applies startup-only configuration such as MCP servers; it does not rebuild the image,
 so a code release still needs the operator.

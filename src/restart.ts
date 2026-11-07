@@ -77,7 +77,9 @@ export class RestartCoordinator {
 	#shutdown: (() => Promise<void>) | undefined;
 	readonly #exit: (code: number) => void;
 	readonly #onStop: (() => void) | undefined;
-	#harness: Pick<Harness, "inspect" | "commit"> | undefined;
+	#harness: Pick<Harness, "inspect"> | undefined;
+	/** Aborted when a drain starts: the thread tools' waits end, so their turns reach a boundary and pause. */
+	readonly #drain = new AbortController();
 	#draining = false;
 	#stopping = false;
 	#forced = false;
@@ -103,13 +105,18 @@ export class RestartCoordinator {
 	}
 
 	/** The host attaches its Harness after opening it; the tool cannot be called before then. */
-	attach(harness: Pick<Harness, "inspect" | "commit">): void {
+	attach(harness: Pick<Harness, "inspect">): void {
 		this.#harness = harness;
 	}
 
 	/** The host installs the closure that closes MCP, T3 and the Harness; a restart is possible only after this. */
 	setShutdown(shutdown: () => Promise<void>): void {
 		this.#shutdown = shutdown;
+	}
+
+	/** A signal aborted once a restart starts draining (the bridge's `waitSignal`). */
+	get drainSignal(): AbortSignal {
+		return this.#drain.signal;
 	}
 
 	get draining(): boolean {
@@ -133,6 +140,7 @@ export class RestartCoordinator {
 		if (this.#shutdown === undefined) throw new Error("restart is not ready: the host has not installed its shutdown");
 
 		this.#draining = true;
+		this.#drain.abort();
 		this.#deadline = Date.now() + this.#drainTimeoutMs;
 		this.#reason = reason.trim().slice(0, MAX_REASON_CHARS) || "agent request";
 		try {
@@ -207,7 +215,7 @@ export class RestartCoordinator {
 		while (Date.now() < deadline) {
 			const live = await this.#liveRecords();
 			this.#rememberRestartOwners(live);
-			const paused = await this.#pausedWithOwners(live, (task) => this.#held.has(task.id) || this.#restartTasks.has(task.id) || this.#restartOwners.has(task.id));
+			const paused = new Set(live.filter((task) => this.#held.has(task.id) || this.#restartTasks.has(task.id) || this.#restartOwners.has(task.id)).map((task) => String(task.id)));
 			const unsafe = live.filter((task) => !paused.has(String(task.id)));
 			if (unsafe.length === 0) return false;
 			await delay(this.#pollIntervalMs);
@@ -226,7 +234,7 @@ export class RestartCoordinator {
 			this.#rememberRestartOwners(live);
 			// Unlike the safe wait, the final pause still waits for the requesting generation itself: after its tool result
 			// is committed, its own afterTools hook is the last boundary before stop.
-			const paused = await this.#pausedWithOwners(live, (task) => this.#held.has(task.id) || this.#restartTasks.has(task.id));
+			const paused = new Set(live.filter((task) => this.#held.has(task.id) || this.#restartTasks.has(task.id)).map((task) => String(task.id)));
 			const unsafe = live.filter((task) => !paused.has(String(task.id)));
 			const restartLive = live.some((task) => this.#restartTasks.has(task.id));
 			if (unsafe.length === 0 && !restartLive) {
@@ -238,50 +246,6 @@ export class RestartCoordinator {
 			await delay(this.#pollIntervalMs);
 		}
 		this.#log.warn("restart did not reach a clean pause; forcing exit", { forced, live: [...this.#liveSnapshot] });
-	}
-
-	/**
-	 * The live tasks that count as paused: those `isPaused` names, and every task whose live owned work all counts as
-	 * paused. A tool task waiting on what it started — a subagent's conversation, a child task — never reaches a
-	 * boundary of its own; once that work is paused it can do nothing more, so the drain need not wait for it. A task's
-	 * owned work is the tasks that name it as `owner` and the tasks of the conversations it created.
-	 */
-	async #pausedWithOwners(live: readonly TaskInspection["record"][], isPaused: (task: TaskInspection["record"]) => boolean): Promise<Set<string>> {
-		const paused = new Set(live.filter(isPaused).map((task) => String(task.id)));
-		const owned = new Map<string, string[]>();
-		for (const task of live) {
-			const owner = task.owner ?? (await this.#conversationOwner(task.conversationId));
-			if (owner !== undefined) owned.set(String(owner), [...(owned.get(String(owner)) ?? []), String(task.id)]);
-		}
-		for (let grew = true; grew; ) {
-			grew = false;
-			for (const task of live) {
-				const id = String(task.id);
-				if (paused.has(id)) continue;
-				const work = owned.get(id);
-				if (work !== undefined && work.length > 0 && work.every((child) => paused.has(child))) {
-					paused.add(id);
-					grew = true;
-				}
-			}
-		}
-		return paused;
-	}
-
-	/** The task that created a conversation (immutable, so read once). */
-	readonly #conversationOwners = new Map<ConversationId, TaskId | undefined>();
-	async #conversationOwner(conversationId: ConversationId): Promise<TaskId | undefined> {
-		if (this.#conversationOwners.has(conversationId)) return this.#conversationOwners.get(conversationId);
-		const harness = this.#harness;
-		if (harness === undefined) return undefined;
-		let owner: TaskId | undefined;
-		try {
-			owner = (await harness.commit(async (tx) => tx.conversation(conversationId), BACKGROUND_CONTEXT))?.owner?.taskId;
-		} catch {
-			// Unknown: the task counts by its own state alone.
-		}
-		this.#conversationOwners.set(conversationId, owner);
-		return owner;
 	}
 
 	/** A snapshot of live task IDs, used only for diagnostics. */
