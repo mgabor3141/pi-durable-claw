@@ -2,8 +2,9 @@
  * Connection and registry manager for operator-configured HTTP MCP servers.
  *
  * The manager connects at startup, lists each server's tools, and installs one extension per
- * server. A failed server does not stop the harness: its tools are absent until a later call
- * reconnects. Tools are exposed as deferred model tools by default, so `tool_search` loads
+ * server. A failed server does not stop the harness: its tools are absent, and the manager keeps
+ * reconnecting it in the background (a model cannot call a tool it was never shown, so waiting for a
+ * call would wait forever). A server that drops is reconnected the same way. Tools are exposed as deferred model tools by default, so `tool_search` loads
  * them for direct use, while codemode scripts can call them at any time.
  */
 
@@ -43,6 +44,8 @@ export interface McpManagerOptions {
 	/** Test seam; production uses `StreamableHttpTransport`. */
 	readonly transportFactory?: McpTransportFactory;
 	readonly connectTimeoutMs?: number;
+	/** Waits before each reconnect attempt of a failed or dropped server; the last repeats. */
+	readonly retryDelaysMs?: readonly number[];
 }
 
 type McpState = {
@@ -55,9 +58,13 @@ type McpState = {
 	error?: string;
 	connecting?: Promise<void>;
 	instructions?: string;
+	/** Reconnect attempts since the last success, and the pending one. */
+	retries: number;
+	retryTimer?: ReturnType<typeof setTimeout>;
 };
 
 const DEFAULT_CONNECT_TIMEOUT_MS = 10_000;
+const DEFAULT_RETRY_DELAYS_MS = [5_000, 15_000, 60_000, 300_000];
 const CLIENT_VERSION = "1.0.0";
 
 function withTimeout<T>(promise: Promise<T>, ms: number, message: string): Promise<T> {
@@ -85,6 +92,7 @@ export class McpManager {
 	private readonly states = new Map<string, McpState>();
 	private registry?: Registry;
 	private loaded = false;
+	private closed = false;
 
 	constructor(options: McpManagerOptions) {
 		this.options = options;
@@ -96,7 +104,7 @@ export class McpManager {
 		const loaded = await loadMcpConfig(this.options.configPath);
 		if (loaded.errors.length > 0) throw new McpConfigError(loaded.errors);
 		for (const entry of loaded.servers) {
-			this.states.set(entry.name, { entry, tools: [], registeredNames: [], status: "idle" });
+			this.states.set(entry.name, { entry, tools: [], registeredNames: [], status: "idle", retries: 0 });
 		}
 		this.loaded = true;
 	}
@@ -145,8 +153,13 @@ export class McpManager {
 		);
 	}
 
-	/** Close every client. */
+	/** Close every client and stop reconnecting. */
 	async close(): Promise<void> {
+		this.closed = true;
+		for (const state of this.states.values()) {
+			if (state.retryTimer !== undefined) clearTimeout(state.retryTimer);
+			state.retryTimer = undefined;
+		}
 		await Promise.all(
 			[...this.states.values()].map(async (state) => {
 				const client = state.client;
@@ -246,6 +259,8 @@ export class McpManager {
 					state.client = undefined;
 					state.transport = undefined;
 					state.status = "disconnected";
+					this.options.logger?.warn("MCP server disconnected", { server });
+					this.retryLater(state);
 				});
 
 				await withTimeout(
@@ -257,6 +272,7 @@ export class McpManager {
 				state.transport = transport;
 				state.instructions = client.instructions;
 				state.status = "connected";
+				state.retries = 0;
 				this.options.logger?.info("MCP server connected", {
 					server,
 					tools: state.tools.length,
@@ -270,12 +286,26 @@ export class McpManager {
 				if (client !== undefined) await client.close().catch(() => {});
 				else if (transport !== undefined) await transport.close().catch(() => {});
 				this.options.logger?.warn("MCP server failed", { server, error: state.error });
+				this.retryLater(state);
 			}
 		})().finally(() => {
 			state.connecting = undefined;
 		});
 
 		return state.connecting;
+	}
+
+	/** Try a failed or dropped server again after the next delay, unless the manager is closing or a try is pending. */
+	private retryLater(state: McpState): void {
+		if (this.closed || state.retryTimer !== undefined || !enabled(state.entry.config)) return;
+		const delays = this.options.retryDelaysMs ?? DEFAULT_RETRY_DELAYS_MS;
+		const delay = delays[Math.min(state.retries, delays.length - 1)] ?? DEFAULT_RETRY_DELAYS_MS[0]!;
+		state.retries += 1;
+		state.retryTimer = setTimeout(() => {
+			state.retryTimer = undefined;
+			if (!this.closed) void this.connect(state.entry.name);
+		}, delay);
+		state.retryTimer.unref?.();
 	}
 
 	private async refresh(state: McpState, client: McpClient): Promise<void> {

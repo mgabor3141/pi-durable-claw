@@ -209,4 +209,41 @@ describe("tool search and the MCP manager", () => {
 		expect(result.structuredContent).toEqual({ answer: "found it" });
 		await manager.close();
 	});
+
+	it("reconnects a server that failed at startup in the background, and stops when closed", async () => {
+		const path = await tempConfig({ mcpServers: { docs: { url: "http://example.test/mcp", exposure: "deferred" } } });
+		let attempts = 0;
+		const manager = new McpManager({
+			configPath: path,
+			connectTimeoutMs: 500,
+			retryDelaysMs: [20],
+			transportFactory: () => {
+				attempts += 1;
+				if (attempts === 1) throw new Error("server not up yet");
+				const { client, server } = createInMemoryTransportPair();
+				void server.start();
+				server.onMessage((message) => {
+					const request = message as { id?: unknown; method?: string };
+					if (request.id === undefined) return;
+					const result =
+						request.method === "initialize"
+							? { protocolVersion: "2025-06-18", capabilities: { tools: {} }, serverInfo: { name: "test", version: "1" } }
+							: { tools: [{ name: "search", inputSchema: { type: "object", properties: {} } }] };
+					void server.send({ jsonrpc: "2.0", id: request.id, result } as never);
+				});
+				return client;
+			},
+		});
+		await manager.load();
+		const registry = createRegistry();
+		manager.attach(registry);
+		await manager.start();
+		expect(registry.snapshot().extension("mcp:docs")?.tools ?? []).toHaveLength(0);
+		for (let i = 0; i < 100 && (registry.snapshot().extension("mcp:docs")?.tools?.length ?? 0) === 0; i++) await new Promise((resolve) => setTimeout(resolve, 10));
+		expect(registry.snapshot().extension("mcp:docs")?.tools?.map((tool) => tool.name), "registered once it came up, with no call").toEqual(["mcp__docs__search"]);
+		await manager.close();
+		const after = attempts;
+		await new Promise((resolve) => setTimeout(resolve, 80));
+		expect(attempts, "no retry after close").toBe(after);
+	});
 });

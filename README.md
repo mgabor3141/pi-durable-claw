@@ -159,8 +159,15 @@ Exposure, per server or per tool with `toolExposure`:
 
 `mcp_servers` lists the configured indirect servers and how to reach them. `describeNamespace()`
 and `searchTools()` see the `mcp__<server>` namespaces. A successful connect installs the
-server's tools; a failed one is logged and retried on the next call. OAuth is not implemented
-yet.
+server's tools. A server that fails to connect, or drops later, is logged and reconnected in the
+background (after 5 s, 15 s, 1 min, then every 5 min); its tools appear once it is back. OAuth is not
+implemented yet.
+
+## Codemode limits
+
+Each codemode script runs in its own QuickJS VM, in a worker thread of the harness process. A script may allocate at
+most 256 MiB (`CLAW_CODEMODE_MEMORY_MB`); past that it fails with `out of memory` and the turn goes on, instead of
+taking the harness down. A script also ends after 5 minutes, tool calls included.
 
 ## Restart
 

@@ -14,10 +14,20 @@ import { webTools } from "./web.ts";
 import { summarizeTools } from "./summarize.ts";
 import { workspaceEnv, type WorkspaceConnection } from "./workspace.ts";
 
+/**
+ * What one codemode script's VM may allocate (`CLAW_CODEMODE_MEMORY_MB`, default 256 MiB). The VMs run in worker threads
+ * of the host process, so without a limit a runaway script takes the host down with it; with one, the script fails with
+ * QuickJS's `out of memory` and the turn goes on. Large data belongs in tools and files, not in script memory.
+ */
+export function codemodeMemoryLimitBytes(env: Readonly<Record<string, string | undefined>> = process.env): number {
+	const megabytes = Number(env.CLAW_CODEMODE_MEMORY_MB ?? "");
+	return (Number.isFinite(megabytes) && megabytes > 0 ? megabytes : 256) * 1024 * 1024;
+}
+
 /** One QuickJS sandbox per process is enough: each execution gets its own VM and worker. */
 let sharedSandbox: CodemodeSandbox | undefined;
 export function codemodeSandbox(): CodemodeSandbox {
-	return (sharedSandbox ??= new CodemodeSandbox());
+	return (sharedSandbox ??= new CodemodeSandbox({ memoryLimitBytes: codemodeMemoryLimitBytes() }));
 }
 
 export interface HarnessExtensionOptions {
