@@ -15,15 +15,13 @@ import { join } from "node:path";
 import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
 import type { Registry } from "@earendil-works/pi-durable";
 import { ModelRuntime } from "@earendil-works/pi-coding-agent";
-import { openHarness } from "./harness.ts";
+import { openHarness, type HarnessLate } from "./harness.ts";
 import { McpManager } from "./mcp/manager.ts";
 import { workspaceSource } from "./mcp/config.ts";
 import { McpOAuth } from "./mcp/oauth.ts";
 import { SecretStore, withSecrets } from "./secrets.ts";
 import { connectWorkspace, ensureKeypair, workspaceEnv } from "./workspace.ts";
 import { attachT3, mintPairingCode } from "@mgabor3141/pi-durable-t3";
-import { setSharedBrowser } from "./browser.ts";
-import { setTextGenerationModel } from "./summarize.ts";
 import { installShutdown } from "./shutdown.ts";
 import { RestartCoordinator, consumeRestartMarker } from "./restart.ts";
 import { titleThread } from "./title.ts";
@@ -160,6 +158,8 @@ async function main(): Promise<void> {
 	// tools are not offered, and the log says why.
 	const browserlessUrl = process.env.BROWSERLESS_URL?.trim() ?? "";
 	if (browserlessUrl === "") log.info("browser tools off: BROWSERLESS_URL is not set");
+	// Filled in once the bridge is attached (below); the harness's own tools read it at each call.
+	const late: HarnessLate = {};
 	const harness = await openHarness({
 		storagePath: join(root, "durable.db"),
 		browser: browserlessUrl !== "",
@@ -167,6 +167,7 @@ async function main(): Promise<void> {
 		models,
 		mcpNamespaces: mcp.namespaces(),
 		toolSearch: () => mcp.hasIndirectTools(),
+		late,
 		secrets: { store: secrets, log },
 		extraExtensions: [mcp.extension(), restartExtension],
 		onRegistry: (registry) => {
@@ -214,11 +215,11 @@ async function main(): Promise<void> {
 	toolRegistry?.install(t3.secretRequests({ save: (name, value) => secrets.save(name, value) }));
 
 	// Agent `browser_open` pages are T3's preview tabs, the ones the user sees; there is no other browser.
-	// `summarize` generates with T3's text-generation model (Settings) when it names one of ours; titles get it per request.
-	setTextGenerationModel(() => t3.textGenerationModel());
-	if (t3.previewBrowser !== undefined) {
-		setSharedBrowser((conversationId, url) => t3.previewBrowser!.open(conversationId, url));
-	}
+	// What the harness's own tools need from the bridge: `summarize` generates with T3's text-generation model when it names
+	// one of ours (titles get it per request), and `browser_open` opens T3's preview tabs.
+	late.textGenerationModel = () => t3.textGenerationModel();
+	const previewBrowser = t3.previewBrowser;
+	if (previewBrowser !== undefined) late.previewBrowser = (conversationId, url) => previewBrowser.open(conversationId, url);
 
 	const shutdown = async () => {
 		await mcp.close();

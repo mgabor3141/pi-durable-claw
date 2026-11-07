@@ -127,11 +127,16 @@ function recordLog(session: BrowserSession, line: string): void {
 export class BrowserSessions {
 	private readonly sessions = new Map<string, BrowserSession>();
 	private readonly byConversation = new Map<ConversationId, string>();
-	private shared: SharedBrowserProvider | undefined;
+	private shared: () => SharedBrowserProvider | undefined;
 
-	/** Use a page owned by the T3 preview, when one is available for the conversation. */
+	/** `shared`: T3's preview browser, read at each open (it exists once the bridge is attached). */
+	constructor(shared: () => SharedBrowserProvider | undefined = () => undefined) {
+		this.shared = shared;
+	}
+
+	/** Use this provider from now on (tests). */
 	useShared(provider: SharedBrowserProvider | undefined): void {
-		this.shared = provider;
+		this.shared = () => provider;
 	}
 
 	async open(
@@ -153,8 +158,9 @@ export class BrowserSessions {
 		await withTimeout(this.closeConversation(conversationId), CLOSE_TIMEOUT_MS, "browser session close").catch(() => undefined);
 		const targetUrl = browserUrl(options.url);
 		// The page is T3's preview tab, the one the user sees; there is no other browser, so a failure here is the answer.
-		if (this.shared === undefined) throw new Error("The browser is not ready: T3's preview browser has not attached yet.");
-		const shared = await withTimeout(this.shared(conversationId, targetUrl), SHARED_OPEN_TIMEOUT_MS, "T3 preview browser open");
+		const provider = this.shared();
+		if (provider === undefined) throw new Error("The browser is not ready: T3's preview browser has not attached yet.");
+		const shared = await withTimeout(provider(conversationId, targetUrl), SHARED_OPEN_TIMEOUT_MS, "T3 preview browser open");
 		if (shared === undefined) throw new Error("This conversation is not a T3 thread, so it has no browser panel to open a page in.");
 		const page = shared.page;
 		const session: BrowserSession = {
@@ -434,14 +440,9 @@ function snapshotStructured(snapshot: BrowserSnapshot): JsonValue {
 	} as unknown as JsonValue;
 }
 
-const sessions = new BrowserSessions();
-
-/** Let agent browser pages use T3's preview browser (set once the T3 bridge has been attached). */
-export function setSharedBrowser(provider: SharedBrowserProvider | undefined): void {
-	sessions.useShared(provider);
-}
-
-export function browserTools(): ToolRegistration[] {
+/** The browser tools, over T3's preview browser as `late` names it once the bridge is attached. */
+export function browserTools(late: { readonly previewBrowser?: SharedBrowserProvider } = {}): ToolRegistration[] {
+	const sessions = new BrowserSessions(() => late.previewBrowser);
 	return [
 		defineTool({
 			name: "browser_open",

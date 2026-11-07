@@ -2,13 +2,13 @@ import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
 import type { Context } from "@earendil-works/chord";
 import { createRegistry, defineExtension, Harness, type Extension, type HarnessOptions, type Registry, type ToolRegistration } from "@earendil-works/pi-durable";
 import { createCodemodeExtension, type CodemodeNamespace } from "@earendil-works/pi-durable/codemode";
-import { createToolSearchExtension } from "@earendil-works/pi-durable/tool-search";
 import { openNodeSqliteStorage } from "@earendil-works/pi-durable/storage/sqlite/node";
 import { CodemodeSandbox } from "@earendil-works/pi-codemode";
 import { workspaceMemoryExtension } from "./memory.ts";
 import { preambleExtension } from "./preamble.ts";
 import { compactionExtension } from "./compaction.ts";
-import { browserTools } from "./browser.ts";
+import { browserTools, type SharedBrowserProvider } from "./browser.ts";
+import type { TextGenerationModel } from "@mgabor3141/pi-durable-t3";
 import { workspaceTools } from "./tools.ts";
 import { webTools } from "./web.ts";
 import { summarizeTools } from "./summarize.ts";
@@ -33,6 +33,12 @@ export function codemodeSandbox(): CodemodeSandbox {
 	return (sharedSandbox ??= new CodemodeSandbox({ memoryLimitBytes: codemodeMemoryLimitBytes() }));
 }
 
+/** The parts of the bridge the harness's own tools use, set once it is attached. */
+export interface HarnessLate {
+	previewBrowser?: SharedBrowserProvider;
+	textGenerationModel?: () => TextGenerationModel | undefined;
+}
+
 export interface HarnessExtensionOptions {
 	/** More script-callable tools (`callers: ["tools"]`), e.g. integrations. */
 	readonly extraTools?: readonly ToolRegistration[];
@@ -42,9 +48,11 @@ export interface HarnessExtensionOptions {
 	readonly mcpNamespaces?: readonly CodemodeNamespace[];
 	/** Offer the `browser_*` tools: only when T3's preview browser is configured, since it is the only browser. */
 	readonly browser?: boolean;
-	/** Offer `tool_search` when deferred tools (normally MCP tools) are configured. A function: the MCP manager installs
-	 * `tool_search` itself as its configuration changes, and the preamble asks it whether it is offered. */
-	readonly toolSearch?: boolean | (() => boolean);
+	/** Whether `tool_search` is offered (the MCP manager installs it as its configuration changes); the preamble asks. */
+	readonly toolSearch?: () => boolean;
+	/** What exists only once the bridge is attached: the host fills it in after `attachT3`, and the tools read it at each
+	 * call. */
+	readonly late?: HarnessLate;
 	/** The harness's secrets: every harness tool resolves and scrubs them (`secrets.ts`), and scripts get the `secrets` tool. */
 	readonly secrets?: { readonly store: SecretStore; readonly log: SecretsLogger };
 }
@@ -62,15 +70,14 @@ export function harnessExtensions(options: HarnessExtensionOptions = {}): readon
 		...(options.extraTools ?? []),
 		...workspaceTools(),
 		...webTools(),
-		...(options.browser === true ? browserTools() : []),
-		...summarizeTools(),
+		...(options.browser === true ? browserTools(options.late) : []),
+		...summarizeTools(options.late),
 	];
 	const secrets = options.secrets;
 	const harnessTools = secrets === undefined ? tools : [...tools.map((tool) => withSecrets(tool, secrets.store, secrets.log)), secretsTool(secrets.store)];
 	return [
 		preambleExtension({ toolSearch: options.toolSearch }),
 		createCodemodeExtension({ sandbox: codemodeSandbox(), namespaces: options.mcpNamespaces ?? [] }) as Extension,
-		...(options.toolSearch === true ? [createToolSearchExtension() as Extension] : []),
 		defineExtension({ name: "harness-tools", tools: harnessTools }),
 		...(options.extraExtensions ?? []),
 		workspaceMemoryExtension(),
