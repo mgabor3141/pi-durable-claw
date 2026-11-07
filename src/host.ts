@@ -155,8 +155,13 @@ async function main(): Promise<void> {
 
 	const restartExtension = restart.extension();
 	let toolRegistry: Registry | undefined;
+	// The agent's browser is T3's preview browser (Browserless over CDP). Without one there is no browser at all: the
+	// tools are not offered, and the log says why.
+	const browserlessUrl = process.env.BROWSERLESS_URL?.trim() ?? "";
+	if (browserlessUrl === "") log.info("browser tools off: BROWSERLESS_URL is not set");
 	const harness = await openHarness({
 		storagePath: join(root, "durable.db"),
+		browser: browserlessUrl !== "",
 		workspace,
 		models,
 		mcpNamespaces: mcp.namespaces(),
@@ -188,9 +193,9 @@ async function main(): Promise<void> {
 			waitSignal: () => restart.drainSignal,
 			routes: [{ method: "GET", path: OAUTH_CALLBACK_PATH, handle: (request) => oauthCallback(mcp, request) }],
 			titleThread: titleThread(harness, models),
-			...(process.env.BROWSERLESS_URL === undefined || process.env.BROWSERLESS_URL.trim() === ""
+			...(browserlessUrl === ""
 				? {}
-				: { preview: { cdpUrl: process.env.BROWSERLESS_URL.trim(), ...(process.env.BROWSERLESS_TOKEN === undefined ? {} : { token: process.env.BROWSERLESS_TOKEN }), storageStatePath: join(stateDir, "browser-profile.json") } }),
+				: { preview: { cdpUrl: browserlessUrl, ...(process.env.BROWSERLESS_TOKEN === undefined ? {} : { token: process.env.BROWSERLESS_TOKEN }), storageStatePath: join(stateDir, "browser-profile.json") } }),
 			log,
 		});
 	} catch (error) {
@@ -207,8 +212,7 @@ async function main(): Promise<void> {
 	// T3's secret card: `request_secret` asks the user in the thread and saves the answer to the harness's secrets.
 	toolRegistry?.install(t3.secretRequests({ save: (name, value) => secrets.save(name, value) }));
 
-	// Agent `browser_open` pages ride T3's preview browser when this conversation is a thread's head. A fallback private
-	// Browserless browser remains for conversations with no T3 thread.
+	// Agent `browser_open` pages are T3's preview tabs, the ones the user sees; there is no other browser.
 	if (t3.previewBrowser !== undefined) {
 		setSharedBrowser((conversationId, url) => t3.previewBrowser!.open(conversationId, url));
 	}

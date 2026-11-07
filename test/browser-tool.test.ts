@@ -34,4 +34,16 @@ describe("browser sessions", () => {
 		const after = await sessions.read(1 as never, "shared", 100);
 		expect(after.text).toBe("body text");
 	});
+
+	it("fails loudly when there is no preview page to open, with no other browser to fall back to", async () => {
+		const sessions = new BrowserSessions();
+		const open = () => sessions.open(1 as never, { url: "https://example.com/" });
+		await expect(open()).rejects.toThrow("T3's preview browser has not attached");
+		sessions.useShared(async () => undefined);
+		await expect(open()).rejects.toThrow("not a T3 thread");
+		sessions.useShared(async () => {
+			throw new Error("preview target is wedged");
+		});
+		await expect(open()).rejects.toThrow("preview target is wedged");
+	});
 });

@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import type { JsonValue } from "@earendil-works/chord";
 import { Type } from "@earendil-works/pi-ai";
 import { defineTool, type ConversationId, type ToolRegistration } from "@earendil-works/pi-durable";
-import { chromium, type Browser, type BrowserContext, type Page } from "playwright-core";
+import type { Page } from "playwright-core";
 import { assertFetchableUrl } from "./web.ts";
 import {
 	BROWSER_ACT_TOOL_DESCRIPTION,
@@ -17,18 +17,12 @@ import {
 } from "./prompts.ts";
 
 /**
- * An interactive browser for the workspace agent. Browserless owns the
- * Chromium processes, limits concurrency and kills a session when its client
- * goes away; this module only holds one page per conversation and closes it on
- * an idle timer. It is deliberately not the page reader: `web_fetch` is the
- * cheap, stateless path for reading, and this is for pages that need clicking,
- * typing, JavaScript or a screenshot.
- *
- * The defaults are the common compose service name. A deployment can override
- * them in the harness environment when its service uses another name.
+ * An interactive browser for the workspace agent: the agent's page is a tab of T3's preview browser (Browserless
+ * Chromium, attached by the bridge), the same page the user sees in the Browser panel. This module holds one page per
+ * conversation and closes it after its maximum age. It is deliberately not the page reader: `web_fetch` is the cheap,
+ * stateless path for reading, and this is for pages that need clicking, typing, JavaScript or a screenshot. Without
+ * the preview browser there is no browser: the host does not offer these tools.
  */
-const BROWSERLESS_URL = (process.env.BROWSERLESS_URL ?? "ws://browserless:3000/chromium").replace(/\/+$/, "");
-const BROWSERLESS_TOKEN = process.env.BROWSERLESS_TOKEN ?? "";
 // Browser-only allowlist for local dev servers (normally "workspace"). The page
 // reader never sees this; web_fetch keeps rejecting all internal hosts.
 const LOCAL_HOSTS = (process.env.BROWSER_LOCAL_HOSTS ?? "")
@@ -36,14 +30,12 @@ const LOCAL_HOSTS = (process.env.BROWSER_LOCAL_HOSTS ?? "")
 	.map((host) => host.trim())
 	.filter((host) => host !== "");
 
-const CONNECT_TIMEOUT_MS = 30_000;
 const NAVIGATION_TIMEOUT_MS = 45_000;
 const ACTION_TIMEOUT_MS = 15_000;
 const OPEN_TIMEOUT_MS = 75_000;
 const TOOL_TIMEOUT_MS = 60_000;
 const SHARED_OPEN_TIMEOUT_MS = 50_000;
 const CLOSE_TIMEOUT_MS = 10_000;
-const IDLE_TIMEOUT_MS = 900_000;
 const MAX_SESSION_AGE_MS = 1_800_000;
 const MAX_MESSAGE_CHARS = 10_000;
 const MAX_SNAPSHOT_CHARS = 20_000;
@@ -65,14 +57,11 @@ export interface BrowserSnapshot {
 interface BrowserSession {
 	readonly id: string;
 	readonly conversationId: ConversationId;
-	readonly browser: Browser | undefined;
-	readonly context: BrowserContext | undefined;
 	readonly page: Page;
-	readonly closeShared: (() => Promise<void>) | undefined;
-	readonly touchShared: (() => void) | undefined;
+	readonly closeShared: () => Promise<void>;
+	readonly touchShared: () => void;
 	readonly logs: string[];
 	readonly createdAt: number;
-	idleTimer: NodeJS.Timeout | undefined;
 	maxTimer: NodeJS.Timeout | undefined;
 	closed: boolean;
 }
@@ -85,17 +74,11 @@ export interface SharedBrowserPage {
 	close(): Promise<void>;
 }
 
-/** Resolve a conversation's URL to a page shared with the user's T3 preview, or undefined to use a private browser. */
+/** Resolve a conversation's URL to a page of the user's T3 preview, or undefined when the conversation has no thread. */
 export type SharedBrowserProvider = (conversationId: ConversationId, url: string) => Promise<SharedBrowserPage | undefined>;
 
 function browserUrl(value: string): string {
 	return assertFetchableUrl(value, { allowHosts: LOCAL_HOSTS });
-}
-
-function endpoint(): string {
-	const url = new URL(BROWSERLESS_URL);
-	if (BROWSERLESS_TOKEN !== "") url.searchParams.set("token", BROWSERLESS_TOKEN);
-	return url.toString();
 }
 
 function timeoutError(what: string, ms: number): Error {
@@ -169,36 +152,19 @@ export class BrowserSessions {
 	): Promise<BrowserSnapshot> {
 		await withTimeout(this.closeConversation(conversationId), CLOSE_TIMEOUT_MS, "browser session close").catch(() => undefined);
 		const targetUrl = browserUrl(options.url);
-		let shared: SharedBrowserPage | undefined;
-		if (this.shared !== undefined) {
-			try {
-				shared = await withTimeout(this.shared(conversationId, targetUrl), SHARED_OPEN_TIMEOUT_MS, "T3 preview browser open");
-			} catch {
-				// A wedged T3 preview target must not take the agent's browser down with it; use a private Browserless page.
-				shared = undefined;
-			}
-		}
-		let browser: Browser | undefined;
-		let context: BrowserContext | undefined;
-		let page: Page;
-		if (shared === undefined) {
-			browser = await chromium.connectOverCDP(endpoint(), { timeout: CONNECT_TIMEOUT_MS });
-			context = browser.contexts()[0] ?? (await browser.newContext());
-			page = context.pages()[0] ?? (await context.newPage());
-		} else {
-			page = shared.page;
-		}
+		// The page is T3's preview tab, the one the user sees; there is no other browser, so a failure here is the answer.
+		if (this.shared === undefined) throw new Error("The browser is not ready: T3's preview browser has not attached yet.");
+		const shared = await withTimeout(this.shared(conversationId, targetUrl), SHARED_OPEN_TIMEOUT_MS, "T3 preview browser open");
+		if (shared === undefined) throw new Error("This conversation is not a T3 thread, so it has no browser panel to open a page in.");
+		const page = shared.page;
 		const session: BrowserSession = {
-			id: shared?.id ?? randomUUID(),
+			id: shared.id,
 			conversationId,
-			browser,
-			context,
 			page,
-			closeShared: shared?.close,
-			touchShared: shared?.touch,
+			closeShared: () => shared.close(),
+			touchShared: () => shared.touch(),
 			logs: [],
 			createdAt: Date.now(),
-			idleTimer: undefined,
 			maxTimer: undefined,
 			closed: false,
 		};
@@ -214,18 +180,9 @@ export class BrowserSessions {
 			});
 			page.on("close", () => {
 				session.closed = true;
-				if (session.idleTimer !== undefined) clearTimeout(session.idleTimer);
 				if (session.maxTimer !== undefined) clearTimeout(session.maxTimer);
 				this.forget(session);
 			});
-			browser?.on("disconnected", () => {
-				session.closed = true;
-				if (session.idleTimer !== undefined) clearTimeout(session.idleTimer);
-				if (session.maxTimer !== undefined) clearTimeout(session.maxTimer);
-				this.forget(session);
-			});
-
-			if (shared === undefined) await page.goto(targetUrl, { waitUntil: "domcontentloaded", timeout: NAVIGATION_TIMEOUT_MS });
 			if (options.waitMs !== undefined && options.waitMs > 0) await page.waitForTimeout(Math.min(options.waitMs, 10_000));
 
 			this.sessions.set(session.id, session);
@@ -233,8 +190,7 @@ export class BrowserSessions {
 			this.armTimers(session);
 			return this.snapshot(session, options.maxChars);
 		} catch (error) {
-			if (browser !== undefined) await browser.close().catch(() => undefined);
-			else if (shared !== undefined) await shared.close().catch(() => undefined);
+			await shared.close().catch(() => undefined);
 			throw error;
 		}
 	}
@@ -344,18 +300,13 @@ export class BrowserSessions {
 	}
 
 	private armTimers(session: BrowserSession): void {
-		// A T3 preview tab has a human viewer; only the agent's private pages get an idle timer.
-		if (session.closeShared === undefined) this.touch(session);
+		// A T3 preview tab has a human viewer, so it has no idle timer; the bridge's own sweep closes abandoned tabs.
 		session.maxTimer = setTimeout(() => void this.closeSession(session), MAX_SESSION_AGE_MS);
 		session.maxTimer.unref();
 	}
 
 	private touch(session: BrowserSession): void {
-		session.touchShared?.();
-		if (session.closeShared !== undefined) return;
-		if (session.idleTimer !== undefined) clearTimeout(session.idleTimer);
-		session.idleTimer = setTimeout(() => void this.closeSession(session), IDLE_TIMEOUT_MS);
-		session.idleTimer.unref();
+		session.touchShared();
 	}
 
 	private async closeConversation(conversationId: ConversationId): Promise<void> {
@@ -366,16 +317,11 @@ export class BrowserSessions {
 	}
 
 	private async closeSession(session: BrowserSession): Promise<void> {
-		if (session.idleTimer !== undefined) clearTimeout(session.idleTimer);
 		if (session.maxTimer !== undefined) clearTimeout(session.maxTimer);
 		this.forget(session);
 		if (session.closed) return;
 		session.closed = true;
-		if (session.closeShared !== undefined) {
-			await withTimeout(session.closeShared(), CLOSE_TIMEOUT_MS, "T3 preview tab close").catch(() => undefined);
-		} else if (session.browser !== undefined) {
-			await withTimeout(session.browser.close(), CLOSE_TIMEOUT_MS, "browser close").catch(() => undefined);
-		}
+		await withTimeout(session.closeShared(), CLOSE_TIMEOUT_MS, "T3 preview tab close").catch(() => undefined);
 	}
 
 	private forget(session: BrowserSession): void {

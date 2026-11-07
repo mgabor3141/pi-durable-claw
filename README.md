@@ -97,11 +97,12 @@ services, not cloud APIs:
 - `web_search` calls a SearXNG JSON endpoint (`SEARXNG_URL`, default `http://searxng:8080`).
 - `web_fetch` calls a page-reader service (`READER_URL`, default `http://reader:8000`) and returns the complete page as main-content Markdown. There is no tool-level character limit; the codemode output limit decides what reaches the model.
 - `summarize` makes one model call over supplied text or a workspace file; it is not a subagent and cannot run tools.
-- `browser_open`, `browser_act`, `browser_snapshot`, `browser_screenshot` and `browser_close` drive a
-  Browserless Chromium pool (`BROWSERLESS_URL`, default `ws://browserless:3000/chromium`) over CDP. `BROWSERLESS_TOKEN`
-  is optional in the default endpoint and becomes a `token` query parameter when set. `BROWSER_LOCAL_HOSTS` is an
-  optional comma-separated allowlist for the browser only; a deployment can set `workspace` so the agent can open
-  its own local dev server. `web_fetch` never uses that allowlist.
+- `browser_open`, `browser_act`, `browser_snapshot`, `browser_screenshot` and `browser_close` drive T3's preview
+  browser, a Browserless Chromium the harness reaches over CDP (`BROWSERLESS_URL`, for example
+  `ws://browserless:3000/chromium`; `BROWSERLESS_TOKEN` is optional). Without `BROWSERLESS_URL` there is no browser:
+  the tools are not offered, and the harness logs that at start. `BROWSER_LOCAL_HOSTS` is an optional comma-separated
+  allowlist for the browser only; a deployment can set `workspace` so the agent can open its own local dev server.
+  `web_fetch` never uses that allowlist.
 
 Point them at services the harness can reach; this repo does not run them. The
 reader accepts `POST /read` with `{"url":"..."}` and returns `markdown` and the final `url`.
@@ -113,15 +114,14 @@ the request fails, the tool returns the backend error instead of inventing a res
 The browser is for interaction, not reading. `web_fetch` is the cheap, stateless path and should be the default;
 use the browser when a page needs clicks, typing, JavaScript, a screenshot, or a short interactive test. A
 screenshot result is an image block; call `image(shot)` in the same codemode script to attach it. One page
-is kept per conversation; a private one is closed after fifteen idle minutes, while a T3 preview tab
-stays while viewed. The bridge sweeps tabs with no viewer after thirty minutes when an agent opened them, or twenty-four hours when the user did; a viewed tab is kept. Browserless's session timer is effectively off, and the shared preview browser closes after three days with no tabs. Local HTML is served from the workspace (for example `python3 -m http.server`) and opened by URL like any other page.
+is kept per conversation, a T3 preview tab that stays while viewed. The bridge sweeps tabs with no viewer after thirty minutes when an agent opened them, or twenty-four hours when the user did; a viewed tab is kept. Browserless's session timer is effectively off, and the shared preview browser closes after three days with no tabs. Local HTML is served from the workspace (for example `python3 -m http.server`) and opened by URL like any other page.
 
 When `BROWSERLESS_URL` is set, the bridge also offers T3's in-app Browser panel: it advertises
 `serverBrowser`, implements `preview.*` and `subscribePreviewEvents`, and serves `/api/preview-stream/ws`
 from the same Browserless Chromium. T3's panel opens a tab, receives JPEG frames and forwards pointer and
 keyboard input, so the same browser is visible and controllable from the web or mobile client. A URL passed to
-`browser_open` is opened in that same T3 preview tab; the tab is visible in the Browser panel. The agent and the user operate one page. When the preview browser is not configured or does not answer,
-the agent gets a private browser instead. This is a live view, not a page reader. Preview tabs share a durable storageState profile (cookies and origins' localStorage, kept at the bridge's stateDir/browser-profile.json); private pages stay ephemeral. A preview tab has no
+`browser_open` is opened in that same T3 preview tab; the tab is visible in the Browser panel. The agent and the user operate one page. If the preview browser does not answer, `browser_open` fails with its
+error; there is no other browser to fall back to. This is a live view, not a page reader. Preview tabs share a durable storageState profile (cookies and origins' localStorage, kept at the bridge's stateDir/browser-profile.json). A preview tab has no
 upload/download or file chooser; closing the panel closes its tab. The URL is reached from Browserless, not from
 the device, so no host forwarder or proxy is needed.
 
