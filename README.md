@@ -229,6 +229,11 @@ conversation belongs to, so a message it sends shows in the other thread as comi
 A child nests under its parent in T3: the parent's run shows it as a subagent card, and the child is a full thread
 you can open and write to. Children nest at most 3 deep, and at most 10 children of one thread work at once.
 
+Scripts also have T3's scheduled-task tools: `schedule_task` (a prompt on an interval or at a time of day, posted
+into the calling thread by default, or into a new thread per run with `bindToCurrentThread: false`; with a
+`scheduledTaskId` it changes or pauses a task), `list_scheduled_tasks` and `delete_scheduled_task`. The tasks are the
+ones T3's Settings → Scheduled tasks shows.
+
 T3's own thread tools are served to outside MCP clients at `<CLAW_PUBLIC_URL>/mcp`. A client signs in over OAuth as it would to T3:
 it opens T3's approval page, where you choose its access and approve with a pairing code (`claw pair`) or in one click
 from a signed-in browser. It then appears under Settings → Sharing & access, where it can be revoked. Every thread
