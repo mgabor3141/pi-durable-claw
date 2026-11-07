@@ -215,9 +215,7 @@ by name.
 Every agent works in a thread, and scripts drive other threads with six tools. A call acts as the thread the
 conversation belongs to, so a message it sends shows in the other thread as coming from it.
 
-- `thread_prompt` starts a child thread (`new`, optionally `fork` to give it the caller's history, or `worktree` to give
-  it a git worktree of its own on branch `thread/<id>`; its reports then say how many commits it made and whether it
-  left changes, and the agent removes the worktree when done) or follows up on any
+- `thread_prompt` starts a child thread (`new`, optionally `fork` to give it the caller's history) or follows up on any
   thread (`mode`: auto, followUp, steer, or notify to add to its context without starting work). By default it waits
   and returns the activity's report: every message that entered the work, its tool-call count and the final answer,
   with a verdict (completed, interrupted, failed, or active when the wait ran out). With `wait: false` it returns at
