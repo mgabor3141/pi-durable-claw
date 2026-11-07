@@ -6,11 +6,8 @@ import { createRegistry, type ToolRegistration } from "@earendil-works/pi-durabl
 import { createInMemoryTransportPair } from "@earendil-works/pi-mcp/testing";
 import { createToolSearchTool } from "@earendil-works/pi-durable/tool-search";
 import { afterEach, describe, expect, it } from "vitest";
-import {
-	getMcpToolExposure,
-	loadMcpConfig,
-	resolveHeaders,
-} from "../src/mcp/config.ts";
+import { fileSource, getMcpToolExposure, parseMcpConfig, resolveConnection } from "../src/mcp/config.ts";
+import { SecretStore } from "../src/secrets.ts";
 import { McpManager } from "../src/mcp/manager.ts";
 import { mcpServersSection } from "../src/mcp/section.ts";
 import { createMcpResultSchema, createMcpToolName } from "../src/mcp/tools.ts";
@@ -25,41 +22,78 @@ async function tempConfig(content: unknown): Promise<string> {
 	return path;
 }
 
+const load = (content: unknown) => parseMcpConfig(JSON.stringify(content), "~/.mcp.json");
+
+/** A transport to an in-memory server with one tool, `search`. */
+function fakeServer() {
+	const { client, server } = createInMemoryTransportPair();
+	void server.start();
+	server.onMessage((message) => {
+		const request = message as { id?: unknown; method?: string };
+		if (request.id === undefined) return;
+		const result =
+			request.method === "initialize"
+				? { protocolVersion: "2025-06-18", capabilities: { tools: {} }, serverInfo: { name: "test", version: "1" } }
+				: { tools: [{ name: "search", inputSchema: { type: "object", properties: {} } }] };
+		void server.send({ jsonrpc: "2.0", id: request.id, result } as never);
+	});
+	return client;
+}
+
+async function until(check: () => boolean): Promise<void> {
+	for (let i = 0; i < 200 && !check(); i++) await new Promise((resolve) => setTimeout(resolve, 10));
+}
+
 afterEach(async () => {
 	await Promise.all(tempDirs.splice(0).map((directory) => rm(directory, { recursive: true, force: true })));
 });
 
 describe("MCP configuration", () => {
-	it("accepts HTTP servers and expands header variables", async () => {
-		const path = await tempConfig({
+	it("reads Claude Code's format and resolves ${NAME} from the secrets", () => {
+		const loaded = load({
 			mcpServers: {
 				docs: {
-					url: "https://example.test/mcp",
-					headers: { Authorization: "Bearer ${DOCS_TOKEN}" },
+					type: "http",
+					url: "https://example.test/mcp?key=${DOCS_KEY}",
+					headers: { Authorization: "Bearer ${DOCS_TOKEN}", "X-Region": "${REGION:-eu}" },
+					timeout: 30000,
+					alwaysLoad: true,
 					description: "Documentation",
-					exposure: "deferred",
 				},
+				// Claude Code's alias for the same transport.
+				issues: { type: "streamable-http", url: "https://issues.test/mcp" },
 			},
 		});
-		const loaded = await loadMcpConfig(path);
 		expect(loaded.errors).toEqual([]);
-		expect(loaded.servers).toHaveLength(1);
-		expect(loaded.servers[0]!.namespace).toBe("mcp__docs");
-		expect(resolveHeaders(loaded.servers[0]!.config.headers, { DOCS_TOKEN: "secret" })).toEqual({
-			Authorization: "Bearer secret",
-		});
+		const docs = loaded.servers[0]!;
+		expect(docs.namespace).toBe("mcp__docs");
+		expect(docs.config).toMatchObject({ timeout: 30000, exposure: "direct" });
+		const secrets = { substitute: (text: string) => {
+			const known: Record<string, string> = { DOCS_KEY: "k1", DOCS_TOKEN: "t1" };
+			const missing: string[] = [];
+			const out = text.replace(/\$\{([A-Z_]+)(?::-([^}]*))?\}/g, (match, name: string, fallback?: string) => known[name] ?? fallback ?? (missing.push(name), match));
+			return { text: out, used: [], missing };
+		} };
+		expect(resolveConnection(docs.config, secrets)).toEqual({ url: "https://example.test/mcp?key=k1", headers: { Authorization: "Bearer t1", "X-Region": "eu" } });
+		expect(resolveConnection({ url: "https://x.test/${NOPE}" }, secrets)).toEqual({ missing: ["NOPE"] });
 	});
 
-	it("rejects stdio entries and does not read a workspace file", async () => {
-		const path = await tempConfig({
+	it("refuses what this harness does not run, and says how to fix it", () => {
+		const loaded = load({
 			mcpServers: {
 				local: { command: "npx", args: ["server"] },
-				good: { url: "http://127.0.0.1:1234/mcp" },
+				legacy: { type: "sse", url: "https://example.test/sse" },
+				untyped: { url: "https://example.test/mcp" },
+				good: { type: "http", url: "http://127.0.0.1:1234/mcp" },
 			},
 		});
-		const loaded = await loadMcpConfig(path);
 		expect(loaded.errors.join("\n")).toContain("stdio servers are not supported");
+		expect(loaded.errors.join("\n")).toContain("the sse transport is not supported");
+		expect(loaded.errors.join("\n")).toContain('has a "url" but no "type"; add "type": "http"');
 		expect(loaded.servers.map((server) => server.name)).toEqual(["good"]);
+		expect(load({ mcpServers: { x: { type: "http", url: "https://x.test", timeout: -1 } } }).errors[0]).toContain("milliseconds");
+		expect(parseMcpConfig("{ nope", "~/.mcp.json").errors[0]).toMatch(/^~\/\.mcp\.json: /);
+		expect(parseMcpConfig(undefined, "~/.mcp.json")).toEqual({ servers: [], errors: [] });
 	});
 
 	it("uses exact tool overrides, then patterns, then the server default", () => {
@@ -115,6 +149,12 @@ describe("MCP prompt section", () => {
 	it("returns undefined without indirect servers", () => {
 		expect(mcpServersSection([{ name: "x", namespace: "mcp__x", reaches: [] }])).toBeUndefined();
 	});
+
+	it("puts problems first, even with no server to list", () => {
+		expect(mcpServersSection([], ['server "docs" is not connected: refused'])).toBe(
+			'Problems with your MCP configuration (~/.mcp.json):\n- server "docs" is not connected: refused',
+		);
+	});
 });
 
 describe("tool search and the MCP manager", () => {
@@ -140,6 +180,7 @@ describe("tool search and the MCP manager", () => {
 		const path = await tempConfig({
 			mcpServers: {
 				docs: {
+					type: "http",
 					url: "http://example.test/mcp",
 					description: "Documentation",
 					exposure: "deferred",
@@ -189,7 +230,7 @@ describe("tool search and the MCP manager", () => {
 		});
 
 		const manager = new McpManager({
-			configPath: path,
+			source: fileSource(path),
 			transportFactory: () => client,
 			connectTimeoutMs: 2000,
 		});
@@ -211,10 +252,10 @@ describe("tool search and the MCP manager", () => {
 	});
 
 	it("reconnects a server that failed at startup in the background, and stops when closed", async () => {
-		const path = await tempConfig({ mcpServers: { docs: { url: "http://example.test/mcp", exposure: "deferred" } } });
+		const path = await tempConfig({ mcpServers: { docs: { type: "http", url: "http://example.test/mcp", exposure: "deferred" } } });
 		let attempts = 0;
 		const manager = new McpManager({
-			configPath: path,
+			source: fileSource(path),
 			connectTimeoutMs: 500,
 			retryDelaysMs: [20],
 			transportFactory: () => {
@@ -245,5 +286,70 @@ describe("tool search and the MCP manager", () => {
 		const after = attempts;
 		await new Promise((resolve) => setTimeout(resolve, 80));
 		expect(attempts, "no retry after close").toBe(after);
+	});
+
+	it("applies an edit of the config: a new server connects, a removed one leaves, tool_search follows", async () => {
+		const path = await tempConfig({ mcpServers: {} });
+		const manager = new McpManager({ source: fileSource(path), transportFactory: () => fakeServer(), connectTimeoutMs: 1000 });
+		await manager.load();
+		const registry = createRegistry();
+		manager.attach(registry);
+		await manager.start();
+		expect(registry.snapshot().extension("tool-search")).toBeUndefined();
+
+		await writeFile(path, JSON.stringify({ mcpServers: { docs: { type: "http", url: "http://example.test/mcp" } } }));
+		await manager.reload();
+		await until(() => (registry.snapshot().extension("mcp:docs")?.tools?.length ?? 0) > 0);
+		expect(registry.snapshot().extension("mcp:docs")?.tools?.map((tool) => tool.name)).toEqual(["mcp__docs__search"]);
+		expect(manager.namespaces().map((namespace) => namespace.name)).toEqual(["mcp__docs"]);
+		expect(registry.snapshot().extension("tool-search"), "deferred tools: tool_search is offered").toBeDefined();
+
+		// A broken file, or a broken entry, is reported and leaves the running server alone.
+		await writeFile(path, "{ broken");
+		await manager.reload();
+		expect(manager.problems()[0]).toContain("mcp.json: ");
+		expect(registry.snapshot().extension("mcp:docs")?.tools).toHaveLength(1);
+		await writeFile(path, JSON.stringify({ mcpServers: { docs: { url: "http://example.test/mcp" } } }));
+		await manager.reload();
+		expect(manager.problems()[0]).toContain('add "type": "http"');
+		expect(registry.snapshot().extension("mcp:docs")?.tools).toHaveLength(1);
+
+		await writeFile(path, JSON.stringify({ mcpServers: {} }));
+		await manager.reload();
+		expect(registry.snapshot().extension("mcp:docs")).toBeUndefined();
+		expect(manager.namespaces()).toEqual([]);
+		expect(registry.snapshot().extension("tool-search")).toBeUndefined();
+		await manager.close();
+	});
+
+	it("a server that names a missing secret waits for it, then connects when it is saved", async () => {
+		const dir = await mkdtemp(join(tmpdir(), "pdc-mcp-secrets-"));
+		tempDirs.push(dir);
+		const secrets = new SecretStore(join(dir, "secrets.json"));
+		const path = await tempConfig({ mcpServers: { docs: { type: "http", url: "http://example.test/mcp", headers: { Authorization: "Bearer ${DOCS_TOKEN}" } } } });
+		const seen: unknown[] = [];
+		const manager = new McpManager({
+			source: fileSource(path),
+			secrets,
+			transportFactory: (_server, config) => {
+				seen.push(config.headers);
+				return fakeServer();
+			},
+			connectTimeoutMs: 1000,
+		});
+		secrets.subscribe(() => void manager.secretsChanged());
+		await manager.load();
+		const registry = createRegistry();
+		manager.attach(registry);
+		await manager.start();
+		expect(manager.status("docs")).toMatchObject({ status: "failed", error: expect.stringContaining("needs the secret DOCS_TOKEN") });
+		expect(manager.problems()).toEqual([expect.stringContaining('server "docs" is not connected: it needs the secret DOCS_TOKEN; ask the user for it with request_secret')]);
+		expect(seen).toEqual([]);
+
+		await secrets.save("DOCS_TOKEN", "t0ken-value-123");
+		await until(() => (registry.snapshot().extension("mcp:docs")?.tools?.length ?? 0) > 0);
+		expect(registry.snapshot().extension("mcp:docs")?.tools?.map((tool) => tool.name)).toEqual(["mcp__docs__search"]);
+		expect(seen).toEqual([{ Authorization: "Bearer t0ken-value-123" }]);
+		await manager.close();
 	});
 });

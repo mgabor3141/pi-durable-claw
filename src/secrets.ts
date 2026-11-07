@@ -11,6 +11,7 @@ import { dirname, join } from "node:path";
 import type { JsonValue } from "@earendil-works/chord";
 import { defineTool, type ToolExecutionApi, type ToolExecutionResult, type ToolRegistration } from "@earendil-works/pi-durable";
 import { Type } from "@earendil-works/pi-ai";
+import { SECRETS_TOOL_DESCRIPTION } from "./prompts.ts";
 
 /** A secret's name: an environment variable's, so a shell can use it as one. */
 export const SECRET_NAME = /^[A-Z][A-Z0-9_]{0,127}$/;
@@ -167,8 +168,7 @@ export function withSecrets(tool: ToolRegistration, store: SecretStore, log: Log
 export function secretsTool(store: SecretStore): ToolRegistration {
 	return defineTool({
 		name: "secrets",
-		description:
-			"The harness's secrets, by name. list: their names. set: save a value you already have (one you generated or received); to get one from the user, use request_secret instead, so it never enters the chat. delete: remove one. Use a secret by writing ${NAME} where its value goes (tool arguments, MCP config) or $NAME in a shell command; output shows ${NAME} where a value appeared.",
+		description: SECRETS_TOOL_DESCRIPTION,
 		parameters: Type.Object({
 			action: Type.Union([Type.Literal("list"), Type.Literal("set"), Type.Literal("delete")]),
 			name: Type.Optional(Type.String({ pattern: SECRET_NAME.source })),

@@ -6,6 +6,8 @@
  * in the model's tool list and are not listed here. The section is bounded like pi's.
  */
 
+import { MCP_CONFIG_PROBLEMS } from "../prompts.ts";
+
 export type McpReach = "tool_search" | "codemode";
 
 export interface McpServerSummary {
@@ -30,13 +32,20 @@ function intro(reaches: ReadonlySet<McpReach>): string {
 	return text;
 }
 
-/** Render the section, or undefined when no server needs one. */
-export function mcpServersSection(servers: readonly McpServerSummary[]): string | undefined {
+/** Render the section, or undefined when no server needs one and nothing is wrong. `problems` (a broken config, a
+ * server that cannot connect) come first, so the agent that edited the config sees what to fix. */
+export function mcpServersSection(servers: readonly McpServerSummary[], problems: readonly string[] = []): string | undefined {
 	const listed = servers
 		.filter((server) => server.reaches.length > 0)
 		.slice()
 		.sort((a, b) => a.name.localeCompare(b.name));
-	if (listed.length === 0) return undefined;
+	const trouble = problems.length === 0 ? [] : [MCP_CONFIG_PROBLEMS, ...problems.map((problem) => `- ${truncate(problem, 400)}`)];
+	if (listed.length === 0) return trouble.length === 0 ? undefined : trouble.join("\n");
+	const servers_ = renderServers(listed);
+	return trouble.length === 0 ? servers_ : [...trouble, "", servers_].join("\n");
+}
+
+function renderServers(listed: readonly McpServerSummary[]): string {
 
 	const reaches = new Set(listed.flatMap((server) => server.reaches));
 	const introText = intro(reaches);

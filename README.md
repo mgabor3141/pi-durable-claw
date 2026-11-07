@@ -127,17 +127,20 @@ the device, so no host forwarder or proxy is needed.
 
 ## MCP servers
 
-MCP is supported over streamable HTTP only. Put the operator-owned configuration at
-`data/harness/mcp.json` (`/data/mcp.json` in the harness, mode 0600); `CLAW_MCP_CONFIG` can name
-another path. It is never read from the workspace, so the agent cannot add a server or a
-credential to it.
+The agent owns its MCP configuration: `/home/agent/.mcp.json` in the workspace, in Claude Code's `.mcp.json`
+format, so a snippet from a server's documentation works as is. The agent adds, edits and removes servers itself. The
+harness checks the file before each model request and after each round of tools, and applies the change: a new server
+connects, a changed one reconnects, a removed one is closed. A broken file or entry is shown to the agent in
+`mcp_servers` and leaves the running servers alone. Project `.mcp.json` files are not read.
 
 ```json
 {
   "mcpServers": {
     "docs": {
+      "type": "http",
       "url": "https://mcp.example.com/mcp",
       "headers": { "Authorization": "Bearer ${DOCS_TOKEN}" },
+      "timeout": 60000,
       "description": "Search and read the product documentation",
       "exposure": "deferred"
     }
@@ -145,9 +148,11 @@ credential to it.
 }
 ```
 
-`${NAME}` in a header is resolved from the harness environment. Stdio entries
-(`command`, `args`, `env`, `cwd`) are rejected: a server runs as its own container and holds
-only its own key.
+`type` is required: `"http"` (or its alias `"streamable-http"`). `timeout` is per request, in milliseconds.
+`alwaysLoad: true` means `exposure: "direct"`. stdio, `sse` and `ws` entries are refused with a message saying so.
+`${NAME}` (or `${NAME:-default}`) in `url` or `headers` names one of the harness's [secrets](#secrets), never an
+environment variable. A server that names a missing secret is reported as needing it, and connects once the secret is
+saved. Changing a secret reconnects the servers that use it.
 
 Exposure, per server or per tool with `toolExposure`:
 
@@ -160,8 +165,8 @@ Exposure, per server or per tool with `toolExposure`:
 `mcp_servers` lists the configured indirect servers and how to reach them. `describeNamespace()`
 and `searchTools()` see the `mcp__<server>` namespaces. A successful connect installs the
 server's tools. A server that fails to connect, or drops later, is logged and reconnected in the
-background (after 5 s, 15 s, 1 min, then every 5 min); its tools appear once it is back. OAuth is not
-implemented yet.
+background (after 5 s, 15 s, 1 min, then every 5 min); its tools appear once it is back. `tool_search` is offered while
+some server's tools are reached through it. OAuth is not implemented yet.
 
 ## Subagents
 

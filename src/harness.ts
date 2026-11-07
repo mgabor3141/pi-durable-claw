@@ -40,8 +40,9 @@ export interface HarnessExtensionOptions {
 	readonly extraExtensions?: readonly Extension[];
 	/** Namespaces of MCP servers, for codemode's `describeNamespace()` and tool search. */
 	readonly mcpNamespaces?: readonly CodemodeNamespace[];
-	/** Offer `tool_search` when deferred tools (normally MCP tools) are configured. */
-	readonly toolSearch?: boolean;
+	/** Offer `tool_search` when deferred tools (normally MCP tools) are configured. A function: the MCP manager installs
+	 * `tool_search` itself as its configuration changes, and the preamble asks it whether it is offered. */
+	readonly toolSearch?: boolean | (() => boolean);
 	/** The harness's secrets: every harness tool resolves and scrubs them (`secrets.ts`), and scripts get the `secrets` tool. */
 	readonly secrets?: { readonly store: SecretStore; readonly log: SecretsLogger };
 }

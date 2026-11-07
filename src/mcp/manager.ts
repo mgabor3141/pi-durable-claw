@@ -18,15 +18,19 @@ import {
 	type ToolRegistration,
 } from "@earendil-works/pi-durable";
 import type { CodemodeNamespace } from "@earendil-works/pi-durable/codemode";
+import { createToolSearchExtension } from "@earendil-works/pi-durable/tool-search";
+import { GenerationTask, hook } from "@earendil-works/pi-durable";
 import {
 	getMcpToolExposure,
 	hasIndirectTools,
-	loadMcpConfig,
-	resolveHeaders,
-	McpConfigError,
+	parseMcpConfig,
+	resolveConnection,
+	type McpConfigSource,
 	type McpServerEntry,
 	type McpServerConfig,
+	type SecretResolver,
 } from "./config.ts";
+import { mcpNeedsSecrets } from "../prompts.ts";
 import { mcpServersSection, type McpReach, type McpServerSummary } from "./section.ts";
 import { createMcpToolName, createMcpToolRegistration } from "./tools.ts";
 
@@ -38,9 +42,11 @@ export interface McpLogger {
 export type McpTransportFactory = (server: McpServerEntry, config: McpServerConfig) => McpTransport;
 
 export interface McpManagerOptions {
-	readonly configPath: string;
+	/** The agent's `~/.mcp.json` (or, in tests, a local file): read at start and again whenever it changes. */
+	readonly source: McpConfigSource;
 	readonly logger?: McpLogger;
-	readonly env?: Readonly<Record<string, string | undefined>>;
+	/** Resolves `${NAME}` in a server's `url` and `headers`: the harness's secrets. */
+	readonly secrets?: SecretResolver;
 	/** Test seam; production uses `StreamableHttpTransport`. */
 	readonly transportFactory?: McpTransportFactory;
 	readonly connectTimeoutMs?: number;
@@ -63,6 +69,10 @@ type McpState = {
 	/** Reconnect attempts since the last success, and the pending one. */
 	retries: number;
 	retryTimer?: ReturnType<typeof setTimeout>;
+	/** Set once the entry left the configuration (or changed): its callbacks change nothing more. */
+	dropped?: boolean;
+	/** The per-server extension installed in the registry. */
+	extension?: Extension;
 };
 
 const DEFAULT_CONNECT_TIMEOUT_MS = 10_000;
@@ -95,24 +105,127 @@ export class McpManager {
 	private registry?: Registry;
 	private loaded = false;
 	private closed = false;
+	private started = false;
+	/** The configuration's version as last read; problems in it, for the prompt section. */
+	private version: string | undefined;
+	private configErrors: string[] = [];
+	private reloading: Promise<void> | undefined;
+	/** The namespaces codemode sees: one array, updated in place, since codemode reads it at each use. */
+	private readonly liveNamespaces: CodemodeNamespace[] = [];
+	private toolSearch: Extension | undefined;
 
 	constructor(options: McpManagerOptions) {
 		this.options = options;
 	}
 
-	/** Read the configuration. Throws McpConfigError when any entry is invalid. */
+	/** Read the configuration. A broken file or entry is reported (log, prompt section), never thrown. */
 	async load(): Promise<void> {
-		if (this.loaded) return;
-		const loaded = await loadMcpConfig(this.options.configPath);
-		if (loaded.errors.length > 0) throw new McpConfigError(loaded.errors);
-		for (const entry of loaded.servers) {
-			this.states.set(entry.name, { entry, tools: [], registeredNames: [], status: "idle", retries: 0 });
-		}
-		this.loaded = true;
+		if (!this.loaded) await this.reload(true);
 	}
 
-	/** Namespaces for codemode's `describeNamespace()`, built from the operator's entries. */
+	/**
+	 * Read the configuration again if its version changed (or `force`), and apply the difference: a removed or changed
+	 * server is closed and its tools uninstalled, a new one installed and (once started) connected. Concurrent calls
+	 * share one read.
+	 */
+	reload(force = false): Promise<void> {
+		this.reloading ??= (async () => {
+			const version = await this.options.source.version().catch(() => undefined);
+			if (!force && this.loaded && version === this.version) return;
+			let text: string | undefined;
+			try {
+				text = await this.options.source.read();
+			} catch (error) {
+				this.configErrors = [`${this.options.source.describe}: ${error instanceof Error ? error.message : String(error)}`];
+				this.options.logger?.warn("MCP configuration unreadable", { errors: this.configErrors });
+				return;
+			}
+			this.version = version;
+			this.loaded = true;
+			const parsed = parseMcpConfig(text, this.options.source.describe);
+			this.configErrors = [...parsed.errors];
+			if (parsed.errors.length > 0) this.options.logger?.warn("MCP configuration has errors", { errors: parsed.errors });
+			if (parsed.unreadable === true) return;
+			await this.apply(parsed.servers, new Set(parsed.broken));
+		})().finally(() => {
+			this.reloading = undefined;
+		});
+		return this.reloading;
+	}
+
+	/** Check the configuration's version (one `stat`) and apply an edit; never throws into the generation. */
+	private async recheck(): Promise<void> {
+		if (this.closed) return;
+		await this.reload().catch((error: unknown) => this.options.logger?.warn("MCP configuration check failed", { error: String(error) }));
+	}
+
+	/** The secrets changed: servers whose config names one connect again with the new values. */
+	async secretsChanged(): Promise<void> {
+		if (!this.started) return;
+		await Promise.all(
+			[...this.states.values()]
+				.filter((state) => enabled(state.entry.config) && /\$\{/.test(JSON.stringify([state.entry.config.url, state.entry.config.headers ?? {}])))
+				.map(async (state) => {
+					const client = state.client;
+					state.client = undefined;
+					state.transport = undefined;
+					if (client !== undefined) await client.close().catch(() => {});
+					state.retries = 0;
+					await this.connect(state.entry.name);
+				}),
+		);
+	}
+
+	private async apply(entries: readonly McpServerEntry[], broken: ReadonlySet<string>): Promise<void> {
+		const next = new Map(entries.map((entry) => [entry.name, entry]));
+		for (const [name, state] of [...this.states]) {
+			if (broken.has(name)) continue;
+			const entry = next.get(name);
+			if (entry !== undefined && JSON.stringify(entry) === JSON.stringify(state.entry)) continue;
+			await this.drop(state);
+		}
+		for (const entry of entries) {
+			if (this.states.has(entry.name)) continue;
+			const state: McpState = { entry, tools: [], registeredNames: [], status: "idle", retries: 0 };
+			this.states.set(entry.name, state);
+			this.install(state);
+			if (this.started && enabled(entry.config)) void this.connect(entry.name);
+		}
+		this.liveNamespaces.splice(0, this.liveNamespaces.length, ...this.currentNamespaces());
+		this.updateToolSearch();
+	}
+
+	/** A server that left the configuration: close it, stop retrying, uninstall its tools. */
+	private async drop(state: McpState): Promise<void> {
+		state.dropped = true;
+		this.states.delete(state.entry.name);
+		if (state.retryTimer !== undefined) clearTimeout(state.retryTimer);
+		const client = state.client;
+		state.client = undefined;
+		if (client !== undefined) await client.close().catch(() => {});
+		if (state.extension !== undefined) this.registry?.uninstall(state.extension);
+		this.options.logger?.info("MCP server removed", { server: state.entry.name });
+	}
+
+	/** `tool_search` is offered while some server's tools are reached through it. */
+	private updateToolSearch(): void {
+		if (this.registry === undefined) return;
+		const needed = this.hasIndirectTools();
+		if (needed && this.toolSearch === undefined) {
+			this.toolSearch = createToolSearchExtension() as Extension;
+			this.registry.install(this.toolSearch);
+		} else if (!needed && this.toolSearch !== undefined) {
+			this.registry.uninstall(this.toolSearch);
+			this.toolSearch = undefined;
+		}
+	}
+
+	/** Namespaces for codemode's `describeNamespace()`: a live array, kept current as the configuration changes. */
 	namespaces(): CodemodeNamespace[] {
+		return this.liveNamespaces;
+	}
+
+	private currentNamespaces(): CodemodeNamespace[] {
 		return [...this.states.values()]
 			.filter((state) => enabled(state.entry.config))
 			.map((state) => ({
@@ -131,23 +244,48 @@ export class McpManager {
 		);
 	}
 
-	/** The `mcp_servers` prompt section. Its content follows the manager's current state. */
+	/** The `mcp_servers` prompt section (servers, and what is wrong with the config or a server), and the hooks that
+	 * notice an edit of the config: its version is checked after each round of tools (the agent edits it with them, and
+	 * the next request sees the result) and before each request (an edit from outside). */
 	extension(): Extension {
 		return defineExtension({
 			name: "mcp-servers",
-			sections: [section("mcp-servers", () => mcpServersSection(this.summaries()))],
+			sections: [section("mcp-servers", () => mcpServersSection(this.summaries(), this.problems()))],
+			hooks: [
+				hook(GenerationTask, {
+					beforeRequest: async () => {
+						await this.recheck();
+						return undefined;
+					},
+					afterTools: () => this.recheck(),
+				}),
+			],
 		});
+	}
+
+	/** A server's connection state, and why it is not connected. */
+	status(server: string): { status: McpState["status"]; error?: string } | undefined {
+		const state = this.states.get(server);
+		return state === undefined ? undefined : { status: state.status, ...(state.error === undefined ? {} : { error: state.error }) };
+	}
+
+	/** What the agent should know is wrong: config errors, and servers that failed to connect. */
+	problems(): string[] {
+		const failing = [...this.states.values()].filter((state) => enabled(state.entry.config) && state.status === "failed" && state.error !== undefined);
+		return [...this.configErrors, ...failing.map((state) => `server "${state.entry.name}" is not connected: ${state.error}`)];
 	}
 
 	/** Give the manager the registry where per-server extensions are installed. */
 	attach(registry: Registry): void {
 		this.registry = registry;
 		for (const state of this.states.values()) this.install(state);
+		this.updateToolSearch();
 	}
 
 	/** Connect every enabled server. Failures are recorded and logged, not thrown. */
 	async start(): Promise<void> {
 		if (!this.loaded) await this.load();
+		this.started = true;
 		await Promise.all(
 			[...this.states.values()]
 				.filter((state) => enabled(state.entry.config))
@@ -240,24 +378,31 @@ export class McpManager {
 			const config = state.entry.config;
 			let transport: McpTransport | undefined;
 			let client: McpClient | undefined;
+			// The secrets its url and headers name: a missing one is the server's error until it is saved, which reconnects it.
+			const connection = resolveConnection(config, this.options.secrets);
+			if ("missing" in connection) {
+				state.status = "failed";
+				state.error = mcpNeedsSecrets(connection.missing);
+				this.options.logger?.warn("MCP server needs secrets", { server, missing: connection.missing });
+				return;
+			}
 			try {
-				const resolvedHeaders = resolveHeaders(config.headers, this.options.env ?? process.env);
 				transport =
-					this.options.transportFactory?.(state.entry, config) ??
+					this.options.transportFactory?.(state.entry, { ...config, url: connection.url, ...(connection.headers === undefined ? {} : { headers: connection.headers }) }) ??
 					new StreamableHttpTransport({
-						url: config.url,
-						...(resolvedHeaders === undefined ? {} : { headers: resolvedHeaders }),
+						url: connection.url,
+						...(connection.headers === undefined ? {} : { headers: connection.headers }),
 					});
 				client = new McpClient({
 					name: "claw",
 					version: CLIENT_VERSION,
-					requestTimeoutMs: (config.timeout ?? 60) * 1000,
+					requestTimeoutMs: config.timeout ?? 60_000,
 				});
 				client.onError((error) => {
 					this.options.logger?.warn("MCP client error", { server, error: error.message });
 				});
 				client.onClose(() => {
-					if (state.client !== client) return;
+					if (state.client !== client || state.dropped === true) return;
 					state.client = undefined;
 					state.transport = undefined;
 					state.status = "disconnected";
@@ -312,7 +457,7 @@ export class McpManager {
 
 	private async refresh(state: McpState, client: McpClient): Promise<void> {
 		try {
-			const tools = await client.listTools({ timeoutMs: (state.entry.config.timeout ?? 60) * 1000 });
+			const tools = await client.listTools({ timeoutMs: state.entry.config.timeout ?? 60_000 });
 			state.tools = tools;
 			state.instructions = client.instructions;
 			state.error = undefined;
@@ -351,18 +496,15 @@ export class McpManager {
 					tool,
 					name,
 					exposure,
-					timeoutMs: (state.entry.config.timeout ?? 60) * 1000,
+					timeoutMs: state.entry.config.timeout ?? 60_000,
 					getClient: () => this.clientFor(state.entry.name),
 				})),
 			);
 		}
 		state.registeredNames = names;
-		this.registry.install(
-			defineExtension({
-				name: `mcp:${state.entry.name}`,
-				tools,
-			}),
-		);
+		if (state.extension !== undefined) this.registry.uninstall(state.extension);
+		state.extension = defineExtension({ name: `mcp:${state.entry.name}`, tools });
+		this.registry.install(state.extension);
 		this.options.logger?.info("MCP extension installed", {
 			server: state.entry.name,
 			tools: tools.length,

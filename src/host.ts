@@ -17,6 +17,7 @@ import type { Registry } from "@earendil-works/pi-durable";
 import { ModelRuntime } from "@earendil-works/pi-coding-agent";
 import { openHarness } from "./harness.ts";
 import { McpManager } from "./mcp/manager.ts";
+import { workspaceSource } from "./mcp/config.ts";
 import { subagentExtension } from "./subagent.ts";
 import { SecretStore, withSecrets } from "./secrets.ts";
 import { connectWorkspace, ensureKeypair, workspaceEnv } from "./workspace.ts";
@@ -30,6 +31,8 @@ const PORT = Number(process.env.CLAW_PORT ?? 3775);
 const LISTEN = { host: process.env.CLAW_HOST ?? "127.0.0.1", port: PORT };
 const PUBLIC_URL = (process.env.CLAW_PUBLIC_URL ?? `http://127.0.0.1:${PORT}`).replace(/\/+$/, "");
 const LABEL = process.env.CLAW_LABEL?.trim() || "claw";
+/** The agent's MCP configuration, in the workspace (Claude Code's user-scope file). */
+const MCP_CONFIG_PATH = "/home/agent/.mcp.json";
 
 const log = {
 	info: (message: string, fields?: Record<string, unknown>) => console.log(JSON.stringify({ t: new Date().toISOString(), level: "info", message, ...fields })),
@@ -105,17 +108,16 @@ async function main(): Promise<void> {
 	});
 	// The harness's secrets, beside its data and outside `durable.db` (`secrets.ts`).
 	const secrets = new SecretStore(join(root, "secrets.json"));
+	// The agent's own MCP configuration, `~/.mcp.json` in the workspace: it adds and edits servers itself; an edit is
+	// picked up before its next request, and a broken entry is reported in its prompt, not fatal.
 	const mcp = new McpManager({
-		configPath: process.env.CLAW_MCP_CONFIG?.trim() || join(root, "mcp.json"),
+		source: workspaceSource(workspaceEnv(workspace.connection), MCP_CONFIG_PATH, BACKGROUND_CONTEXT),
 		logger: log,
+		secrets,
 		wrapTool: (tool) => withSecrets(tool, secrets, log),
 	});
-	try {
-		await mcp.load();
-	} catch (error) {
-		console.error(`cannot load MCP configuration: ${(error as Error).message}`);
-		process.exit(1);
-	}
+	secrets.subscribe(() => void mcp.secretsChanged());
+	await mcp.load();
 
 	const restartExtension = restart.extension();
 	let toolRegistry: Registry | undefined;
@@ -124,7 +126,7 @@ async function main(): Promise<void> {
 		workspace,
 		models,
 		mcpNamespaces: mcp.namespaces(),
-		toolSearch: mcp.hasIndirectTools(),
+		toolSearch: () => mcp.hasIndirectTools(),
 		secrets: { store: secrets, log },
 		extraExtensions: [mcp.extension(), restartExtension, subagentExtension({ without: [restartExtension] })],
 		onRegistry: (registry) => {

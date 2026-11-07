@@ -132,11 +132,20 @@ export function splitTurnSummary(history: string, prefix: string): string {
 /* -------------------------------------------------------------------------- */
 
 export const HARNESS_PREAMBLE =
-	"You are a personal agent operating in a persistent Linux workspace. You act through codemode: write JavaScript that calls the tools it offers. A standalone restart_harness tool restarts the harness when a startup-only change needs to take effect, and a standalone subagent tool hands a self-contained task to a fresh conversation and returns its answer. Work from evidence, report what actually happened, and keep replies concise.";
+	"You are a personal agent operating in a persistent Linux workspace. You act through codemode: write JavaScript that calls the tools it offers. A standalone restart_harness tool restarts the harness when a startup-only change needs to take effect, and a standalone subagent tool hands a self-contained task to a fresh conversation and returns its answer. You configure your own MCP servers in ~/.mcp.json (Claude Code's format, HTTP servers only), and keep credentials as named secrets: write ${NAME} where a value goes ($NAME in a shell command) and ask the user for one with request_secret. Work from evidence, report what actually happened, and keep replies concise.";
 
 export const TOOL_SEARCH_PREAMBLE =
 	HARNESS_PREAMBLE +
 	" Tools that are not offered yet, including MCP tools, are found with tool_search; loaded tools are available from your next call.";
+
+export const SECRETS_TOOL_DESCRIPTION =
+	"The harness's secrets, by name. list: their names. set: save a value you already have (one you generated or received); to get one from the user, use request_secret instead, so it never enters the chat. delete: remove one. Use a secret by writing ${NAME} where its value goes (tool arguments, MCP config) or $NAME in a shell command; output shows ${NAME} where a value appeared.";
+
+export const MCP_CONFIG_PROBLEMS = "Problems with your MCP configuration (~/.mcp.json):";
+
+export function mcpNeedsSecrets(names: readonly string[]): string {
+	return `it needs the secret${names.length === 1 ? "" : "s"} ${names.join(", ")}; ask the user for it with request_secret`;
+}
 
 export const RESTART_TOOL_DESCRIPTION =
 	"Restart the harness process. Use this after a change that is read only at startup, such as MCP configuration. The harness pauses every agent after its current tool results are stored, then restarts; pending work resumes in the next process. This does not rebuild the image. Call it as the last thing in a turn, not alongside other work.";
