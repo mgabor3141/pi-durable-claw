@@ -18,6 +18,7 @@ import { ModelRuntime } from "@earendil-works/pi-coding-agent";
 import { openHarness } from "./harness.ts";
 import { McpManager } from "./mcp/manager.ts";
 import { workspaceSource } from "./mcp/config.ts";
+import { McpOAuth } from "./mcp/oauth.ts";
 import { subagentExtension } from "./subagent.ts";
 import { SecretStore, withSecrets } from "./secrets.ts";
 import { connectWorkspace, ensureKeypair, workspaceEnv } from "./workspace.ts";
@@ -43,6 +44,29 @@ const log = {
 function envMs(name: string, fallback: number): number {
 	const value = Number(process.env[name]);
 	return Number.isFinite(value) && value > 0 ? value : fallback;
+}
+
+/** Where an OAuth sign-in returns (a public route on T3's listener; its `state` is the check). */
+const OAUTH_CALLBACK_PATH = "/host/oauth/callback";
+
+/** The page the user's browser lands on after approving (or refusing) a sign-in. */
+async function oauthCallback(mcp: McpManager, request: Request): Promise<Response> {
+	const page = (status: number, title: string, text: string) =>
+		new Response(
+			`<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width"><title>${escapeHtml(title)}</title><body style="font:16px system-ui;max-width:32em;margin:4em auto;padding:0 1em"><h1 style="font-size:1.3em">${escapeHtml(title)}</h1><p>${escapeHtml(text)}</p></body>`,
+			{ status, headers: { "content-type": "text/html; charset=utf-8", "cache-control": "no-store", "referrer-policy": "no-referrer" } },
+		);
+	try {
+		const server = await mcp.completeSignIn(new URL(request.url).searchParams);
+		return page(200, `Signed in to ${server}`, "The agent can use it now. You can close this tab.");
+	} catch (error) {
+		log.warn("MCP sign-in failed", { error: error instanceof Error ? error.message : String(error) });
+		return page(400, "Sign-in failed", error instanceof Error ? error.message : String(error));
+	}
+}
+
+function escapeHtml(text: string): string {
+	return text.replace(/[&<>"']/g, (char) => `&#${char.charCodeAt(0)};`);
 }
 
 /** The value after `--root`, if any (undefined at the end or before another flag). */
@@ -110,10 +134,13 @@ async function main(): Promise<void> {
 	const secrets = new SecretStore(join(root, "secrets.json"));
 	// The agent's own MCP configuration, `~/.mcp.json` in the workspace: it adds and edits servers itself; an edit is
 	// picked up before its next request, and a broken entry is reported in its prompt, not fatal.
+	// OAuth sign-ins come back to this host: the user's browser reaches it already (`mcp/oauth.ts`).
+	const oauth = new McpOAuth({ redirectUrl: `${PUBLIC_URL}${OAUTH_CALLBACK_PATH}`, store: secrets, secrets });
 	const mcp = new McpManager({
 		source: workspaceSource(workspaceEnv(workspace.connection), MCP_CONFIG_PATH, BACKGROUND_CONTEXT),
 		logger: log,
 		secrets,
+		oauth,
 		wrapTool: (tool) => withSecrets(tool, secrets, log),
 	});
 	secrets.subscribe(() => void mcp.secretsChanged());
@@ -149,6 +176,7 @@ async function main(): Promise<void> {
 			env: workspaceEnv(workspace.connection, "/"),
 			listen: LISTEN,
 			label: LABEL,
+			routes: [{ method: "GET", path: OAUTH_CALLBACK_PATH, handle: (request) => oauthCallback(mcp, request) }],
 			titleThread: titleThread(harness, models),
 			...(process.env.BROWSERLESS_URL === undefined || process.env.BROWSERLESS_URL.trim() === ""
 				? {}

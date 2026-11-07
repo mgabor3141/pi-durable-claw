@@ -30,7 +30,10 @@ import {
 	type McpServerConfig,
 	type SecretResolver,
 } from "./config.ts";
-import { mcpNeedsSecrets } from "../prompts.ts";
+import { MCP_AUTH_TOOL_DESCRIPTION, mcpNeedsSecrets, mcpNeedsSignIn } from "../prompts.ts";
+import { type McpOAuth, needsSignIn, usesOAuth } from "./oauth.ts";
+import { defineTool } from "@earendil-works/pi-durable";
+import { Type } from "@earendil-works/pi-ai";
 import { mcpServersSection, type McpReach, type McpServerSummary } from "./section.ts";
 import { createMcpToolName, createMcpToolRegistration } from "./tools.ts";
 
@@ -47,6 +50,8 @@ export interface McpManagerOptions {
 	readonly logger?: McpLogger;
 	/** Resolves `${NAME}` in a server's `url` and `headers`: the harness's secrets. */
 	readonly secrets?: SecretResolver;
+	/** OAuth sign-in for servers without an `Authorization` header (`oauth.ts`); absent, none signs in. */
+	readonly oauth?: McpOAuth;
 	/** Test seam; production uses `StreamableHttpTransport`. */
 	readonly transportFactory?: McpTransportFactory;
 	readonly connectTimeoutMs?: number;
@@ -71,6 +76,8 @@ type McpState = {
 	retryTimer?: ReturnType<typeof setTimeout>;
 	/** Set once the entry left the configuration (or changed): its callbacks change nothing more. */
 	dropped?: boolean;
+	/** The last connect was refused for want of a sign-in: no retries until one completes. */
+	needsSignIn?: boolean;
 	/** The per-server extension installed in the registry. */
 	extension?: Extension;
 };
@@ -157,6 +164,72 @@ export class McpManager {
 	private async recheck(): Promise<void> {
 		if (this.closed) return;
 		await this.reload().catch((error: unknown) => this.options.logger?.warn("MCP configuration check failed", { error: String(error) }));
+	}
+
+	/** Close `server`'s connection and connect again now (after a sign-in, or a sign-out). */
+	async reconnect(server: string): Promise<void> {
+		const state = this.states.get(server);
+		if (state === undefined) return;
+		if (state.retryTimer !== undefined) clearTimeout(state.retryTimer);
+		state.retryTimer = undefined;
+		await state.connecting?.catch(() => {});
+		const client = state.client;
+		state.client = undefined;
+		state.transport = undefined;
+		if (client !== undefined) await client.close().catch(() => {});
+		state.retries = 0;
+		await this.connect(server);
+	}
+
+	/** Finish an OAuth sign-in from the redirect's query (the host's callback route, or a pasted URL), then connect. */
+	async completeSignIn(params: URLSearchParams): Promise<string> {
+		const oauth = this.options.oauth;
+		if (oauth === undefined) throw new Error("OAuth is not configured on this harness");
+		const server = await oauth.complete(params, (name) => {
+			const state = this.states.get(name);
+			if (state === undefined) return undefined;
+			const connection = resolveConnection(state.entry.config, this.options.secrets);
+			return "missing" in connection ? undefined : { url: connection.url, config: state.entry.config };
+		});
+		this.options.logger?.info("MCP server signed in", { server });
+		await this.reconnect(server);
+		return server;
+	}
+
+	/** `mcp_auth`: start a sign-in, finish one from a pasted URL, or sign out. */
+	private authTool() {
+		return defineTool({
+			name: "mcp_auth",
+			description: MCP_AUTH_TOOL_DESCRIPTION,
+			parameters: Type.Object({
+				action: Type.Union([Type.Literal("login"), Type.Literal("complete"), Type.Literal("logout")]),
+				server: Type.Optional(Type.String({ description: "The server's name in ~/.mcp.json (login, logout)" })),
+				redirectUrl: Type.Optional(Type.String({ description: "The URL the user's browser ended on (complete)" })),
+			}),
+			callers: ["tools"],
+			execute: async (args) => {
+				const answer = (value: unknown) => ({ output: [{ type: "text" as const, text: JSON.stringify(value) }] });
+				const oauth = this.options.oauth!;
+				if (args.action === "complete") {
+					if (args.redirectUrl === undefined || !URL.canParse(args.redirectUrl)) throw new Error("complete needs the full redirectUrl the browser ended on");
+					const server = await this.completeSignIn(new URL(args.redirectUrl).searchParams);
+					return answer({ server, ...this.status(server) });
+				}
+				const state = args.server === undefined ? undefined : this.states.get(args.server);
+				if (state === undefined) throw new Error(`no MCP server named ${JSON.stringify(args.server)} in ~/.mcp.json`);
+				if (!usesOAuth(state.entry.config)) throw new Error(`${state.entry.name} sends its own Authorization header; remove it to sign in by OAuth`);
+				if (args.action === "logout") {
+					await oauth.logout(state.entry.name);
+					await this.reconnect(state.entry.name);
+					return answer({ server: state.entry.name, signedOut: true, ...this.status(state.entry.name) });
+				}
+				const connection = resolveConnection(state.entry.config, this.options.secrets);
+				if ("missing" in connection) throw new Error(`${state.entry.name}: ${mcpNeedsSecrets(connection.missing)}`);
+				const link = await oauth.login(state.entry.name, connection.url, state.entry.config);
+				this.options.logger?.info("MCP sign-in started", { server: state.entry.name });
+				return answer({ server: state.entry.name, signInUrl: link, redirectUri: oauth.redirectUrl });
+			},
+		});
 	}
 
 	/** The secrets changed: servers whose config names one connect again with the new values. */
@@ -251,6 +324,7 @@ export class McpManager {
 		return defineExtension({
 			name: "mcp-servers",
 			sections: [section("mcp-servers", () => mcpServersSection(this.summaries(), this.problems()))],
+			...(this.options.oauth === undefined ? {} : { tools: [this.authTool()] }),
 			hooks: [
 				hook(GenerationTask, {
 					beforeRequest: async () => {
@@ -387,11 +461,13 @@ export class McpManager {
 				return;
 			}
 			try {
+				const oauth = this.options.oauth !== undefined && usesOAuth(config) ? this.options.oauth.authProvider(server, connection.url, config) : undefined;
 				transport =
 					this.options.transportFactory?.(state.entry, { ...config, url: connection.url, ...(connection.headers === undefined ? {} : { headers: connection.headers }) }) ??
 					new StreamableHttpTransport({
 						url: connection.url,
 						...(connection.headers === undefined ? {} : { headers: connection.headers }),
+						...(oauth === undefined ? {} : { authProvider: oauth }),
 					});
 				client = new McpClient({
 					name: "claw",
@@ -420,6 +496,7 @@ export class McpManager {
 				state.instructions = client.instructions;
 				state.status = "connected";
 				state.retries = 0;
+				state.needsSignIn = false;
 				this.options.logger?.info("MCP server connected", {
 					server,
 					tools: state.tools.length,
@@ -427,13 +504,15 @@ export class McpManager {
 				await this.refresh(state, client);
 			} catch (error) {
 				state.status = "failed";
-				state.error = error instanceof Error ? error.message : String(error);
+				state.needsSignIn = this.options.oauth !== undefined && usesOAuth(config) && needsSignIn(error);
+				state.error = state.needsSignIn ? mcpNeedsSignIn(server) : error instanceof Error ? error.message : String(error);
 				state.client = undefined;
 				state.transport = undefined;
 				if (client !== undefined) await client.close().catch(() => {});
 				else if (transport !== undefined) await transport.close().catch(() => {});
-				this.options.logger?.warn("MCP server failed", { server, error: state.error });
-				this.retryLater(state);
+				this.options.logger?.warn(state.needsSignIn ? "MCP server needs a sign-in" : "MCP server failed", { server, error: state.error });
+				// Retrying cannot help until the user signs in; the sign-in reconnects.
+				if (!state.needsSignIn) this.retryLater(state);
 			}
 		})().finally(() => {
 			state.connecting = undefined;

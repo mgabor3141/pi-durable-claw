@@ -166,7 +166,35 @@ Exposure, per server or per tool with `toolExposure`:
 and `searchTools()` see the `mcp__<server>` namespaces. A successful connect installs the
 server's tools. A server that fails to connect, or drops later, is logged and reconnected in the
 background (after 5 s, 15 s, 1 min, then every 5 min); its tools appear once it is back. `tool_search` is offered while
-some server's tools are reached through it. OAuth is not implemented yet.
+some server's tools are reached through it.
+
+### OAuth
+
+A server with no `Authorization` header signs in by OAuth when it answers 401, as in Claude Code. It shows in
+`mcp_servers` as needing a sign-in. The agent calls `mcp_auth({ action: "login", server })` and gives the user the link.
+After the user approves, the browser returns to `<CLAW_PUBLIC_URL>/host/oauth/callback` and the server connects. If the
+user's browser cannot reach that URL, the page fails to load, but the address bar still holds the code: pasted back to
+the agent, `mcp_auth({ action: "complete", redirectUrl })` finishes the sign-in the same way. A callback works once.
+
+Discovery follows the MCP authorization spec (RFC 9728, then RFC 8414). The client registers dynamically, unless the
+server takes a Client ID Metadata Document or you configure a client. Tokens refresh on their own, including a
+step-up on `insufficient_scope`. They are kept with the secrets in `secrets.json` and appear in tool output only as
+`[<server> OAuth credential]`. `mcp_auth({ action: "logout", server })` forgets a sign-in.
+
+Claude Code's `oauth` block is read:
+
+```json
+"linear": {
+  "type": "http",
+  "url": "https://mcp.linear.app/mcp",
+  "oauth": { "clientId": "…", "clientSecret": "${LINEAR_CLIENT_SECRET}", "scopes": "read", "authServerMetadataUrl": "https://…" }
+}
+```
+
+`clientSecret` is our addition (Claude Code prompts for it); write it as a secret. `callbackPort` is accepted and not
+used: the redirect URI is always the host's. Register `<CLAW_PUBLIC_URL>/host/oauth/callback` with a server that needs
+a pre-registered client. Many authorization servers accept plain `http` only on loopback, so with a non-loopback
+`CLAW_PUBLIC_URL`, use `https` (Tailscale Serve) or the paste fallback.
 
 ## Subagents
 

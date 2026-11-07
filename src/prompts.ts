@@ -141,6 +141,13 @@ export const TOOL_SEARCH_PREAMBLE =
 export const SECRETS_TOOL_DESCRIPTION =
 	"The harness's secrets, by name. list: their names. set: save a value you already have (one you generated or received); to get one from the user, use request_secret instead, so it never enters the chat. delete: remove one. Use a secret by writing ${NAME} where its value goes (tool arguments, MCP config) or $NAME in a shell command; output shows ${NAME} where a value appeared.";
 
+export const MCP_AUTH_TOOL_DESCRIPTION =
+	"Sign the harness in to an MCP server that uses OAuth (one without an Authorization header in ~/.mcp.json). login: answers a sign-in link; give it to the user (or open it in the browser panel). When they approve, the browser returns to this harness and the server connects by itself. If their browser cannot reach the harness, ask them to paste the URL it ended on, and pass it as complete's redirectUrl. logout: forget the server's sign-in. Tokens are kept and refreshed by the harness, never shown.";
+
+export function mcpNeedsSignIn(server: string): string {
+	return `it needs a sign-in: call mcp_auth({ action: "login", server: "${server}" }) and give the user the link`;
+}
+
 export const MCP_CONFIG_PROBLEMS = "Problems with your MCP configuration (~/.mcp.json):";
 
 export function mcpNeedsSecrets(names: readonly string[]): string {

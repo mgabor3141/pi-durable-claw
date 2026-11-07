@@ -11,6 +11,7 @@ import { dirname, join } from "node:path";
 import type { JsonValue } from "@earendil-works/chord";
 import { defineTool, type ToolExecutionApi, type ToolExecutionResult, type ToolRegistration } from "@earendil-works/pi-durable";
 import { Type } from "@earendil-works/pi-ai";
+import type { McpOAuthState } from "@earendil-works/pi-mcp/oauth";
 import { SECRETS_TOOL_DESCRIPTION } from "./prompts.ts";
 
 /** A secret's name: an environment variable's, so a shell can use it as one. */
@@ -20,11 +21,16 @@ const MIN_SCRUB_LENGTH = 8;
 const PLACEHOLDER = /\$\{([A-Z][A-Z0-9_]{0,127})(?::-([^}]*))?\}/g;
 
 type Logger = { info(message: string, fields?: Record<string, unknown>): void; warn(message: string, fields?: Record<string, unknown>): void };
-type Stored = { readonly secrets: Record<string, { value: string; updatedAt: string }> };
+type Stored = {
+	readonly secrets: Record<string, { value: string; updatedAt: string }>;
+	/** Each MCP server's OAuth sign-in (`mcp/oauth.ts`): its client, tokens, and a pending authorization. */
+	readonly oauth?: Record<string, McpOAuthState>;
+};
 
 export class SecretStore {
 	readonly #path: string;
 	#secrets: Stored["secrets"] = {};
+	#oauth: NonNullable<Stored["oauth"]> = {};
 	readonly #listeners = new Set<() => void>();
 
 	constructor(path: string) {
@@ -32,6 +38,7 @@ export class SecretStore {
 		try {
 			const parsed = JSON.parse(readFileSync(path, "utf8")) as Partial<Stored>;
 			this.#secrets = parsed.secrets ?? {};
+			this.#oauth = parsed.oauth ?? {};
 		} catch (error) {
 			if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw new Error(`cannot read the secrets file ${path}: ${(error as Error).message}`);
 		}
@@ -59,7 +66,22 @@ export class SecretStore {
 		return true;
 	}
 
-	/** Called after every change (a server whose config names a secret reconnects with the new value). */
+	oauthState(server: string): McpOAuthState | undefined {
+		return this.#oauth[server];
+	}
+
+	oauthServers(): string[] {
+		return Object.keys(this.#oauth);
+	}
+
+	/** Saved without telling `subscribe`rs: a refreshed token is not a changed secret. `undefined` forgets the sign-in. */
+	async saveOAuthState(server: string, state: McpOAuthState | undefined): Promise<void> {
+		const { [server]: _previous, ...rest } = this.#oauth;
+		this.#oauth = state === undefined ? rest : { ...rest, [server]: state };
+		this.#write(false);
+	}
+
+	/** Called after every change of a named secret (a server whose config names one reconnects with the new value). */
 	subscribe(listener: () => void): () => void {
 		this.#listeners.add(listener);
 		return () => this.#listeners.delete(listener);
@@ -88,26 +110,35 @@ export class SecretStore {
 		return Object.keys(this.#secrets).filter((name) => new RegExp(`\\$(?:\\{${name}(?:[:}]|-)|${name}(?![A-Za-z0-9_]))`).test(command));
 	}
 
-	/** `text` with every secret value in it replaced by its placeholder. */
+	/** `text` with every secret value in it replaced by its placeholder, and every OAuth token or client secret by a
+	 * marker naming its server. */
 	scrub(text: string): string {
-		const entries = Object.entries(this.#secrets).filter(([, entry]) => entry.value.length >= MIN_SCRUB_LENGTH).sort(([, a], [, b]) => b.value.length - a.value.length);
+		const values: [string, string][] = Object.entries(this.#secrets).map(([name, entry]) => [entry.value, "${" + name + "}"]);
+		for (const [server, state] of Object.entries(this.#oauth)) {
+			const marker = `[${server} OAuth credential]`;
+			for (const value of [state.tokens?.access_token, state.tokens?.refresh_token, (state.clientInformation as { client_secret?: string } | undefined)?.client_secret]) {
+				if (value !== undefined) values.push([value, marker]);
+			}
+		}
 		let result = text;
-		for (const [name, entry] of entries) if (result.includes(entry.value)) result = result.split(entry.value).join("${" + name + "}");
+		for (const [value, placeholder] of values.filter(([value]) => value.length >= MIN_SCRUB_LENGTH).sort(([a], [b]) => b.length - a.length)) {
+			if (result.includes(value)) result = result.split(value).join(placeholder);
+		}
 		return result;
 	}
 
-	#write(): void {
+	#write(notify = true): void {
 		const temporary = join(dirname(this.#path), `.secrets.${process.pid}.${Date.now()}.tmp`);
 		const fd = openSync(temporary, "wx", 0o600);
 		try {
-			writeSync(fd, `${JSON.stringify({ secrets: this.#secrets }, null, 2)}\n`);
+			writeSync(fd, `${JSON.stringify({ secrets: this.#secrets, oauth: this.#oauth }, null, 2)}\n`);
 			fsyncSync(fd);
 		} finally {
 			closeSync(fd);
 		}
 		chmodSync(temporary, 0o600);
 		renameSync(temporary, this.#path);
-		for (const listener of this.#listeners) listener();
+		if (notify) for (const listener of this.#listeners) listener();
 	}
 }
 

@@ -8,6 +8,7 @@
  */
 
 import { readFile, stat } from "node:fs/promises";
+import type { McpOAuthConfig } from "./oauth.ts";
 
 /** How the model reaches a server's tools. */
 export type McpExposure = "codemode" | "deferred" | "direct" | "hidden";
@@ -25,6 +26,8 @@ export interface McpServerConfig {
 	readonly enabled?: boolean;
 	/** Per-request timeout in milliseconds, as Claude Code's. Default: 60000. */
 	readonly timeout?: number;
+	/** Claude Code's `oauth` block (`oauth.ts`). A server with no `Authorization` header signs in by OAuth when asked. */
+	readonly oauth?: McpOAuthConfig;
 }
 
 /** Where the configuration is read from: `version` changes whenever its content may have. */
@@ -186,6 +189,15 @@ export function validateMcpServerConfig(name: string, raw: unknown): McpServerCo
 	if (raw.alwaysLoad !== undefined && typeof raw.alwaysLoad !== "boolean") {
 		return `server "${name}": alwaysLoad must be a boolean`;
 	}
+	if (raw.oauth !== undefined) {
+		if (!isRecord(raw.oauth)) return `server "${name}": oauth must be an object`;
+		for (const field of ["clientId", "clientSecret", "authServerMetadataUrl", "scopes"]) {
+			if (raw.oauth[field] !== undefined && typeof raw.oauth[field] !== "string") return `server "${name}": oauth.${field} must be a string`;
+		}
+		if (raw.oauth.callbackPort !== undefined && typeof raw.oauth.callbackPort !== "number") return `server "${name}": oauth.callbackPort must be a number`;
+		const unknown = Object.keys(raw.oauth).filter((field) => !["clientId", "clientSecret", "authServerMetadataUrl", "scopes", "callbackPort"].includes(field));
+		if (unknown.length > 0) return `server "${name}": unknown oauth field${unknown.length === 1 ? "" : "s"} ${unknown.join(", ")}`;
+	}
 
 	return {
 		url: raw.url as string,
@@ -196,6 +208,7 @@ export function validateMcpServerConfig(name: string, raw: unknown): McpServerCo
 		...(raw.toolExposure === undefined ? {} : { toolExposure: raw.toolExposure as Record<string, McpExposure> }),
 		...(raw.enabled === undefined ? {} : { enabled: raw.enabled }),
 		...(raw.timeout === undefined ? {} : { timeout: raw.timeout }),
+		...(raw.oauth === undefined ? {} : { oauth: raw.oauth as McpOAuthConfig }),
 	};
 }
 
