@@ -23,6 +23,7 @@ import { SecretStore, withSecrets } from "./secrets.ts";
 import { connectWorkspace, ensureKeypair, workspaceEnv } from "./workspace.ts";
 import { attachT3, mintPairingCode } from "@mgabor3141/pi-durable-t3";
 import { setSharedBrowser } from "./browser.ts";
+import { setTextGenerationModel } from "./summarize.ts";
 import { installShutdown } from "./shutdown.ts";
 import { RestartCoordinator, consumeRestartMarker } from "./restart.ts";
 import { titleThread } from "./title.ts";
@@ -213,6 +214,8 @@ async function main(): Promise<void> {
 	toolRegistry?.install(t3.secretRequests({ save: (name, value) => secrets.save(name, value) }));
 
 	// Agent `browser_open` pages are T3's preview tabs, the ones the user sees; there is no other browser.
+	// `summarize` generates with T3's text-generation model (Settings) when it names one of ours; titles get it per request.
+	setTextGenerationModel(() => t3.textGenerationModel());
 	if (t3.previewBrowser !== undefined) {
 		setSharedBrowser((conversationId, url) => t3.previewBrowser!.open(conversationId, url));
 	}

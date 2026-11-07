@@ -1,6 +1,7 @@
 import type { JsonValue } from "@earendil-works/chord";
 import { Type } from "@earendil-works/pi-ai";
 import { defineTool, type ToolRegistration } from "@earendil-works/pi-durable";
+import type { TextGenerationModel } from "@mgabor3141/pi-durable-t3";
 import type { ExecutionEnv } from "@earendil-works/pi-durable/env";
 import { SUMMARIZE_DEFAULT_INSTRUCTION, SUMMARIZE_INSTRUCTION_DESCRIPTION, SUMMARIZE_PATH_DESCRIPTION, SUMMARIZE_SYSTEM_PROMPT, SUMMARIZE_TEXT_DESCRIPTION, SUMMARIZE_TOOL_DESCRIPTION, summarizePrompt } from "./prompts.ts";
 
@@ -16,6 +17,12 @@ function textOf(message: { content: readonly { type: string; text?: string }[] }
 function resultValue(value: { ok: true; value: string } | { ok: false; error: { message: string } }): string {
 	if (!value.ok) throw new Error(value.error.message);
 	return value.value;
+}
+
+/** T3's text-generation model (Settings), when it names one of ours; set once the bridge is attached. */
+let textGenerationModel: () => TextGenerationModel | undefined = () => undefined;
+export function setTextGenerationModel(source: () => TextGenerationModel | undefined): void {
+	textGenerationModel = source;
 }
 
 export function summarizeTools(): ToolRegistration[] {
@@ -39,8 +46,9 @@ export function summarizeTools(): ToolRegistration[] {
 					input = resultValue(await env.readTextFile(args.path, context));
 				}
 				if (input.length > MAX_INPUT_CHARS) throw new Error(`input is too large (${input.length} chars; max ${MAX_INPUT_CHARS})`);
-				const agent = await api.agent(context);
-				const ref = agent.model;
+				// T3's text-generation model when Settings names one; else the conversation's own.
+				const configured = textGenerationModel();
+				const ref = configured ?? (await api.agent(context)).model;
 				if (ref === undefined) throw new Error("summarize has no model selected");
 				const model = api.models.getModel(ref.provider, ref.modelId);
 				if (model === undefined) throw new Error(`summarize cannot resolve ${ref.provider}/${ref.modelId}`);
@@ -51,7 +59,7 @@ export function summarizeTools(): ToolRegistration[] {
 						systemPrompt: SUMMARIZE_SYSTEM_PROMPT,
 						messages: [{ role: "user", content: summarizePrompt(task, input), timestamp: Date.now() }],
 					},
-					{ signal: context.abortSignal },
+					{ signal: context.abortSignal, ...(configured?.thinkingLevel === undefined || configured.thinkingLevel === "off" ? {} : { reasoning: configured.thinkingLevel as never }) },
 				);
 				if (reply.stopReason === "error" || reply.stopReason === "aborted") throw new Error(reply.errorMessage ?? reply.stopReason);
 				const summary = textOf(reply).slice(0, MAX_SUMMARY_CHARS);
