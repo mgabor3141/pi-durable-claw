@@ -9,7 +9,7 @@ import { preambleExtension } from "./preamble.ts";
 import { fixedPromptExtension } from "./fixed-prompt.ts";
 import { compactionExtension } from "./compaction.ts";
 import { browserTools, type SharedBrowserProvider } from "./browser.ts";
-import { abortable, type TextGenerationModel } from "@mgabor3141/pi-durable-t3";
+import { abortable, imageCheckExtension, type TextGenerationModel } from "@mgabor3141/pi-durable-t3";
 import { workspaceTools } from "./tools.ts";
 import { webTools } from "./web.ts";
 import { summarizeTools } from "./summarize.ts";
@@ -83,6 +83,9 @@ export function harnessExtensions(options: HarnessExtensionOptions = {}): readon
 		...(options.extraExtensions ?? []),
 		workspaceContextExtension(),
 		compactionExtension(),
+		// Only images a provider can read reach the model: a broken one (a screenshot copied while still being written)
+		// becomes a text saying why, in the tool result and in every request, so it never stops the thread.
+		imageCheckExtension(),
 	];
 }
 

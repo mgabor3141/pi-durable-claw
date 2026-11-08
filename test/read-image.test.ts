@@ -13,6 +13,7 @@ import { openNodeSqliteStorage } from "@earendil-works/pi-durable/storage/sqlite
 import type { ImageContent } from "@earendil-works/pi-ai";
 import { NodeExecutionEnv } from "@earendil-works/pi-durable/env/node";
 import { afterEach, expect, it } from "vitest";
+import { imageCheckExtension } from "@mgabor3141/pi-durable-t3";
 import { readTool } from "../src/tools.ts";
 
 const dirs: string[] = [];
@@ -102,4 +103,43 @@ it("a script that reads a PNG can show it: the codemode result carries the pictu
 	} finally {
 		await harness.close(BACKGROUND_CONTEXT);
 	}
+});
+
+/** A script's run, with the harness's image check: the codemode result as the model gets it. */
+async function runScript(cwd: string, code: string): Promise<{ type: string; text?: string; data?: string }[]> {
+	const registry = createRegistry();
+	registry.install(createCodemodeExtension({ sandbox: new CodemodeSandbox({ memoryLimitBytes: 64 * 1024 * 1024 }) }) as never);
+	registry.install(defineExtension({ name: "harness-tools", tools: [readTool()] }));
+	registry.install(imageCheckExtension());
+	const faux = fauxProvider({ provider: "faux" });
+	const models = createModels();
+	models.setProvider(faux.provider);
+	const harness = await Harness.open(await openNodeSqliteStorage(join(cwd, "durable.db")), { models, registry, env: () => new NodeExecutionEnv({ cwd }) }, BACKGROUND_CONTEXT);
+	try {
+		const conversation = await harness.root(BACKGROUND_CONTEXT, { agent: { model: { provider: "faux", modelId: faux.models[0]!.id } } });
+		faux.setResponses([fauxAssistantMessage([fauxToolCall("codemode", { code } as never, { id: "c1" })], { stopReason: "toolUse" }), fauxAssistantMessage("seen")]);
+		await conversation.submit({ type: "input", content: "look" }, BACKGROUND_CONTEXT);
+		await conversation.waitForIdle(BACKGROUND_CONTEXT);
+		const context = await conversation.context(BACKGROUND_CONTEXT);
+		return (context.messages.find((message) => message.role === "toolResult") as { content: { type: string; text?: string; data?: string }[] }).content;
+	} finally {
+		await harness.close(BACKGROUND_CONTEXT);
+	}
+}
+
+// A screenshot copied while it was still being written arrived cut short; the provider refused every request after it,
+// and the thread could not continue. With the image check the script learns why, and nothing broken reaches the model.
+it("a truncated PNG: read rejects with the reason, and image() of broken data shows the reason, not the image", { timeout: 60_000 }, async () => {
+	const cwd = await dir();
+	const cut = PNG.subarray(0, 50);
+	await writeFile(join(cwd, "cut.png"), cut);
+	const viaRead = await runScript(cwd, `try { await tools.read({ path: ${JSON.stringify(join(cwd, "cut.png"))} }); return "read it"; } catch (error) { return "refused: " + error.message; }`);
+	const readText = viaRead.flatMap((block) => (block.type === "text" ? [block.text] : [])).join("\n");
+	expect(readText).toContain("refused:");
+	expect(readText).toContain("the PNG ends early, at 50 bytes");
+	expect(viaRead.some((block) => block.type === "image")).toBe(false);
+
+	const viaImage = await runScript(cwd, `image("data:image/png;base64,${cut.toString("base64")}"); return "shown";`);
+	expect(viaImage.some((block) => block.type === "image"), "the broken image never reaches the model").toBe(false);
+	expect(viaImage.flatMap((block) => (block.type === "text" ? [block.text] : [])).join("\n")).toContain("[Image not shown to the model: the PNG ends early, at 50 bytes");
 });
