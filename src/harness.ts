@@ -4,7 +4,7 @@ import { createRegistry, defineExtension, Harness, type Extension, type HarnessO
 import { createCodemodeExtension, type CodemodeNamespace } from "@earendil-works/pi-durable/codemode";
 import { openNodeSqliteStorage } from "@earendil-works/pi-durable/storage/sqlite/node";
 import { CodemodeSandbox } from "@earendil-works/pi-codemode";
-import { recordConversationStart, workspaceMemoryExtension } from "./memory.ts";
+import { recordConversationStart, workspaceContextExtension } from "./context.ts";
 import { preambleExtension } from "./preamble.ts";
 import { fixedPromptExtension } from "./fixed-prompt.ts";
 import { compactionExtension } from "./compaction.ts";
@@ -80,7 +80,7 @@ export function harnessExtensions(options: HarnessExtensionOptions = {}): readon
 		createCodemodeExtension({ sandbox: codemodeSandbox(), namespaces: options.mcpNamespaces ?? [], inlineBudget: Number.POSITIVE_INFINITY }) as Extension,
 		defineExtension({ name: "harness-tools", tools: harnessTools }),
 		...(options.extraExtensions ?? []),
-		workspaceMemoryExtension(),
+		workspaceContextExtension(),
 		compactionExtension(),
 	];
 }

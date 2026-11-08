@@ -16,7 +16,7 @@ import { PROMPT_SECTIONS, fixedPromptExtension } from "../src/fixed-prompt.ts";
 import { codemodeSandbox, harnessExtensions } from "../src/harness.ts";
 import { fileSource } from "../src/mcp/config.ts";
 import { McpManager } from "../src/mcp/manager.ts";
-import { ConversationStartDoc, recordConversationStart, workspaceMemoryExtension } from "../src/memory.ts";
+import { ConversationStartDoc, recordConversationStart, workspaceContextExtension } from "../src/context.ts";
 import { preambleExtension } from "../src/preamble.ts";
 
 const ctx = BACKGROUND_CONTEXT;
@@ -66,7 +66,7 @@ describe("the fixed system prompt", () => {
 			defineExtension({ name: "first", tools: [scriptTool("first_tool")] }),
 			mcp.extension(),
 			// A clock far from the recorded start: a prompt rendered again must still name the start.
-			workspaceMemoryExtension({ home, now: () => new Date("2030-01-01T12:00:00Z") }),
+			workspaceContextExtension({ home, now: () => new Date("2030-01-01T12:00:00Z") }),
 		]) {
 			registry.install(extension);
 		}

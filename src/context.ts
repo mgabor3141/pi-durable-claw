@@ -27,7 +27,7 @@ export function recordConversationStart(now: () => number = Date.now) {
 	};
 }
 
-export interface WorkspaceMemoryOptions {
+export interface WorkspaceContextOptions {
 	/** The workspace home. Default `/home/agent`; tests override it. */
 	readonly home?: string;
 	/** The clock for a conversation with no recorded start (one created before it was recorded). Default `new Date()`. */
@@ -42,7 +42,7 @@ export interface WorkspaceMemoryOptions {
  *
  * The files live in the workspace, so every read goes through pi-env over SSH.
  */
-export function workspaceMemoryExtension(options: WorkspaceMemoryOptions = {}): Extension {
+export function workspaceContextExtension(options: WorkspaceContextOptions = {}): Extension {
 	const home = options.home ?? DEFAULT_HOME;
 	const now = options.now ?? (() => new Date());
 

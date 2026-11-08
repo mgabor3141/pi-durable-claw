@@ -6,9 +6,9 @@ import { NodeExecutionEnv } from "@earendil-works/pi-durable/env/node";
 import { describe, expect, it } from "vitest";
 import { HARNESS_PREAMBLE } from "../src/prompts.ts";
 import { preambleExtension } from "../src/preamble.ts";
-import { workspaceMemoryExtension } from "../src/memory.ts";
+import { workspaceContextExtension } from "../src/context.ts";
 
-const section = (extension: ReturnType<typeof workspaceMemoryExtension>, key: string) =>
+const section = (extension: ReturnType<typeof workspaceContextExtension>, key: string) =>
 	extension.sections?.find((candidate) => candidate.key === key);
 
 async function skill(root: string, dir: string, name: string, description: string): Promise<void> {
@@ -25,7 +25,7 @@ describe("system prompt", () => {
 	});
 
 	it("injects global and local AGENTS.md, then the working directory", async () => {
-		const root = await mkdtemp(join(tmpdir(), "pdc-memory-"));
+		const root = await mkdtemp(join(tmpdir(), "pdc-context-"));
 		const home = join(root, "home");
 		const project = join(root, "project");
 		await mkdir(home);
@@ -34,7 +34,7 @@ describe("system prompt", () => {
 		await writeFile(join(project, "AGENTS.md"), "# Project rule\n\nUse tests.");
 		try {
 			const env = new NodeExecutionEnv({ cwd: project });
-			const extension = workspaceMemoryExtension({ home });
+			const extension = workspaceContextExtension({ home });
 			expect(extension.sections?.map((candidate) => candidate.key)).toEqual([
 				"global-agents",
 				"global-skills",
@@ -72,7 +72,7 @@ describe("system prompt", () => {
 		await skill(project, "shadowed", "shadowed", "The local copy");
 		try {
 			const env = new NodeExecutionEnv({ cwd: project });
-			const extension = workspaceMemoryExtension({ home });
+			const extension = workspaceContextExtension({ home });
 
 			const global = await section(extension, "global-skills")!.render({ env } as never, BACKGROUND_CONTEXT);
 			expect(global).toContain("<name>global-only</name>");
@@ -89,7 +89,7 @@ describe("system prompt", () => {
 	});
 
 	it("renders when the conversation started, from its recorded start (test/fixed-prompt.test.ts keeps it over a reload)", async () => {
-		const extension = workspaceMemoryExtension({ now: () => new Date("2026-11-04T12:42:00Z") });
+		const extension = workspaceContextExtension({ now: () => new Date("2026-11-04T12:42:00Z") });
 		const time = section(extension, "conversation-time");
 		const reading = (at: number | undefined) => ({ shown: {}, conversationId: 1, read: { snapshot: async () => (at === undefined ? undefined : { at }) } }) as never;
 		const recorded = await time!.render(reading(Date.parse("2026-10-01T08:00:00Z")), BACKGROUND_CONTEXT);
