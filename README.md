@@ -68,6 +68,11 @@ rendered again still names it). The agent owns its tools under
 `/home/agent`; the workspace image reads `PATH` from `~/.ssh/environment` and includes `jq`. The model tool list is
 `codemode`, `restart_harness` and the bridge's `request_secret`, and it never changes.
 
+`read` in a script gives a text file's text, or an image as `{ type: "image", data, mimeType }`; show it with
+`image(result)`. (pi-durable's `read` already returns an image as its content, but a tool without an output schema gives
+scripts only its text, so the picture would arrive as `""`; claw gives `read` that schema.) A file that cannot be read
+as an image says why, and the call rejects.
+
 `ssh` runs one command on another machine from the workspace, with the workspace's `~/.ssh` keys and config.
 `ssh({ host, command, timeout? })` passes the remote command to the remote shell exactly as written, so a script needs
 no second layer of quoting. It is `bash` running `ssh -n -o BatchMode=yes -- <host> <command>`, and it returns what

@@ -137,6 +137,9 @@ export const HARNESS_PREAMBLE =
 export const SECRETS_TOOL_DESCRIPTION =
 	"The harness's secrets, by name. list: their names. set: save a value you already have (one you generated or received); to get one from the user, use request_secret instead, so it never enters the chat. delete: remove one. Use a secret by writing ${NAME} where its value goes (tool arguments, MCP config) or $NAME in a shell command; output shows ${NAME} where a value appeared.";
 
+export const READ_TOOL_DESCRIPTION =
+	"Read a file from the workspace: text, or an image (jpg, png, gif, webp). A text file gives { type: \"text\", text } (truncated to the first 2000 lines or 50KB; use offset and limit, and read on until the end). An image gives { type: \"image\", data, mimeType }: show it to the model with image(result), which also saves a copy to a temp file. A file that cannot be read as an image says why and the call rejects.";
+
 export const SSH_TOOL_DESCRIPTION =
 	"Run a command on another machine over SSH, from the workspace with its ~/.ssh keys and config. host: what you would pass to ssh (a name from ~/.ssh/config, user@host, or ssh://user@host:port). command: the remote command line, written as you would type it in the remote shell; it reaches that shell as it is, so it needs no extra quoting. No terminal, no stdin, no prompts: a host that asks for a password, or whose key is not in ~/.ssh/known_hosts, fails with exit code 255. Put a secret into the command as ${NAME}; $VAR and ${VAR} otherwise belong to the remote shell. Returns what bash returns: output, exitCode, truncated.";
 

@@ -1,7 +1,8 @@
 import type { ToolRegistration } from "@earendil-works/pi-durable";
 import { createBashTool, createEditTool, createReadTool, createWriteTool } from "@earendil-works/pi-durable/tools";
 import { Type } from "@earendil-works/pi-ai";
-import { SSH_TOOL_DESCRIPTION } from "./prompts.ts";
+import type { ImageContent } from "@earendil-works/pi-ai";
+import { READ_TOOL_DESCRIPTION, SSH_TOOL_DESCRIPTION } from "./prompts.ts";
 
 /**
  * The workspace's files and shell: pi-durable's own coding tools, unchanged except `callers: ["tools"]` — the model
@@ -11,12 +12,45 @@ import { SSH_TOOL_DESCRIPTION } from "./prompts.ts";
  */
 export function workspaceTools(): ToolRegistration[] {
 	return [
-		{ ...createReadTool(), callers: ["tools"] as const },
+		readTool(),
 		{ ...createWriteTool(), callers: ["tools"] as const },
 		{ ...createEditTool(), callers: ["tools"] as const },
 		{ ...createBashTool(), callers: ["tools"] as const },
 		sshTool(),
 	];
+}
+
+/**
+ * What `read` gives a script: a text file's text, or an image as the block `image()` shows. pi-durable's `read` returns an
+ * image block as its content, but a tool without an output schema gives scripts only its text, so the image would arrive
+ * as "". Every other tool that returns an image (`browser_screenshot`, `models.generateImages`) already hands scripts
+ * the block; this does the same for `read`.
+ */
+const READ_RESULT_SCHEMA = Type.Union([
+	Type.Object({ type: Type.Literal("text"), text: Type.String() }),
+	Type.Object({ type: Type.Literal("image"), data: Type.String(), mimeType: Type.String() }),
+]);
+
+export function readTool(): ToolRegistration {
+	const read = createReadTool();
+	return {
+		...read,
+		description: READ_TOOL_DESCRIPTION,
+		structuredOutputSchema: READ_RESULT_SCHEMA,
+		async execute(args: never, api, context) {
+			const result = await read.execute(args, api, context);
+			// An error (a file too large to send, or one that is not there) carries its reason as an error diagnostic,
+			// which a script's rejected call shows; no structured output, so nothing pretends to be read.
+			if (result.isError === true) return result;
+			const output = result.output ?? [];
+			const picture = output.find((item) => item.type === "image");
+			const structuredOutput: ImageContent | { type: "text"; text: string } =
+				picture === undefined
+					? { type: "text", text: output.flatMap((item) => (item.type === "text" ? [item.text] : [])).join("\n") }
+					: { type: "image", data: picture.data, mimeType: picture.mimeType };
+			return { ...result, structuredOutput };
+		},
+	} as ToolRegistration;
 }
 
 /** A single-quoted shell word: the shell passes it on exactly as it is. */
