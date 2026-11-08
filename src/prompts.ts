@@ -137,6 +137,9 @@ export const HARNESS_PREAMBLE =
 export const SECRETS_TOOL_DESCRIPTION =
 	"The harness's secrets, by name. list: their names. set: save a value you already have (one you generated or received); to get one from the user, use request_secret instead, so it never enters the chat. delete: remove one. Use a secret by writing ${NAME} where its value goes (tool arguments, MCP config) or $NAME in a shell command; output shows ${NAME} where a value appeared.";
 
+export const SSH_TOOL_DESCRIPTION =
+	"Run a command on another machine over SSH, from the workspace with its ~/.ssh keys and config. host: what you would pass to ssh (a name from ~/.ssh/config, user@host, or ssh://user@host:port). command: the remote command line, written as you would type it in the remote shell; it reaches that shell as it is, so it needs no extra quoting. No terminal, no stdin, no prompts: a host that asks for a password, or whose key is not in ~/.ssh/known_hosts, fails with exit code 255. Put a secret into the command as ${NAME}; $VAR and ${VAR} otherwise belong to the remote shell. Returns what bash returns: output, exitCode, truncated.";
+
 export const MCP_TOOL_DESCRIPTION =
 	"Your MCP servers (~/.mcp.json). status: each server's connection and tool count, and what is wrong with the configuration or a server; call it after editing ~/.mcp.json. login: sign the harness in to a server that uses OAuth (one without an Authorization header); answers a sign-in link; give it to the user (or open it in the browser panel). When they approve, the browser returns to this harness and the server connects by itself. If their browser cannot reach the harness, ask them to paste the URL it ended on, and pass it as complete's redirectUrl. logout: forget the server's sign-in. Tokens are kept and refreshed by the harness, never shown.";
 

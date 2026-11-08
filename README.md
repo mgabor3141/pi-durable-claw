@@ -68,6 +68,13 @@ rendered again still names it). The agent owns its tools under
 `/home/agent`; the workspace image reads `PATH` from `~/.ssh/environment` and includes `jq`. The model tool list is
 `codemode`, `restart_harness` and the bridge's `request_secret`, and it never changes.
 
+`ssh` runs one command on another machine from the workspace, with the workspace's `~/.ssh` keys and config.
+`ssh({ host, command, timeout? })` passes the remote command to the remote shell exactly as written, so a script needs
+no second layer of quoting. It is `bash` running `ssh -n -o BatchMode=yes -- <host> <command>`, and it returns what
+`bash` returns. It never prompts: a password or an unknown host key fails with exit code 255. A secret goes into the
+remote command as `${NAME}`. A bare `$NAME` of a secret is refused, since the remote shell does not have it; any other
+`$VAR` or `${VAR}` belongs to the remote shell.
+
 ## A fixed system prompt
 
 The system prompt is rendered at a thread's first request and then sent byte for byte the same, so the provider's

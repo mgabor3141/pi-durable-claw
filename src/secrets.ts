@@ -1,4 +1,4 @@
-// The harness's secrets: named values the agent writes as `${NAME}` (`${NAME:-default}`) instead of the value, kept in
+// The harness's secrets: named values the agent writes as `${NAME}` (`default`) instead of the value, kept in
 // an owner-only file beside the harness's data — never in `durable.db`, never in the model's context.
 //
 // The agent is trusted (it may use, and even read, its secrets); this is hygiene, not a boundary. A value is
@@ -105,6 +105,22 @@ export class SecretStore {
 		return { text: result, used: [...used], missing: [...missing] };
 	}
 
+	/** Replace `${NAME}` only where NAME is a secret: every other `${...}` (a fallback included) is left as written, for a
+	 * remote shell. */
+	substituteKnown(text: string, used: Set<string>): string {
+		return text.replace(PLACEHOLDER, (match, name: string) => {
+			const value = this.get(name);
+			if (value === undefined) return match;
+			used.add(name);
+			return value;
+		});
+	}
+
+	/** The secrets a command names bare, as `$NAME` (not `${NAME}`). */
+	namedBare(command: string): string[] {
+		return Object.keys(this.#secrets).filter((name) => new RegExp(`\\$${name}(?![A-Za-z0-9_])`).test(command));
+	}
+
 	/** The known secrets a shell command names (`$NAME` or `${NAME…}`). */
 	referenced(command: string): string[] {
 		return Object.keys(this.#secrets).filter((name) => new RegExp(`\\$(?:\\{${name}(?:[:}]|-)|${name}(?![A-Za-z0-9_]))`).test(command));
@@ -155,7 +171,9 @@ const shellQuote = (value: string) => `'${value.replaceAll("'", `'"'"'`)}'`;
 
 /**
  * `tool` with the secrets resolved where it runs and scrubbed from what it returns. A shell command (`bash`) gets the
- * secrets it names exported in front of it; any other tool gets `${NAME}` replaced in its arguments. Output streamed
+ * secrets it names exported in front of it. A remote command (`ssh`) gets `${NAME}` replaced where NAME is a secret,
+ * and everything else left to the remote shell; a bare `$NAME` of a secret is refused, since an export cannot reach
+ * that shell. Any other tool gets `${NAME}` replaced in its arguments. Output streamed
  * while it runs and its result are scrubbed. Each use is logged (names only).
  */
 export function withSecrets(tool: ToolRegistration, store: SecretStore, log: Logger): ToolRegistration {
@@ -169,6 +187,13 @@ export function withSecrets(tool: ToolRegistration, store: SecretStore, log: Log
 				const names = store.referenced(command);
 				for (const name of names) used.add(name);
 				if (names.length > 0) runArgs = { ...(args as object), command: `${names.map((name) => `export ${name}=${shellQuote(store.get(name)!)}`).join("; ")}; ${command}` } as typeof args;
+			} else if (tool.name === "ssh" && typeof (args as { command?: unknown }).command === "string") {
+				const command = (args as { command: string }).command;
+				const bare = store.namedBare(command);
+				if (bare.length > 0) {
+					throw new Error(`ssh: write ${bare.map((name) => `\${${name}}`).join(", ")} to put the secret${bare.length === 1 ? "" : "s"} into the remote command; $${bare[0]} would be the remote shell's own variable`);
+				}
+				runArgs = mapStrings(args, (text) => store.substituteKnown(text, used));
 			} else {
 				runArgs = mapStrings(args, (text) => {
 					const result = store.substitute(text);
