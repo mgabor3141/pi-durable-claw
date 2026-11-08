@@ -278,8 +278,8 @@ ends it after that long (pi-durable's codemode; it does not use the sandbox's 5-
 
 ### Known limitations
 
-- No account integrations are configured by default. HTTP MCP servers can be added as above; OAuth, stdio and MCP
-  resources are not implemented. Web search, page view and the browser are the built-in connectors.
+- No account integrations are configured by default. HTTP MCP servers can be added as above (with OAuth); stdio
+  servers and MCP resources are not supported. Web search, page view and the browser are the built-in connectors.
 - Scheduled tasks run on intervals or fixed times; there are no webhook triggers.
 - T3 projects do not map to containers: use "No project" threads. The project picker, file panel and search go
   through the workspace execution environment, so a project must live under the workspace's `/home/agent` (the

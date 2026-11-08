@@ -1,10 +1,10 @@
 # Design
 
-Status: decisions agreed. Plan step 1 is implemented in the bridge (interval and fixed-time schedules; the webhook
-trigger is not), step 2 (codemode over the workspace) is the harness in `src/`, and step 3 is done: `docker compose
-up` runs the harness and a workspace (the README has the install). Web search and page fetch are implemented as
-harness tools against a local SearXNG and page-reader service; account integrations and the rest of the plan are not
-built. Sections marked **unverified** are assumptions a spike must confirm.
+Status: `docker compose up` runs the harness and a workspace (the README has the install). Built: codemode over the
+workspace, web search and page fetch, the browser through T3's preview, MCP servers over HTTP (with OAuth and the
+harness's secrets), the thread tools, scheduled tasks (not the webhook trigger) and a system prompt fixed per thread.
+Not built: memory (Hindsight, under discussion), spending caps, notifications, the release flow and self-update,
+devcontainers, host conversations. Sections marked **unverified** are assumptions a spike must confirm.
 
 ## Goal
 
@@ -37,7 +37,7 @@ Two kinds of people use it, as with Home Assistant or Immich:
 ┌─────────────────────────┴──────────────────────────┐
 │ harness container (server)                         │
 │   pi-durable: conversations, storage, schedules    │
-│   keys · MCP clients (HTTP) · restart_harness     │
+│   keys · secrets · MCP clients (HTTP)             │
 └───────┬───────────────────────────┬────────────────┘
         │ SSH (pi-env)              │ SSH (pi-env), only from a host conversation
 ┌───────┴─────────────────────┐   ┌─┴───────────────────────────┐
@@ -71,10 +71,10 @@ pi-durable ships it: `@earendil-works/pi-durable/codemode`'s `createCodemodeExte
 `tools.<name>(args)` calls are nested `pi.tool` tasks of the codemode call, so a crash is a **resume, not a rerun**:
 the tool is replay-safe — after a restart the script is replayed deterministically from a journal of the results it
 already got, completed nested calls never run twice, and the script continues live. The workspace's
-`read`/`write`/`bash` are registered with `callers: ["tools"]`, so only scripts call them. MCP tools default to
-`deferred` with `callers: ["model", "tools"]`: scripts call them directly, and `tool_search` loads them into the
-model's tool list for direct calls. The agent's `modelTools` selects what a conversation offers — for the assistant,
-`codemode` and `restart_harness`, plus `tool_search` when MCP servers with deferred tools are configured.
+`read`/`write`/`bash` and every other harness tool are registered with `callers: ["tools"]`, so only scripts call
+them, and so are MCP tools: the codemode section lists the harness's tools in full and leaves MCP tools out, which
+scripts find with `searchTools()`. The model is offered `codemode` and the bridge's `request_secret`, and that list
+never changes, so the prompt cache holds (the README's "A fixed system prompt").
 **Verified (spike):** upstream's extension runs a model script whose only capabilities are the conversation's
 script-callable tools — a key-bearing harness tool and the workspace's `read`/`write`/`bash`, pi-durable's own coding
 tools over pi-env — with the key never reaching the container and the model offered exactly `[codemode]`; after a
@@ -101,20 +101,9 @@ Reachable only from a **host conversation** that the operator starts: bash on th
 same harness and the same T3 window. The assistant cannot launch or prompt it. Optionally, a few read-only tools
 (logs, a screenshot, current activity) may be offered to the assistant.
 
-## Restart
-
-`restart_harness` is a standalone model tool, never callable from codemode. A request writes
-`<root>/restart.json`, then waits until every other live agent is held at its `GenerationTask.afterTools` boundary,
-where the round's tool results are already durable. The requesting tool returns `Restarted` after the others are
-safe; its own `afterTools` hook then holds too. The host closes MCP, T3 and the harness and exits 0; the compose
-restart policy starts the next process, which consumes the marker and resumes. A second request while draining is
-accepted at once and pauses at its own boundary, so two restarts cannot deadlock. The drain timeout forces the
-restart if another agent will not reach a boundary; close is bounded too. This applies startup-only configuration
-(MCP); it does not rebuild the image or deploy code.
-
 ## Working from T3 (bridge-attach)
 
-`node src/host.ts` serves the codemode-first assistant, with `restart_harness`, through `attachT3`; `node src/host.ts pair` mints a pairing
+`node src/host.ts` serves the codemode-first assistant through `attachT3`; `node src/host.ts pair` mints a pairing
 code. Verified in T3's web app (playwright + chromium, screenshots in `.memory/`):
 
 - **The bridge is a package.** `@mgabor3141/pi-durable-t3` is a git dependency at a pinned commit (not on npm yet);
@@ -137,25 +126,25 @@ code. Verified in T3's web app (playwright + chromium, screenshots in `.memory/`
 
 | Profile | Tools (what the model is offered) |
 |---|---|
-| assistant | codemode and restart_harness, plus tool_search when MCP servers are configured — workspace read/write/bash are `callers: ["tools"]`; MCP tools are deferred and loaded by tool_search, or called from scripts |
+| assistant | codemode and the bridge's request_secret — every other tool, MCP tools included, is `callers: ["tools"]` |
 | dev project | read/write/edit/bash on the project's devcontainer, plus codemode |
 | host conversation | read/write/edit/bash on the operator's computer |
 
-- Profiles are expressed with `ToolRegistration.callers` and the agent's `modelTools`: workspace tools are
-  script-callable only; MCP tools are deferred and loaded by tool_search. A request offers exactly the tools in the
-  column above.
+- Profiles are expressed with `ToolRegistration.callers` and the agent's `modelTools`. A request offers exactly the
+  tools in the column above.
 
 - **Web research** is split by job: `web_search` reads SearXNG JSON, `web_fetch` reads one page through the
-  stateless reader, and the `browser_*` tools drive an interactive Browserless pool. All live in the harness because
-  the service URLs and the browser token do; the services are separate containers, so page-driven code never runs
-  beside the keys. Results carry caps and are wrapped as untrusted data. The workspace still has no direct route to
+  stateless reader, and the `browser_*` tools drive T3's preview browser (Browserless over CDP): the tabs the user
+  sees in T3's Browser panel. All live in the harness because the service URLs and the browser token do; the services
+  are separate containers, so page-driven code never runs beside the keys. Results carry caps and are wrapped as untrusted data. The workspace still has no direct route to
   the LAN.
-- **Orchestration** replicates T3's orchestrator MCP: launch, send, wait, read, interrupt and fork threads; queues;
-  projects. Agents can prompt dev-project agents (they hold no keys); none can reach a host conversation.
-- **Schedules** replicate T3's scheduled tasks: interval, fixed time, and signed webhook. The webhook lets a cheap
-  watcher (a script in the workspace, or an MCP server) wake the agent only when something changed.
-- Destructive tools that are rarely needed are hidden by default with pi's per-tool exposure (`"delete_*": "hidden"`).
-  Household instances default to fewer tools still.
+- **Orchestration**: the agent's thread tools (`thread_prompt`, `thread_wait`, `thread_read`, `thread_search`,
+  `thread_list`, `thread_cancel`) start and drive child threads; outside MCP clients get T3's orchestrator toolkit on
+  `/mcp`. Agents will be able to prompt dev-project agents (they hold no keys); none can reach a host conversation.
+- **Schedules** replicate T3's scheduled tasks: interval and fixed time. The signed webhook (a cheap watcher waking the
+  agent only when something changed) is not built; the bridge refuses it.
+- An MCP tool that is rarely needed and destructive can be hidden per tool (`toolExposure: { "delete_*": "hidden" }`).
+  Nothing is hidden unless the configuration says so.
 - Executor is not used: with keys in the harness, pi's codemode already isolates them, and nesting Executor's
   codemode inside pi's confuses models.
 
@@ -179,17 +168,18 @@ Three layers:
 3. **Code**: the harness repository is just another devcontainer project. The agent develops and tests there,
    against a snapshot of the production store. A release builds the harness image; the operator deploys it. The
    deploy snapshots the store, recreates the container and rolls back if the health check fails. pi-durable resumes
-   in-flight work after the restart.
+   in-flight work after the restart. Self-update, the agent restarting into a new release, would bring back a
+   restart tool (removed while nothing needed it: MCP configuration and secrets apply live, the prompt has `/reload`).
 
 ## Memory
 
-Files, not a vector database. Adapted from piclaw's "Dream":
+Not built. The plan is to adopt [Hindsight](https://github.com/vectorize-io/hindsight) as a service rather than build
+one: retain, recall and reflect over memory banks, with consolidated observations, and recall by vector, keyword,
+entity graph and time. The harness would recall before each turn and retain after it, as Hindsight's own agent plugins
+do. Open: the model Hindsight calls, where it runs and how agents share it, the bank layout, and the embedding model.
 
-- every new conversation starts with the same conventions (global `AGENTS.md`, global skills, cwd, project `AGENTS.md` and skills, and the conversation-start time); the user profile and memory index are named in `AGENTS.md` and read on demand;
-- a nightly scheduled run reviews recent activity, writes human-readable daily notes, distils preferences,
-  corrections and project state, and prunes the rest. It may edit only the memory and feedback files.
-
-The memory files live in the workspace. The harness injects the global and project `AGENTS.md` files and lists skill metadata; it does not inject `USER.md`. `AGENTS.md` names `USER.md` and `MEMORY.md`, so the agent reads the rest when a task needs it and a project conversation does not carry personal context by default.
+Today every new conversation starts with the same conventions (global `AGENTS.md`, global skills, cwd, project
+`AGENTS.md` and skills, and the conversation-start time); anything else the agent keeps is files it reads on demand.
 
 ## Spending caps
 
@@ -226,10 +216,11 @@ custom app on T3's client runtime. **To check:** the pi mobile UI mentioned on t
 2. Done: a pi-durable codemode tool with the workspace's read/write/bash injected over pi-env to an sshd container.
 3. Done (v0): harness and workspace images and a compose file for a fresh machine. The T3 bridge installs as a package
    from git; the harness's SSH public key reaches the workspace through a small shared volume.
-4. Key-bearing MCP servers, one container each; HTTP-only manager with deferred tools and tool_search — done (stdio and OAuth deferred).
-5. Orchestration (T3's orchestrator MCP) and dev-project devcontainers.
-6. Memory and the nightly consolidation; spending caps; ntfy.
-7. Release flow: store snapshot, deploy, health check, rollback.
+4. Done: MCP servers over HTTP, one container each for key-bearing ones, configured by the agent in `~/.mcp.json`,
+   with OAuth and the harness's secrets; tools are called from codemode. stdio servers are refused.
+5. Done: orchestration (the thread tools, and T3's orchestrator toolkit on `/mcp`). Not done: dev-project devcontainers.
+6. Memory (Hindsight); spending caps; ntfy.
+7. Release flow: store snapshot, deploy, health check, rollback; then self-update.
 8. Host conversations.
 
 ## Prior art
