@@ -187,6 +187,9 @@ async function main(): Promise<void> {
 	// `thread_cancel`): a conversation that is a thread's head acts as that thread. Installed once the bridge exists,
 	// before anything resumes.
 	toolRegistry?.install(t3.threadTools({ callers: ["tools"] }));
+	// T3's inline HTML for scripts: `html_render` shows a page in the caller's thread, kept in /home/agent/attachments;
+	// `html_preview` (with the preview browser) renders one first.
+	toolRegistry?.install(t3.htmlTools({ callers: ["tools"] }));
 	// T3's secret card: `request_secret` asks the user in the thread and saves the answer to the harness's secrets.
 	toolRegistry?.install(t3.secretRequests({ save: (name, value) => secrets.save(name, value) }));
 

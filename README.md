@@ -122,6 +122,15 @@ also reaches the model inline when the selected model accepts images. The T3 thr
 line, and reads it from the workspace; one the agent deletes shows as missing. Nothing removes them otherwise. Uploads
 are capped at 50 MiB.
 
+## Inline HTML
+
+The agent can show a finished page (a chart, a diagram, a mockup) inline in its T3 thread, above its reply: T3's
+`html_render`, from codemode. T3's rules apply: the page uses T3's theme variables, has no viewport-height units, and
+local images given as absolute paths are inlined. The page is kept in `/home/agent/attachments/` and shown in T3's
+sandboxed frame. With the browser configured, `html_preview` renders a page first and returns a screenshot, its height
+and its console, and published pages are measured for phones and wide windows. The system prompt mentions
+`html_render`; when to use it is in its description.
+
 ## Web tools
 
 The harness offers `web_search`, `web_fetch`, `summarize` and the `browser_*` tools to codemode scripts. They are local
