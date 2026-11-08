@@ -1,3 +1,4 @@
+import { posix } from "node:path";
 import type { ToolRegistration } from "@earendil-works/pi-durable";
 import { createBashTool, createEditTool, createReadTool, createWriteTool } from "@earendil-works/pi-durable/tools";
 import { Type } from "@earendil-works/pi-ai";
@@ -25,6 +26,11 @@ export function workspaceTools(): ToolRegistration[] {
  * image block as its content, but a tool without an output schema gives scripts only its text, so the image would arrive
  * as "". Every other tool that returns an image (`browser_screenshot`, `models.generateImages`) already hands scripts
  * the block; this does the same for `read`.
+ *
+ * A text file is read whole (or the lines `offset` and `limit` select): pi-durable's `read` stops at 2,000 lines or 50 KB,
+ * which is a limit on what the model sees, and that limit belongs where something reaches the model (codemode's output,
+ * or the harness's bound on a direct call's output), not on what a script reads. Images still go through pi-durable's
+ * `read`, which prepares them for the model.
  */
 const READ_RESULT_SCHEMA = Type.Union([
 	Type.Object({ type: Type.Literal("text"), text: Type.String() }),
@@ -37,8 +43,18 @@ export function readTool(): ToolRegistration {
 		...read,
 		description: READ_TOOL_DESCRIPTION,
 		structuredOutputSchema: READ_RESULT_SCHEMA,
-		async execute(args: never, api, context) {
-			const result = await read.execute(args, api, context);
+		async execute(args: { path: string; offset?: number; limit?: number }, api, context) {
+			const env = api.env;
+			if (env === undefined) throw new Error("No execution environment is configured");
+			const path = args.path.startsWith("/") ? args.path : posix.join(env.cwd, args.path);
+			const bytes = await env.readBinaryFile(path, context);
+			if (!bytes.ok) throw new Error(`${args.path}: ${bytes.error.message}`);
+			if (!isImage(bytes.value)) {
+				const all = new TextDecoder().decode(bytes.value);
+				const text = args.offset === undefined && args.limit === undefined ? all : selectLines(all, args.offset, args.limit);
+				return { output: [{ type: "text" as const, text }], structuredOutput: { type: "text" as const, text } };
+			}
+			const result = await read.execute(args as never, api, context);
 			// An error (a file too large to send, or one that is not there) carries its reason as an error diagnostic,
 			// which a script's rejected call shows; no structured output, so nothing pretends to be read.
 			if (result.isError === true) return result;
@@ -51,6 +67,25 @@ export function readTool(): ToolRegistration {
 			return { ...result, structuredOutput };
 		},
 	} as ToolRegistration;
+}
+
+/** The lines `offset` (1-based, default 1) and `limit` (default: to the end) select, as pi-durable's `read` counts them. */
+function selectLines(text: string, offset: number | undefined, limit: number | undefined): string {
+	const start = Math.max(0, Math.trunc(offset ?? 1) - 1);
+	const lines = text.split("\n");
+	return lines.slice(start, limit === undefined ? undefined : start + Math.max(0, Math.trunc(limit))).join("\n");
+}
+
+/** Whether bytes start like an image `read` shows (JPEG, PNG, GIF, WebP); pi-durable's `read` checks it properly. */
+function isImage(bytes: Uint8Array): boolean {
+	const ascii = (at: number, text: string) => [...text].every((char, index) => bytes[at + index] === char.charCodeAt(0));
+	return (
+		(bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff) ||
+		(bytes[0] === 0x89 && ascii(1, "PNG")) ||
+		ascii(0, "GIF87a") ||
+		ascii(0, "GIF89a") ||
+		(ascii(0, "RIFF") && ascii(8, "WEBP"))
+	);
 }
 
 /** A single-quoted shell word: the shell passes it on exactly as it is. */

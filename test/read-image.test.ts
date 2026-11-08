@@ -46,6 +46,18 @@ it("a text file arrives as its text", async () => {
 	expect(result.structuredOutput).toEqual({ type: "text", text: "alpha\nbeta\n" });
 });
 
+it("a large text file arrives whole, past pi-durable's 2,000 lines and 50 KB; offset and limit still select lines", async () => {
+	const cwd = await dir();
+	const lines = Array.from({ length: 5000 }, (_, index) => `line ${index + 1} ${"x".repeat(20)}`);
+	const text = lines.join("\n");
+	expect(Buffer.byteLength(text)).toBeGreaterThan(100_000);
+	await writeFile(join(cwd, "big.log"), text);
+	const whole = (await readTool().execute({ path: "big.log" } as never, api(cwd) as never, BACKGROUND_CONTEXT)) as unknown as { structuredOutput: { text: string } };
+	expect(whole.structuredOutput.text).toBe(text);
+	const some = (await readTool().execute({ path: "big.log", offset: 4999, limit: 5 } as never, api(cwd) as never, BACKGROUND_CONTEXT)) as unknown as { structuredOutput: { text: string } };
+	expect(some.structuredOutput.text).toBe(`${lines[4998]}\n${lines[4999]}`);
+});
+
 it("an image arrives as the block image() shows", async () => {
 	const cwd = await dir();
 	await writeFile(join(cwd, "shot.png"), PNG);

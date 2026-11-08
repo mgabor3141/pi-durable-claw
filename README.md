@@ -68,8 +68,9 @@ rendered again still names it). The agent owns its tools under
 `/home/agent`; the workspace image reads `PATH` from `~/.ssh/environment` and includes `jq`. The model tool list is
 `codemode` and the bridge's `request_secret`, and it never changes.
 
-`read` in a script gives a text file's text, or an image as `{ type: "image", data, mimeType }`; show it with
-`image(result)`. (pi-durable's `read` already returns an image as its content, but a tool without an output schema gives
+`read` in a script gives a text file's whole text (or the lines `offset` and `limit` select), or an image as
+`{ type: "image", data, mimeType }`; show it with `image(result)`. There is no size limit on what a script reads: the
+limit is on what reaches the model, codemode's output. (pi-durable's `read` stops at 2,000 lines or 50 KB.) (pi-durable's `read` already returns an image as its content, but a tool without an output schema gives
 scripts only its text, so the picture would arrive as `""`; claw gives `read` that schema.) A file that cannot be read
 as an image says why, and the call rejects.
 
