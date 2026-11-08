@@ -85,6 +85,24 @@ describe("web view", () => {
 		).rejects.toThrow(/private|internal/);
 	});
 
+	it("Stop aborts a request in flight", async () => {
+		// A backend that never answers, but gives up when its request is aborted, as fetch does.
+		const hanging = fakeFetch(
+			(_input, init) =>
+				new Promise((_resolve, reject) => init?.signal?.addEventListener("abort", () => reject(init.signal!.reason), { once: true })),
+		);
+		const stop = new AbortController();
+		const started = Date.now();
+		const pending = fetchWeb("https://example.com", { fetch: hanging, signal: stop.signal });
+		setTimeout(() => stop.abort(new Error("stopped")), 50);
+		await expect(pending).rejects.toThrow("stopped");
+		const search = new AbortController();
+		const searching = searchWeb("query", { fetch: hanging, signal: search.signal });
+		search.abort(new Error("stopped too"));
+		await expect(searching).rejects.toThrow("stopped too");
+		expect(Date.now() - started).toBeLessThan(2_000);
+	});
+
 	it("reports an empty page as an error", async () => {
 		await expect(
 			fetchWeb("https://example.com", { fetch: fakeFetch(async () => response({ url: "https://example.com", markdown: " " })) }),

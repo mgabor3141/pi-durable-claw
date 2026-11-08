@@ -9,7 +9,7 @@ import { preambleExtension } from "./preamble.ts";
 import { fixedPromptExtension } from "./fixed-prompt.ts";
 import { compactionExtension } from "./compaction.ts";
 import { browserTools, type SharedBrowserProvider } from "./browser.ts";
-import type { TextGenerationModel } from "@mgabor3141/pi-durable-t3";
+import { abortable, type TextGenerationModel } from "@mgabor3141/pi-durable-t3";
 import { workspaceTools } from "./tools.ts";
 import { webTools } from "./web.ts";
 import { summarizeTools } from "./summarize.ts";
@@ -69,7 +69,8 @@ export function harnessExtensions(options: HarnessExtensionOptions = {}): readon
 		...(options.extraTools ?? []),
 		...workspaceTools(),
 		...webTools(),
-		...(options.browser === true ? browserTools(options.late) : []),
+		// The browser's sessions do not listen for Stop; each call returns the moment it is stopped.
+		...(options.browser === true ? browserTools(options.late).map(abortable) : []),
 		...summarizeTools(options.late),
 	];
 	const secrets = options.secrets;

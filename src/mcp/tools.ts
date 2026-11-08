@@ -17,6 +17,7 @@ import {
 import type { ToolExecutionApi, ToolExecutionResult, ToolRegistration } from "@earendil-works/pi-durable";
 import type { Context } from "@earendil-works/chord";
 import type { McpExposure } from "./config.ts";
+import { abortable } from "@mgabor3141/pi-durable-t3";
 import { type Schema } from "@earendil-works/pi-schema";
 
 /** Provider tool names are limited to 64 characters of `[A-Za-z0-9_-]`. */
@@ -230,7 +231,8 @@ export function createMcpToolRegistration(options: McpToolOptions): ToolRegistra
 	const { server, tool, exposure } = options;
 	const title = tool.title ?? tool.annotations?.title;
 	const description = tool.description?.trim() || title || `MCP tool ${tool.name} from server ${server}`;
-	return {
+	// Connecting may wait on the server, which the request's signal does not cover: Stop returns at once.
+	return abortable({
 		name: options.name,
 		description,
 		parameters: toParameters(tool.inputSchema),
@@ -243,8 +245,9 @@ export function createMcpToolRegistration(options: McpToolOptions): ToolRegistra
 			const client = await options.getClient();
 			const result = await client.callTool(tool.name, (args ?? {}) as Record<string, unknown>, {
 				timeoutMs: options.timeoutMs,
+				signal: context.abortSignal,
 			});
 			return convertMcpResult(server, tool.name, result, api, context);
 		},
-	};
+	});
 }

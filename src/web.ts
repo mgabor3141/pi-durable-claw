@@ -52,6 +52,14 @@ export interface WebRequestOptions {
 	readonly timeoutMs?: number;
 	/** Override for tests. */
 	readonly fetch?: typeof fetch;
+	/** The call's Stop: aborts the request. */
+	readonly signal?: AbortSignal;
+}
+
+/** The request's own timeout, and the caller's Stop. */
+function requestSignal(options: WebRequestOptions, defaultTimeoutMs: number): AbortSignal {
+	const timeout = AbortSignal.timeout(options.timeoutMs ?? defaultTimeoutMs);
+	return options.signal === undefined ? timeout : AbortSignal.any([timeout, options.signal]);
 }
 
 function fetcher(options: WebRequestOptions): typeof fetch {
@@ -165,7 +173,7 @@ export async function searchWeb(
 
 	const response = await fetcher(options)(url, {
 		headers: { accept: "application/json" },
-		signal: AbortSignal.timeout(options.timeoutMs ?? DEFAULT_SEARCH_TIMEOUT_MS),
+		signal: requestSignal(options, DEFAULT_SEARCH_TIMEOUT_MS),
 	});
 	const body = await response.text();
 	if (!response.ok) throw new Error(`searxng returned HTTP ${response.status}: ${errorDetail(body)}`);
@@ -198,7 +206,7 @@ export async function fetchWeb(value: string, options: WebRequestOptions = {}): 
 		method: "POST",
 		headers: { "content-type": "application/json", accept: "application/json" },
 		body: JSON.stringify({ url }),
-		signal: AbortSignal.timeout(options.timeoutMs ?? DEFAULT_READ_TIMEOUT_MS),
+		signal: requestSignal(options, DEFAULT_READ_TIMEOUT_MS),
 	});
 	const body = await response.text();
 	if (body.length > MAX_RESPONSE_CHARS) throw new Error(`reader response is too large (${body.length} chars)`);
@@ -243,8 +251,8 @@ export function webTools(): ToolRegistration[] {
 				),
 			}),
 			callers: ["tools"],
-			async execute(args) {
-				const output = await searchWeb(args.query, { maxResults: args.max_results, timeRange: args.time_range });
+			async execute(args, _api, context) {
+				const output = await searchWeb(args.query, { maxResults: args.max_results, timeRange: args.time_range, signal: context.abortSignal });
 				const text = untrusted("web-search", args.query, JSON.stringify(output.results, null, 2));
 				return { output: [{ type: "text", text }], structuredOutput: output as unknown as JsonValue };
 			},
@@ -261,8 +269,8 @@ export function webTools(): ToolRegistration[] {
 				markdown: str(),
 			}),
 			callers: ["tools"],
-			async execute(args) {
-				const page = await fetchWeb(args.url);
+			async execute(args, _api, context) {
+				const page = await fetchWeb(args.url, { signal: context.abortSignal });
 				const text = untrusted("web-page", page.finalUrl, page.markdown);
 				return {
 					output: [{ type: "text", text }],

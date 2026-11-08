@@ -33,6 +33,7 @@ import {
 import { MCP_TOOL_DESCRIPTION, mcpNeedsSecrets, mcpNeedsSignIn } from "../prompts.ts";
 import { type McpOAuth, needsSignIn, usesOAuth } from "./oauth.ts";
 import { defineTool } from "@earendil-works/pi-durable";
+import { abortable } from "@mgabor3141/pi-durable-t3";
 import { mcpServersSection, type McpServerSummary } from "./section.ts";
 import { createMcpToolName, createMcpToolRegistration } from "./tools.ts";
 import { opt, str, union } from "@earendil-works/pi-schema";
@@ -303,7 +304,8 @@ export class McpManager {
 		return defineExtension({
 			name: "mcp-servers",
 			sections: [section("mcp-servers", () => mcpServersSection(this.summaries()))],
-			tools: [this.tool()],
+			// Status and sign-in may wait on a server; Stop does not.
+			tools: [abortable(this.tool())],
 			hooks: [
 				hook(GenerationTask, {
 					beforeRequest: async () => {
