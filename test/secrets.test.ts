@@ -4,9 +4,9 @@ import { mkdtemp, rm, stat } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { ToolRegistration } from "@earendil-works/pi-durable";
-import { Type } from "@earendil-works/pi-ai";
 import { afterEach, expect, it } from "vitest";
 import { SecretStore, secretsTool, withSecrets } from "../src/secrets.ts";
+import { object } from "../src/schema.ts";
 
 const dirs: string[] = [];
 afterEach(async () => void (await Promise.all(dirs.splice(0).map((dir) => rm(dir, { recursive: true, force: true })))));
@@ -31,7 +31,7 @@ function echo(name: string): ToolRegistration & { seen: unknown[]; streamed: unk
 		streamed,
 		name,
 		description: "echo",
-		parameters: Type.Object({}),
+		parameters: object({}),
 		async execute(args: unknown, api: { output(chunk: string): void }) {
 			seen.push(args);
 			api.output(JSON.stringify(args));

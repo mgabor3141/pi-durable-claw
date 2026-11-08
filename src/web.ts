@@ -1,8 +1,9 @@
 import { isIP } from "node:net";
 import type { JsonValue } from "@earendil-works/chord";
-import { Type } from "@earendil-works/pi-ai";
 import { defineTool, type ToolRegistration } from "@earendil-works/pi-durable";
 import { WEB_FETCH_TOOL_DESCRIPTION, WEB_SEARCH_TOOL_DESCRIPTION, untrusted } from "./prompts.ts";
+import { arr, int, opt, str, union } from "@earendil-works/pi-schema";
+import { literal, object } from "./schema.ts";
 
 /**
  * Web tools for the workspace agent: search through a private SearXNG and view
@@ -224,20 +225,20 @@ export function webTools(): ToolRegistration[] {
 		defineTool({
 			name: "web_search",
 			description: WEB_SEARCH_TOOL_DESCRIPTION,
-			parameters: Type.Object({
-				query: Type.String({ minLength: 1, maxLength: 2_000 }),
-				max_results: Type.Optional(Type.Integer({ minimum: 1, maximum: MAX_RESULTS })),
-				time_range: Type.Optional(Type.Union([Type.Literal("day"), Type.Literal("week"), Type.Literal("month"), Type.Literal("year")])),
+			parameters: object({
+				query: str({ minLength: 1, maxLength: 2_000 }),
+				max_results: opt(int({ minimum: 1, maximum: MAX_RESULTS })),
+				time_range: opt(union([literal("day"), literal("week"), literal("month"), literal("year")])),
 			}),
-			structuredOutputSchema: Type.Object({
-				query: Type.String(),
-				results: Type.Array(
-					Type.Object({
-						title: Type.String(),
-						url: Type.String(),
-						snippet: Type.String(),
-						engine: Type.Optional(Type.String()),
-						published: Type.Optional(Type.String()),
+			structuredOutputSchema: object({
+				query: str(),
+				results: arr(
+					object({
+						title: str(),
+						url: str(),
+						snippet: str(),
+						engine: opt(str()),
+						published: opt(str()),
 					}),
 				),
 			}),
@@ -251,13 +252,13 @@ export function webTools(): ToolRegistration[] {
 		defineTool({
 			name: "web_fetch",
 			description: WEB_FETCH_TOOL_DESCRIPTION,
-			parameters: Type.Object({
-				url: Type.String({ minLength: 1, maxLength: 4_000 }),
+			parameters: object({
+				url: str({ minLength: 1, maxLength: 4_000 }),
 			}),
-			structuredOutputSchema: Type.Object({
-				url: Type.String(),
-				finalUrl: Type.String(),
-				markdown: Type.String(),
+			structuredOutputSchema: object({
+				url: str(),
+				finalUrl: str(),
+				markdown: str(),
 			}),
 			callers: ["tools"],
 			async execute(args) {

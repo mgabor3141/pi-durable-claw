@@ -12,14 +12,15 @@
     "start": "node src/host.ts"
   },
   "dependencies": {
-    "@earendil-works/chord": "1.4.0",
-    "@earendil-works/pi-ai": "1.4.0",
-    "@earendil-works/pi-codemode": "1.4.0",
-    "@earendil-works/pi-coding-agent": "1.4.0",
-    "@earendil-works/pi-durable": "1.4.0",
-    "@earendil-works/pi-env": "1.4.0",
-    "@earendil-works/pi-mcp": "1.4.0",
-    "@mgabor3141/pi-durable-t3": "github:mgabor3141/pi-durable-t3#79382cae65eeb580ac228bd0c08b435a24e966aa",
+    "@earendil-works/chord": "1.5.0",
+    "@earendil-works/pi-ai": "1.5.0",
+    "@earendil-works/pi-codemode": "1.5.0",
+    "@earendil-works/pi-coding-agent": "1.5.0",
+    "@earendil-works/pi-durable": "1.5.0",
+    "@earendil-works/pi-env": "1.5.0",
+    "@earendil-works/pi-mcp": "1.5.0",
+    "@earendil-works/pi-schema": "1.5.0",
+    "@mgabor3141/pi-durable-t3": "github:mgabor3141/pi-durable-t3#438d28c4c5c4e233b6a61af09347ff0fa37f1840",
     "playwright-core": "1.64.1"
   },
   "devDependencies": {

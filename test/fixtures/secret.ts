@@ -1,5 +1,6 @@
-import { Type } from "@earendil-works/pi-ai";
 import { defineTool, type ToolRegistration } from "@earendil-works/pi-durable";
+import { str } from "@earendil-works/pi-schema";
+import { object } from "../../src/schema.ts";
 
 /**
  * Test fixture: a key-bearing harness tool. It reads a key and returns a record derived from it — never the key. It is
@@ -10,8 +11,8 @@ export function secretLookupTool(key: string | undefined): ToolRegistration {
 	return defineTool({
 		name: "secret_lookup",
 		description: "Look up a secret record by name. Returns the record, not the key.",
-		parameters: Type.Object({ name: Type.String() }),
-		structuredOutputSchema: Type.Object({ name: Type.String(), value: Type.String(), scope: Type.String() }),
+		parameters: object({ name: str() }),
+		structuredOutputSchema: object({ name: str(), value: str(), scope: str() }),
 		callers: ["tools"],
 		async execute(args) {
 			if (key === undefined || key === "") throw new Error("secret_lookup: no key configured in the harness");

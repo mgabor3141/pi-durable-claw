@@ -33,9 +33,10 @@ import {
 import { MCP_TOOL_DESCRIPTION, mcpNeedsSecrets, mcpNeedsSignIn } from "../prompts.ts";
 import { type McpOAuth, needsSignIn, usesOAuth } from "./oauth.ts";
 import { defineTool } from "@earendil-works/pi-durable";
-import { Type } from "@earendil-works/pi-ai";
 import { mcpServersSection, type McpServerSummary } from "./section.ts";
 import { createMcpToolName, createMcpToolRegistration } from "./tools.ts";
+import { opt, str, union } from "@earendil-works/pi-schema";
+import { literal, object } from "../schema.ts";
 
 export interface McpLogger {
 	info(message: string, fields?: Record<string, unknown>): void;
@@ -198,10 +199,10 @@ export class McpManager {
 		return defineTool({
 			name: "mcp",
 			description: MCP_TOOL_DESCRIPTION,
-			parameters: Type.Object({
-				action: Type.Union([Type.Literal("status"), Type.Literal("login"), Type.Literal("complete"), Type.Literal("logout")]),
-				server: Type.Optional(Type.String({ description: "The server's name in ~/.mcp.json (login, logout)" })),
-				redirectUrl: Type.Optional(Type.String({ description: "The URL the user's browser ended on (complete)" })),
+			parameters: object({
+				action: union([literal("status"), literal("login"), literal("complete"), literal("logout")]),
+				server: opt(str({ description: "The server's name in ~/.mcp.json (login, logout)" })),
+				redirectUrl: opt(str({ description: "The URL the user's browser ended on (complete)" })),
 			}),
 			callers: ["tools"],
 			execute: async (args) => {

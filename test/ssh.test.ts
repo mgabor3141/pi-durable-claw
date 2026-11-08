@@ -5,12 +5,12 @@ import { execFileSync } from "node:child_process";
 import { chmod, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { Type } from "@earendil-works/pi-ai";
 import type { ToolRegistration } from "@earendil-works/pi-durable";
 import { NodeExecutionEnv } from "@earendil-works/pi-durable/env/node";
 import { afterEach, describe, expect, it } from "vitest";
 import { SecretStore, withSecrets } from "../src/secrets.ts";
 import { sshCommandLine, workspaceTools } from "../src/tools.ts";
+import { object } from "../src/schema.ts";
 
 /** What ssh would get: the line run by bash, with `ssh` a function that prints its arguments, one per line. */
 const argv = (line: string) =>
@@ -80,7 +80,7 @@ describe("secrets in a remote command", () => {
 		const tool = {
 			name: "ssh",
 			description: "fake",
-			parameters: Type.Object({}),
+			parameters: object({}),
 			async execute(args: unknown) {
 				seen.push(args);
 				return { output: [{ type: "text", text: JSON.stringify(args) }] };

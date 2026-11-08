@@ -1,9 +1,10 @@
 import type { JsonValue } from "@earendil-works/chord";
-import { Type } from "@earendil-works/pi-ai";
 import { defineTool, type ToolRegistration } from "@earendil-works/pi-durable";
 import type { TextGenerationModel } from "@mgabor3141/pi-durable-t3";
 import type { ExecutionEnv } from "@earendil-works/pi-durable/env";
 import { SUMMARIZE_DEFAULT_INSTRUCTION, SUMMARIZE_INSTRUCTION_DESCRIPTION, SUMMARIZE_PATH_DESCRIPTION, SUMMARIZE_SYSTEM_PROMPT, SUMMARIZE_TEXT_DESCRIPTION, SUMMARIZE_TOOL_DESCRIPTION, summarizePrompt } from "./prompts.ts";
+import { opt, str } from "@earendil-works/pi-schema";
+import { object } from "./schema.ts";
 
 /** A page can be large; this is still a single model call, not a subagent. */
 const MAX_INPUT_CHARS = 200_000;
@@ -26,12 +27,12 @@ export function summarizeTools(late: { readonly textGenerationModel?: () => Text
 		defineTool({
 			name: "summarize",
 			description: SUMMARIZE_TOOL_DESCRIPTION,
-			parameters: Type.Object({
-				path: Type.Optional(Type.String({ minLength: 1, maxLength: 4_000, description: SUMMARIZE_PATH_DESCRIPTION })),
-				text: Type.Optional(Type.String({ minLength: 1, maxLength: MAX_INPUT_CHARS, description: SUMMARIZE_TEXT_DESCRIPTION })),
-				instruction: Type.Optional(Type.String({ maxLength: MAX_INSTRUCTION_CHARS, description: SUMMARIZE_INSTRUCTION_DESCRIPTION })),
+			parameters: object({
+				path: opt(str({ minLength: 1, maxLength: 4_000, description: SUMMARIZE_PATH_DESCRIPTION })),
+				text: opt(str({ minLength: 1, maxLength: MAX_INPUT_CHARS, description: SUMMARIZE_TEXT_DESCRIPTION })),
+				instruction: opt(str({ maxLength: MAX_INSTRUCTION_CHARS, description: SUMMARIZE_INSTRUCTION_DESCRIPTION })),
 			}),
-			structuredOutputSchema: Type.Object({ summary: Type.String() }),
+			structuredOutputSchema: object({ summary: str() }),
 			callers: ["tools"],
 			async execute(args, api, context) {
 				if ((args.path === undefined) === (args.text === undefined)) throw new Error("summarize needs exactly one of path or text");

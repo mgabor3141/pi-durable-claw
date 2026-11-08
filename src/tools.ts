@@ -1,9 +1,10 @@
 import { posix } from "node:path";
 import type { ToolRegistration } from "@earendil-works/pi-durable";
 import { createBashTool, createEditTool, createReadTool, createWriteTool } from "@earendil-works/pi-durable/tools";
-import { Type } from "@earendil-works/pi-ai";
 import type { ImageContent } from "@earendil-works/pi-ai";
 import { READ_TOOL_DESCRIPTION, SSH_TOOL_DESCRIPTION } from "./prompts.ts";
+import { num, opt, str, union } from "@earendil-works/pi-schema";
+import { literal, object } from "./schema.ts";
 
 /**
  * The workspace's files and shell: pi-durable's own coding tools, unchanged except `callers: ["tools"]` — the model
@@ -32,9 +33,9 @@ export function workspaceTools(): ToolRegistration[] {
  * or the harness's bound on a direct call's output), not on what a script reads. Images still go through pi-durable's
  * `read`, which prepares them for the model.
  */
-const READ_RESULT_SCHEMA = Type.Union([
-	Type.Object({ type: Type.Literal("text"), text: Type.String() }),
-	Type.Object({ type: Type.Literal("image"), data: Type.String(), mimeType: Type.String() }),
+const READ_RESULT_SCHEMA = union([
+	object({ type: literal("text"), text: str() }),
+	object({ type: literal("image"), data: str(), mimeType: str() }),
 ]);
 
 export function readTool(): ToolRegistration {
@@ -111,10 +112,10 @@ export function sshTool(): ToolRegistration {
 		...bash,
 		name: "ssh",
 		description: SSH_TOOL_DESCRIPTION,
-		parameters: Type.Object({
-			host: Type.String({ description: "As you would pass it to ssh: a name from ~/.ssh/config, user@host, or ssh://user@host:port" }),
-			command: Type.String({ description: "The remote command line, as you would type it in the remote shell" }),
-			timeout: Type.Optional(Type.Number({ description: "Timeout in seconds (optional, no default timeout)" })),
+		parameters: object({
+			host: str({ description: "As you would pass it to ssh: a name from ~/.ssh/config, user@host, or ssh://user@host:port" }),
+			command: str({ description: "The remote command line, as you would type it in the remote shell" }),
+			timeout: opt(num({ description: "Timeout in seconds (optional, no default timeout)" })),
 		}),
 		callers: ["tools"],
 		execute: (args: { host: string; command: string; timeout?: number }, api, context) =>

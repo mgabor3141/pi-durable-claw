@@ -10,9 +10,10 @@ import { chmodSync, closeSync, fsyncSync, openSync, readFileSync, renameSync, wr
 import { dirname, join } from "node:path";
 import type { JsonValue } from "@earendil-works/chord";
 import { defineTool, type ToolExecutionApi, type ToolExecutionResult, type ToolRegistration } from "@earendil-works/pi-durable";
-import { Type } from "@earendil-works/pi-ai";
 import type { McpOAuthState } from "@earendil-works/pi-mcp/oauth";
 import { SECRETS_TOOL_DESCRIPTION } from "./prompts.ts";
+import { opt, str, union } from "@earendil-works/pi-schema";
+import { literal, object } from "./schema.ts";
 
 /** A secret's name: an environment variable's, so a shell can use it as one. */
 export const SECRET_NAME = /^[A-Z][A-Z0-9_]{0,127}$/;
@@ -225,10 +226,10 @@ export function secretsTool(store: SecretStore): ToolRegistration {
 	return defineTool({
 		name: "secrets",
 		description: SECRETS_TOOL_DESCRIPTION,
-		parameters: Type.Object({
-			action: Type.Union([Type.Literal("list"), Type.Literal("set"), Type.Literal("delete")]),
-			name: Type.Optional(Type.String({ pattern: SECRET_NAME.source })),
-			value: Type.Optional(Type.String()),
+		parameters: object({
+			action: union([literal("list"), literal("set"), literal("delete")]),
+			name: opt(str({ pattern: SECRET_NAME.source })),
+			value: opt(str()),
 		}),
 		callers: ["tools"],
 		async execute(args) {

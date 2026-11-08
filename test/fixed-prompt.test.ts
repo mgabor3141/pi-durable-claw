@@ -5,7 +5,7 @@ import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
-import { createModels, fauxAssistantMessage, fauxProvider, Type, type AssistantMessage } from "@earendil-works/pi-ai";
+import { createModels, fauxAssistantMessage, fauxProvider, type AssistantMessage } from "@earendil-works/pi-ai";
 import { getCurrentSystemMessage, type TranscriptContext } from "@earendil-works/pi-ai/utils/transcript";
 import { createRegistry, defineExtension, defineTool, Harness, type Extension } from "@earendil-works/pi-durable";
 import { createCodemodeExtension } from "@earendil-works/pi-durable/codemode";
@@ -18,6 +18,7 @@ import { fileSource } from "../src/mcp/config.ts";
 import { McpManager } from "../src/mcp/manager.ts";
 import { ConversationStartDoc, recordConversationStart, workspaceContextExtension } from "../src/context.ts";
 import { preambleExtension } from "../src/preamble.ts";
+import { object } from "../src/schema.ts";
 
 const ctx = BACKGROUND_CONTEXT;
 const dirs: string[] = [];
@@ -29,7 +30,7 @@ const scriptTool = (name: string) =>
 	defineTool({
 		name,
 		description: `The ${name} tool.`,
-		parameters: Type.Object({}),
+		parameters: object({}),
 		callers: ["tools"],
 		execute: async () => ({ output: [{ type: "text" as const, text: "ok" }] }),
 	});

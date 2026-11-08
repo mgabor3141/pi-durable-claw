@@ -6,7 +6,7 @@
  */
 
 import { createHash } from "node:crypto";
-import type { ImageContent, TSchema, TextContent } from "@earendil-works/pi-ai";
+import type { ImageContent, TextContent } from "@earendil-works/pi-ai";
 import {
 	type CallToolResult,
 	type ContentBlock,
@@ -17,6 +17,7 @@ import {
 import type { ToolExecutionApi, ToolExecutionResult, ToolRegistration } from "@earendil-works/pi-durable";
 import type { Context } from "@earendil-works/chord";
 import type { McpExposure } from "./config.ts";
+import { type Schema } from "@earendil-works/pi-schema";
 
 /** Provider tool names are limited to 64 characters of `[A-Za-z0-9_-]`. */
 const MAX_TOOL_NAME_LENGTH = 64;
@@ -100,7 +101,7 @@ function relocateSchema(schema: unknown, pointer: string): unknown {
 }
 
 /** Output schema of every MCP tool: the `CallToolResult` scripts receive, without `_meta`. */
-export function createMcpResultSchema(structuredContentSchema: Record<string, unknown> | undefined): TSchema {
+export function createMcpResultSchema(structuredContentSchema: Record<string, unknown> | undefined): Schema {
 	return {
 		type: "object",
 		properties: {
@@ -112,16 +113,16 @@ export function createMcpResultSchema(structuredContentSchema: Record<string, un
 		},
 		required: ["content"],
 		additionalProperties: true,
-	} as unknown as TSchema;
+	} as unknown as Schema;
 }
 
 /** Input schemas must be objects; some providers reject an object schema without `properties`. */
-function toParameters(schema: Record<string, unknown>): TSchema {
+function toParameters(schema: Record<string, unknown>): Schema {
 	return {
 		...schema,
 		type: schema.type ?? "object",
 		...(schema.properties === undefined ? { properties: {} } : {}),
-	} as unknown as TSchema;
+	} as unknown as Schema;
 }
 
 /** Cut text in the middle, byte-oriented, and return the model copy plus whether it was cut. */
@@ -225,7 +226,7 @@ export interface McpToolOptions {
 }
 
 /** One MCP tool as a pi-durable registration, with its exposure determining how the model reaches it. */
-export function createMcpToolRegistration(options: McpToolOptions): ToolRegistration<TSchema, McpToolDetails> {
+export function createMcpToolRegistration(options: McpToolOptions): ToolRegistration<Schema, McpToolDetails> {
 	const { server, tool, exposure } = options;
 	const title = tool.title ?? tool.annotations?.title;
 	const description = tool.description?.trim() || title || `MCP tool ${tool.name} from server ${server}`;

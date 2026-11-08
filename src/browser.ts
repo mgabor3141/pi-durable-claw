@@ -1,6 +1,5 @@
 import { randomUUID } from "node:crypto";
 import type { JsonValue } from "@earendil-works/chord";
-import { Type } from "@earendil-works/pi-ai";
 import { defineTool, type ConversationId, type ToolRegistration } from "@earendil-works/pi-durable";
 import type { Page } from "playwright-core";
 import { assertFetchableUrl } from "./web.ts";
@@ -15,6 +14,8 @@ import {
 	browserSnapshotPrompt,
 	browserTruncationNote,
 } from "./prompts.ts";
+import { arr, bool, int, opt, str, union } from "@earendil-works/pi-schema";
+import { literal, object } from "./schema.ts";
 
 /**
  * An interactive browser for the workspace agent: the agent's page is a tab of T3's preview browser (Browserless
@@ -389,33 +390,33 @@ type BrowserAction =
 	| { action: "evaluate"; expression: string }
 	| { action: "back" | "forward" | "reload" };
 
-const ActionSchema = Type.Union([
-	Type.Object({ action: Type.Literal("goto"), url: Type.String({ minLength: 1, maxLength: 4_000 }) }),
-	Type.Object({ action: Type.Literal("click"), selector: Type.String({ minLength: 1, maxLength: 2_000 }), timeoutMs: Type.Optional(Type.Integer({ minimum: 1, maximum: 60_000 })) }),
-	Type.Object({ action: Type.Literal("fill"), selector: Type.String({ minLength: 1, maxLength: 2_000 }), text: Type.String({ maxLength: MAX_MESSAGE_CHARS }), timeoutMs: Type.Optional(Type.Integer({ minimum: 1, maximum: 60_000 })) }),
-	Type.Object({ action: Type.Literal("press"), key: Type.String({ minLength: 1, maxLength: 100 }), selector: Type.Optional(Type.String({ minLength: 1, maxLength: 2_000 })), timeoutMs: Type.Optional(Type.Integer({ minimum: 1, maximum: 60_000 })) }),
-	Type.Object({ action: Type.Literal("select"), selector: Type.String({ minLength: 1, maxLength: 2_000 }), value: Type.String({ maxLength: 2_000 }), timeoutMs: Type.Optional(Type.Integer({ minimum: 1, maximum: 60_000 })) }),
-	Type.Object({ action: Type.Literal("wait_for"), selector: Type.String({ minLength: 1, maxLength: 2_000 }), timeoutMs: Type.Optional(Type.Integer({ minimum: 1, maximum: 60_000 })) }),
-	Type.Object({ action: Type.Literal("wait"), ms: Type.Integer({ minimum: 0, maximum: 10_000 }) }),
-	Type.Object({ action: Type.Literal("evaluate"), expression: Type.String({ minLength: 1, maxLength: MAX_MESSAGE_CHARS }) }),
-	Type.Object({ action: Type.Union([Type.Literal("back"), Type.Literal("forward"), Type.Literal("reload")]) }),
+const ActionSchema = union([
+	object({ action: literal("goto"), url: str({ minLength: 1, maxLength: 4_000 }) }),
+	object({ action: literal("click"), selector: str({ minLength: 1, maxLength: 2_000 }), timeoutMs: opt(int({ minimum: 1, maximum: 60_000 })) }),
+	object({ action: literal("fill"), selector: str({ minLength: 1, maxLength: 2_000 }), text: str({ maxLength: MAX_MESSAGE_CHARS }), timeoutMs: opt(int({ minimum: 1, maximum: 60_000 })) }),
+	object({ action: literal("press"), key: str({ minLength: 1, maxLength: 100 }), selector: opt(str({ minLength: 1, maxLength: 2_000 })), timeoutMs: opt(int({ minimum: 1, maximum: 60_000 })) }),
+	object({ action: literal("select"), selector: str({ minLength: 1, maxLength: 2_000 }), value: str({ maxLength: 2_000 }), timeoutMs: opt(int({ minimum: 1, maximum: 60_000 })) }),
+	object({ action: literal("wait_for"), selector: str({ minLength: 1, maxLength: 2_000 }), timeoutMs: opt(int({ minimum: 1, maximum: 60_000 })) }),
+	object({ action: literal("wait"), ms: int({ minimum: 0, maximum: 10_000 }) }),
+	object({ action: literal("evaluate"), expression: str({ minLength: 1, maxLength: MAX_MESSAGE_CHARS }) }),
+	object({ action: union([literal("back"), literal("forward"), literal("reload")]) }),
 ]);
 
-const SnapshotSchema = Type.Object({
-	sessionId: Type.String(),
-	url: Type.String(),
-	title: Type.String(),
-	text: Type.String(),
-	truncated: Type.Boolean(),
-	console: Type.Array(Type.String()),
-	evaluated: Type.Optional(Type.String()),
+const SnapshotSchema = object({
+	sessionId: str(),
+	url: str(),
+	title: str(),
+	text: str(),
+	truncated: bool(),
+	console: arr(str()),
+	evaluated: opt(str()),
 });
 
-const ScreenshotSchema = Type.Object({
-	type: Type.Literal("image"),
-	data: Type.String({ minLength: 1 }),
-	mimeType: Type.Literal("image/png"),
-	bytes: Type.Integer({ minimum: 1 }),
+const ScreenshotSchema = object({
+	type: literal("image"),
+	data: str({ minLength: 1 }),
+	mimeType: literal("image/png"),
+	bytes: int({ minimum: 1 }),
 });
 
 /** Turn an evaluate result into bounded text the model can read. */
@@ -447,10 +448,10 @@ export function browserTools(late: { readonly previewBrowser?: SharedBrowserProv
 		defineTool({
 			name: "browser_open",
 			description: BROWSER_OPEN_TOOL_DESCRIPTION,
-			parameters: Type.Object({
-				url: Type.String({ minLength: 1, maxLength: 4_000 }),
-				wait_ms: Type.Optional(Type.Integer({ minimum: 0, maximum: 10_000 })),
-				max_chars: Type.Optional(Type.Integer({ minimum: 1, maximum: 100_000 })),
+			parameters: object({
+				url: str({ minLength: 1, maxLength: 4_000 }),
+				wait_ms: opt(int({ minimum: 0, maximum: 10_000 })),
+				max_chars: opt(int({ minimum: 1, maximum: 100_000 })),
 			}),
 			structuredOutputSchema: SnapshotSchema,
 			callers: ["tools"],
@@ -466,10 +467,10 @@ export function browserTools(late: { readonly previewBrowser?: SharedBrowserProv
 		defineTool({
 			name: "browser_act",
 			description: BROWSER_ACT_TOOL_DESCRIPTION,
-			parameters: Type.Object({
-				session_id: Type.String({ minLength: 1, maxLength: 100 }),
-				actions: Type.Array(ActionSchema, { minItems: 1, maxItems: 20 }),
-				max_chars: Type.Optional(Type.Integer({ minimum: 1, maximum: 100_000 })),
+			parameters: object({
+				session_id: str({ minLength: 1, maxLength: 100 }),
+				actions: arr(ActionSchema, { minItems: 1, maxItems: 20 }),
+				max_chars: opt(int({ minimum: 1, maximum: 100_000 })),
 			}),
 			structuredOutputSchema: SnapshotSchema,
 			callers: ["tools"],
@@ -481,9 +482,9 @@ export function browserTools(late: { readonly previewBrowser?: SharedBrowserProv
 		defineTool({
 			name: "browser_snapshot",
 			description: BROWSER_SNAPSHOT_TOOL_DESCRIPTION,
-			parameters: Type.Object({
-				session_id: Type.String({ minLength: 1, maxLength: 100 }),
-				max_chars: Type.Optional(Type.Integer({ minimum: 1, maximum: 100_000 })),
+			parameters: object({
+				session_id: str({ minLength: 1, maxLength: 100 }),
+				max_chars: opt(int({ minimum: 1, maximum: 100_000 })),
 			}),
 			structuredOutputSchema: SnapshotSchema,
 			callers: ["tools"],
@@ -495,7 +496,7 @@ export function browserTools(late: { readonly previewBrowser?: SharedBrowserProv
 		defineTool({
 			name: "browser_screenshot",
 			description: BROWSER_SCREENSHOT_TOOL_DESCRIPTION,
-			parameters: Type.Object({ session_id: Type.String({ minLength: 1, maxLength: 100 }) }),
+			parameters: object({ session_id: str({ minLength: 1, maxLength: 100 }) }),
 			structuredOutputSchema: ScreenshotSchema,
 			outputLimits: { maxBytes: 4_500_000 },
 			callers: ["tools"],
@@ -513,8 +514,8 @@ export function browserTools(late: { readonly previewBrowser?: SharedBrowserProv
 		defineTool({
 			name: "browser_close",
 			description: BROWSER_CLOSE_TOOL_DESCRIPTION,
-			parameters: Type.Object({ session_id: Type.String({ minLength: 1, maxLength: 100 }) }),
-			structuredOutputSchema: Type.Object({ closed: Type.Boolean() }),
+			parameters: object({ session_id: str({ minLength: 1, maxLength: 100 }) }),
+			structuredOutputSchema: object({ closed: bool() }),
 			callers: ["tools"],
 			async execute(args, api) {
 				await sessions.close(api.conversationId, args.session_id);
