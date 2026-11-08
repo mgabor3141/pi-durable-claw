@@ -162,6 +162,8 @@ async function main(): Promise<void> {
 			models,
 			stateDir,
 			scratchDir,
+			// Every image and file a user sends lives here, where the agent works, named to it by path.
+			attachmentsDir: "/home/agent/attachments",
 			// T3 works in the workspace container, with `/` as its root: every absolute path in the protocol is an
 			// environment path, and there is no harness-filesystem fallback.
 			env: workspaceEnv(workspace.connection, "/"),

@@ -19,7 +19,7 @@
     "@earendil-works/pi-durable": "1.4.0",
     "@earendil-works/pi-env": "1.4.0",
     "@earendil-works/pi-mcp": "1.4.0",
-    "@mgabor3141/pi-durable-t3": "github:mgabor3141/pi-durable-t3#b9c20b8f3e7c8ab1eb05ae5e933fa7dabe5d9844",
+    "@mgabor3141/pi-durable-t3": "github:mgabor3141/pi-durable-t3#1ec4fb714e2484759bc98da4e496b10f1d7d6d9b",
     "playwright-core": "1.64.1"
   },
   "devDependencies": {

@@ -116,10 +116,11 @@ script's on-demand `describeTool()`.
 
 ## Attachments
 
-T3 image attachments reach the model inline when the selected model accepts images. File attachments are uploaded
-through the bridge, copied to `/home/agent/attachments/` in the workspace, and named by path in the prompt, so the
-agent can read them with its normal workspace tools. The T3 thread shows the file chip, not the injected path line.
-Uploads are capped at 50 MiB.
+Every image and file sent in a T3 thread is kept in the workspace at `/home/agent/attachments/`, and the prompt lists
+the paths (`Attachments:` and one `- <path>` line each), so the agent can work with them using its normal tools. An image
+also reaches the model inline when the selected model accepts images. The T3 thread shows the attachment, not the path
+line, and reads it from the workspace; one the agent deletes shows as missing. Nothing removes them otherwise. Uploads
+are capped at 50 MiB.
 
 ## Web tools
 
