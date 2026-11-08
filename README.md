@@ -66,7 +66,7 @@ working directory: a project's root, a Scratch thread's folder, or `/home/agent`
 its `.agents/skills`, and the local time when the conversation started (recorded when it was created, so a prompt
 rendered again still names it). The agent owns its tools under
 `/home/agent`; the workspace image reads `PATH` from `~/.ssh/environment` and includes `jq`. The model tool list is
-`codemode`, `restart_harness` and the bridge's `request_secret`, and it never changes.
+`codemode` and the bridge's `request_secret`, and it never changes.
 
 `read` in a script gives a text file's text, or an image as `{ type: "image", data, mimeType }`; show it with
 `image(result)`. (pi-durable's `read` already returns an image as its content, but a tool without an output schema gives
@@ -250,7 +250,7 @@ conversation belongs to, so a message it sends shows in the other thread as comi
   and returns the activity's report: every message that entered the work, its tool-call count and the final answer,
   with a verdict (completed, interrupted, failed, or active when the wait ran out). With `wait: false` it returns at
   once, and the report is posted into the caller's thread when the work settles, starting its next turn if it is
-  idle. A wait that runs out, or a restart, turns into the same delivery.
+  idle. A wait that runs out turns into the same delivery.
 - `thread_wait` waits for several threads and returns their reports with the worst verdict.
 - `thread_read` reads a thread's exchanges, the caller's own included, back past any compaction.
 - `thread_search` searches every thread's messages; `thread_list` lists threads (`parent: "self"` for children).
@@ -275,18 +275,6 @@ Each codemode script runs in its own QuickJS VM, in a worker thread of the harne
 most 256 MiB (`CLAW_CODEMODE_MEMORY_MB`); past that it fails with `out of memory` and the turn goes on, instead of
 taking the harness down. A script has no time limit unless it sets one: a first line `// @options: {"timeout_ms": 60000}`
 ends it after that long (pi-durable's codemode; it does not use the sandbox's 5-minute default).
-
-## Restart
-
-`restart_harness` is the one standalone model-facing tool. It writes `data/harness/restart.json`, waits until every
-other live agent is paused after its tool results are stored, closes the harness and exits 0; the compose restart
-policy starts the next process, which consumes the marker and resumes. The tool always answers `Restarted`; a
-second request during a drain is accepted and pauses at its own tool boundary, so two requests cannot deadlock. A
-thread tool waiting on another thread returns when the drain starts, so its turn pauses; the report of the work it
-waited on reaches its thread when that work settles.
-`CLAW_RESTART_DRAIN_MS` (default 1800000, 30 minutes) caps the wait and a timeout still restarts; `CLAW_RESTART_CLOSE_GRACE_MS`
-(default 5000) caps close. It applies startup-only configuration such as MCP servers; it does not rebuild the image,
-so a code release still needs the operator.
 
 ### Known limitations
 
@@ -313,7 +301,7 @@ so a code release still needs the operator.
 T3 Code (desktop · web · mobile) ── harness container ── execution containers (hako, devcontainers)
                                     pi-durable, bridge,      bash, files, scripts; no keys
                                     keys, MCP servers,
-                                    codemode, restart_harness, schedules
+                                    codemode, threads, schedules
 ```
 
 See [docs/design.md](docs/design.md) for the decisions and why.

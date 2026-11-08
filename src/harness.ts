@@ -62,7 +62,7 @@ export interface HarnessExtensionOptions {
  * `ExecutionEnv`, i.e. pi-env SSH to the workspace container; plus any `extraTools`) — all with `callers: ["tools"]`,
  * so only codemode scripts call them. The codemode section lists every one of them, without a budget; MCP tools, which
  * the MCP manager registers, are left out of it and found with `searchTools()`. The system prompt is fixed for a thread
- * (`fixed-prompt.ts`). The host adds the model-facing restart_harness tool as an extra extension.
+ * (`fixed-prompt.ts`).
  */
 export function harnessExtensions(options: HarnessExtensionOptions = {}): readonly Extension[] {
 	const tools: ToolRegistration[] = [

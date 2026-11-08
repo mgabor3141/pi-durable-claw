@@ -1,4 +1,4 @@
-// The always-on assistant: the codemode-first harness (workspace read/write/bash over pi-env SSH, plus restart_harness)
+// The always-on assistant: the codemode-first harness (workspace read/write/bash over pi-env SSH)
 // behind the T3 bridge
 // (`attachT3` from @mgabor3141/pi-durable-t3, which serves T3's web app), plus the title hook and shutdown copied from
 // the bridge's example agent.
@@ -23,7 +23,6 @@ import { SecretStore, withSecrets } from "./secrets.ts";
 import { connectWorkspace, ensureKeypair, workspaceEnv } from "./workspace.ts";
 import { attachT3, mintPairingCode } from "@mgabor3141/pi-durable-t3";
 import { installShutdown } from "./shutdown.ts";
-import { RestartCoordinator, consumeRestartMarker } from "./restart.ts";
 import { titleThread } from "./title.ts";
 
 const PORT = Number(process.env.CLAW_PORT ?? 3775);
@@ -37,12 +36,6 @@ const log = {
 	info: (message: string, fields?: Record<string, unknown>) => console.log(JSON.stringify({ t: new Date().toISOString(), level: "info", message, ...fields })),
 	warn: (message: string, fields?: Record<string, unknown>) => console.log(JSON.stringify({ t: new Date().toISOString(), level: "warn", message, ...fields })),
 };
-
-/** A positive millisecond setting, or the fallback. */
-function envMs(name: string, fallback: number): number {
-	const value = Number(process.env[name]);
-	return Number.isFinite(value) && value > 0 ? value : fallback;
-}
 
 /** The thread tools, grouped in codemode's listing. */
 const THREAD_NAMESPACE = {
@@ -91,9 +84,6 @@ async function main(): Promise<void> {
 	}
 	const stateDir = join(root, "t3");
 	const scratchDir = process.env.CLAW_SCRATCH_DIR?.trim() || "/home/agent/scratch";
-	const priorRestart = consumeRestartMarker(join(root, "restart.json"));
-	if (priorRestart.marker !== undefined) log.info("previous restart marker consumed", { ...priorRestart.marker });
-	else if (priorRestart.error !== undefined) log.warn("previous restart marker was unreadable", { error: priorRestart.error });
 
 	// `pair`: mint a code against the state dir's auth store and exit; the running host reads the store per attempt.
 	if (argv[0] === "pair") {
@@ -125,16 +115,6 @@ async function main(): Promise<void> {
 		process.exit(1);
 	}
 
-	let restarting = false;
-	const restart = new RestartCoordinator({
-		markerPath: join(root, "restart.json"),
-		log,
-		drainTimeoutMs: envMs("CLAW_RESTART_DRAIN_MS", 30 * 60_000),
-		closeGraceMs: envMs("CLAW_RESTART_CLOSE_GRACE_MS", 5_000),
-		onStop: () => {
-			restarting = true;
-		},
-	});
 	// The harness's secrets, beside its data and outside `durable.db` (`secrets.ts`).
 	const secrets = new SecretStore(join(root, "secrets.json"));
 	// The agent's own MCP configuration, `~/.mcp.json` in the workspace: it adds and edits servers itself; an edit is
@@ -152,7 +132,6 @@ async function main(): Promise<void> {
 	secrets.subscribe(() => void mcp.secretsChanged());
 	await mcp.load();
 
-	const restartExtension = restart.extension();
 	let toolRegistry: Registry | undefined;
 	// The agent's browser is T3's preview browser (Browserless over CDP). Without one there is no browser at all: the
 	// tools are not offered, and the log says why.
@@ -168,13 +147,12 @@ async function main(): Promise<void> {
 		mcpNamespaces: mcp.namespaces(),
 		late,
 		secrets: { store: secrets, log },
-		extraExtensions: [mcp.extension(), restartExtension],
+		extraExtensions: [mcp.extension()],
 		onRegistry: (registry) => {
 			mcp.attach(registry);
 			toolRegistry = registry;
 		},
 	});
-	restart.attach(harness);
 	// Connect MCP servers before the T3 bridge accepts input, so the first prompt sees their tools.
 	await mcp.start();
 
@@ -189,9 +167,6 @@ async function main(): Promise<void> {
 			env: workspaceEnv(workspace.connection, "/"),
 			listen: LISTEN,
 			label: LABEL,
-			// A restart's drain ends the thread tools' waits, so a waiting script returns and its turn pauses; the report
-			// of the work it waited on reaches its thread when that work settles.
-			waitSignal: () => restart.drainSignal,
 			routes: [{ method: "GET", path: OAUTH_CALLBACK_PATH, handle: (request) => oauthCallback(mcp, request) }],
 			titleThread: titleThread(harness, models),
 			...(browserlessUrl === ""
@@ -220,20 +195,21 @@ async function main(): Promise<void> {
 	const previewBrowser = t3.previewBrowser;
 	if (previewBrowser !== undefined) late.previewBrowser = (conversationId, url) => previewBrowser.open(conversationId, url);
 
+	let stopping = false;
 	const shutdown = async () => {
+		stopping = true;
 		await mcp.close();
 		await t3.close();
 		await harness.close(BACKGROUND_CONTEXT);
 	};
-	restart.setShutdown(shutdown);
 
 	// Crash resume: the caller resumes AFTER the attach resolved (the bridge's contract). An interrupted codemode call
 	// replays its journal: completed nested calls do not run twice.
 	harness.resume();
 	// A facet that stops serving on its own cannot answer a paired client again: fatal, per the example's policy. A
-	// restart closes it deliberately; the restart flag keeps that close from looking like a failure.
+	// shutdown closes it deliberately, and must then finish closing the harness rather than exit here.
 	void t3.closed.then(() => {
-		if (!restarting) process.exit(1);
+		if (!stopping) process.exit(1);
 	});
 
 	log.info("pi-durable-claw host ready", {

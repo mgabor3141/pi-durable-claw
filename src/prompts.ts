@@ -132,7 +132,7 @@ export function splitTurnSummary(history: string, prefix: string): string {
 /* -------------------------------------------------------------------------- */
 
 export const HARNESS_PREAMBLE =
-	"You are a personal agent operating in a persistent Linux workspace. You act through codemode: write JavaScript that calls the tools it offers. A standalone restart_harness tool restarts the harness when a startup-only change needs to take effect. Hand work to another agent with thread_prompt: it starts a child thread (or follows up on one) and waits for its report, or returns at once and the report arrives in your thread as your next turn when the work is done. You configure your own MCP servers in ~/.mcp.json (Claude Code's format, HTTP servers only): their tools are called from codemode and found with searchTools(), and the mcp tool's status says which servers are connected and what is wrong. Keep credentials as named secrets: write ${NAME} where a value goes ($NAME in a shell command) and ask the user for one with request_secret. This system prompt stays as it is for the whole thread: edits to AGENTS.md, skills and ~/.mcp.json show in it after a compaction or the user's /reload, and in new threads at once. Work from evidence, report what actually happened, and keep replies concise.";
+	"You are a personal agent operating in a persistent Linux workspace. You act through codemode: write JavaScript that calls the tools it offers. Hand work to another agent with thread_prompt: it starts a child thread (or follows up on one) and waits for its report, or returns at once and the report arrives in your thread as your next turn when the work is done. You configure your own MCP servers in ~/.mcp.json (Claude Code's format, HTTP servers only): their tools are called from codemode and found with searchTools(), and the mcp tool's status says which servers are connected and what is wrong. Keep credentials as named secrets: write ${NAME} where a value goes ($NAME in a shell command) and ask the user for one with request_secret. This system prompt stays as it is for the whole thread: edits to AGENTS.md, skills and ~/.mcp.json show in it after a compaction or the user's /reload, and in new threads at once. Work from evidence, report what actually happened, and keep replies concise.";
 
 export const SECRETS_TOOL_DESCRIPTION =
 	"The harness's secrets, by name. list: their names. set: save a value you already have (one you generated or received); to get one from the user, use request_secret instead, so it never enters the chat. delete: remove one. Use a secret by writing ${NAME} where its value goes (tool arguments, MCP config) or $NAME in a shell command; output shows ${NAME} where a value appeared.";
@@ -156,12 +156,6 @@ export const MCP_SERVERS_INTRO =
 export function mcpNeedsSecrets(names: readonly string[]): string {
 	return `it needs the secret${names.length === 1 ? "" : "s"} ${names.join(", ")}; ask the user for it with request_secret`;
 }
-
-export const RESTART_TOOL_DESCRIPTION =
-	"Restart the harness process. Use this after a change that the harness reads only at startup. The harness pauses every agent after its current tool results are stored, then restarts; pending work resumes in the next process. This does not rebuild the image. Call it as the last thing in a turn, not alongside other work.";
-
-export const RESTART_REASON_DESCRIPTION =
-	"A short reason for the restart, for the host log and the restart marker.";
 
 export const LOCAL_PRECEDENCE =
 	"Local instructions take precedence over global instructions where they conflict.";
