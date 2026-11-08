@@ -197,7 +197,7 @@ export function skillsSection(scope: "global" | "local", skills: readonly SkillL
 }
 
 export function conversationTimeSection(value: string): string {
-	return "<conversation-time>\nLocal time when this prompt was loaded: " + value + "\n</conversation-time>";
+	return "<conversation-time>\nLocal time when this conversation started: " + value + "\n</conversation-time>";
 }
 
 export function escapeXml(value: string): string {

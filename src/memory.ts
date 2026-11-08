@@ -1,23 +1,43 @@
 import { join } from "node:path";
 import type { Context } from "@earendil-works/chord";
-import { defineExtension, section, type Extension } from "@earendil-works/pi-durable";
+import { defineDoc, defineExtension, section, type ConversationRecord, type Extension, type Tx } from "@earendil-works/pi-durable";
 import type { ExecutionEnv } from "@earendil-works/pi-durable/env";
 import { loadSkills } from "./skills.ts";
 import { LOCAL_PRECEDENCE, agentsSection, conversationTimeSection, cwdSection, skillsSection } from "./prompts.ts";
 
 const DEFAULT_HOME = "/home/agent";
 
+/** When a conversation started (epoch ms). A fork keeps its parent's: T3's undo and edit fork a thread's conversation. */
+export const ConversationStartDoc = defineDoc<{ at: number | null }>({
+	kind: "claw.conversation-start",
+	version: 1,
+	scope: "conversation",
+	history: "latest",
+	fork: "current",
+	initial: () => ({ at: null }),
+	// Written once, and only a number: every change is a complete base.
+	checkpointWhen: () => true,
+});
+
+/** `HarnessOptions.conversationCreated`: record when a conversation started, unless it is a fork that has its parent's. */
+export function recordConversationStart(now: () => number = Date.now) {
+	return async (tx: Tx, conversation: ConversationRecord): Promise<void> => {
+		const started = await tx.doc(ConversationStartDoc, conversation.id);
+		if (started.at === null) started.at = now();
+	};
+}
+
 export interface WorkspaceMemoryOptions {
 	/** The workspace home. Default `/home/agent`; tests override it. */
 	readonly home?: string;
-	/** The clock used for the conversation-start time. Default `new Date()`. */
+	/** The clock for a conversation with no recorded start (one created before it was recorded). Default `new Date()`. */
 	readonly now?: () => Date;
 }
 
 /**
  * The system context after the preamble and tools: the global AGENTS.md, the
  * global skills, the working directory, the project's AGENTS.md and skills,
- * and the local time when the prompt was rendered. A missing or unreadable
+ * and the local time when the conversation started. A missing or unreadable
  * file is omitted; the prompt is never truncated.
  *
  * The files live in the workspace, so every read goes through pi-env over SSH.
@@ -80,7 +100,11 @@ export function workspaceMemoryExtension(options: WorkspaceMemoryOptions = {}): 
 
 			section(
 				"conversation-time",
-				() => conversationTimeSection(formatLocalTime(now())),
+				// The recorded start, so a prompt rendered again (`/reload`, a compaction) still names when the conversation began.
+				async (input, context) => {
+					const started = (await input.read.snapshot(ConversationStartDoc, input.conversationId, context))?.at ?? null;
+					return conversationTimeSection(formatLocalTime(started === null ? now() : new Date(started)));
+				},
 				{ tag: false },
 			),
 		],

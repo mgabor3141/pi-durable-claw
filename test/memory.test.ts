@@ -88,12 +88,15 @@ describe("system prompt", () => {
 		}
 	});
 
-	it("renders the local time the prompt was loaded (the fixed prompt keeps it: test/fixed-prompt.test.ts)", async () => {
+	it("renders when the conversation started, from its recorded start (test/fixed-prompt.test.ts keeps it over a reload)", async () => {
 		const extension = workspaceMemoryExtension({ now: () => new Date("2026-11-04T12:42:00Z") });
 		const time = section(extension, "conversation-time");
-		const first = await time!.render({ shown: {} } as never, BACKGROUND_CONTEXT);
-		expect(first).toContain("<conversation-time>");
-		expect(first).toContain("Local time when this prompt was loaded:");
-		expect(first).toContain("2026-11-04");
+		const reading = (at: number | undefined) => ({ shown: {}, conversationId: 1, read: { snapshot: async () => (at === undefined ? undefined : { at }) } }) as never;
+		const recorded = await time!.render(reading(Date.parse("2026-10-01T08:00:00Z")), BACKGROUND_CONTEXT);
+		expect(recorded).toContain("<conversation-time>");
+		expect(recorded).toContain("Local time when this conversation started:");
+		expect(recorded).toContain("2026-10-01");
+		// A conversation from before starts were recorded: the clock.
+		expect(await time!.render(reading(undefined), BACKGROUND_CONTEXT)).toContain("2026-11-04");
 	});
 });

@@ -16,7 +16,7 @@ import { PROMPT_SECTIONS, fixedPromptExtension } from "../src/fixed-prompt.ts";
 import { codemodeSandbox, harnessExtensions } from "../src/harness.ts";
 import { fileSource } from "../src/mcp/config.ts";
 import { McpManager } from "../src/mcp/manager.ts";
-import { workspaceMemoryExtension } from "../src/memory.ts";
+import { ConversationStartDoc, recordConversationStart, workspaceMemoryExtension } from "../src/memory.ts";
 import { preambleExtension } from "../src/preamble.ts";
 
 const ctx = BACKGROUND_CONTEXT;
@@ -65,7 +65,8 @@ describe("the fixed system prompt", () => {
 			createCodemodeExtension({ sandbox: codemodeSandbox(), namespaces: mcp.namespaces(), inlineBudget: Number.POSITIVE_INFINITY }) as Extension,
 			defineExtension({ name: "first", tools: [scriptTool("first_tool")] }),
 			mcp.extension(),
-			workspaceMemoryExtension({ home }),
+			// A clock far from the recorded start: a prompt rendered again must still name the start.
+			workspaceMemoryExtension({ home, now: () => new Date("2030-01-01T12:00:00Z") }),
 		]) {
 			registry.install(extension);
 		}
@@ -86,8 +87,13 @@ describe("the fixed system prompt", () => {
 			return fauxAssistantMessage(replies.shift() ?? "ok");
 		};
 		faux.setResponses(Array.from({ length: 20 }, () => step));
+		let creationClock = Date.parse("2026-10-01T08:00:00Z");
 		const storage = await openNodeSqliteStorage(join(dir, "durable.db"));
-		const harness = await Harness.open(storage, { models, registry, env: () => new NodeExecutionEnv({ cwd: home }) }, ctx);
+		const harness = await Harness.open(
+			storage,
+			{ models, registry, env: () => new NodeExecutionEnv({ cwd: home }), conversationCreated: recordConversationStart(() => creationClock) },
+			ctx,
+		);
 		try {
 			const conversation = await harness.root(ctx, { agent: { model: { provider: "faux", modelId: faux.models[0]!.id } } });
 			const turn = async (text: string, reply: string) => {
@@ -138,6 +144,16 @@ describe("the fixed system prompt", () => {
 			await turn("five", "fifth");
 			expect(prompts[4]).toContain("Rule three.");
 			expect(prompts[4]).not.toContain("Rule two.");
+			for (const prompt of prompts) {
+				expect(prompt).toContain("Local time when this conversation started: 2026-10-01");
+				expect(prompt).not.toContain("2030-01-01");
+			}
+
+			// A fork (T3's undo and edit fork a thread's conversation) keeps the start it inherited.
+			creationClock = Date.parse("2027-02-02T08:00:00Z");
+			const at = (await conversation.entries({}, 1, undefined, ctx)).items[0]!.id;
+			const fork = await conversation.fork(at, { ownership: "ordinary" } as never, ctx);
+			expect((await harness.snapshot(ConversationStartDoc, fork.id, ctx))?.at).toBe(Date.parse("2026-10-01T08:00:00Z"));
 		} finally {
 			await harness.close(ctx);
 		}

@@ -4,7 +4,7 @@ import { createRegistry, defineExtension, Harness, type Extension, type HarnessO
 import { createCodemodeExtension, type CodemodeNamespace } from "@earendil-works/pi-durable/codemode";
 import { openNodeSqliteStorage } from "@earendil-works/pi-durable/storage/sqlite/node";
 import { CodemodeSandbox } from "@earendil-works/pi-codemode";
-import { workspaceMemoryExtension } from "./memory.ts";
+import { recordConversationStart, workspaceMemoryExtension } from "./memory.ts";
 import { preambleExtension } from "./preamble.ts";
 import { fixedPromptExtension } from "./fixed-prompt.ts";
 import { compactionExtension } from "./compaction.ts";
@@ -117,6 +117,7 @@ export async function openHarness(
 			// says it works: a project's root, a Scratch thread's own folder, or the home fallback.
 			env: (target) => workspaceEnv(options.workspace.connection, target.cwd ?? options.cwd ?? "/home/agent"),
 			settings: { toolExecution: "sequential" },
+			conversationCreated: recordConversationStart(),
 		},
 		context,
 	);
