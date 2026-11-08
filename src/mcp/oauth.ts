@@ -4,7 +4,7 @@
 //
 // The redirect comes back to the host itself (`<public URL>/host/oauth/callback`): the user's browser already reaches
 // the host, since that is how they use T3. A browser that cannot (the redirect page fails to load) still shows the URL;
-// pasted back to the agent, it completes the same way. The agent starts a sign-in with `mcp_auth` and hands the user
+// pasted back to the agent, it completes the same way. The agent starts a sign-in with `mcp` and hands the user
 // the link. Tokens are refreshed on their own and kept with the harness's secrets (`../secrets.ts`), never in the
 // config, and are scrubbed from tool output like any secret.
 import {

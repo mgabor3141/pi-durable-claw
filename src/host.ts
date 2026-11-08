@@ -166,7 +166,6 @@ async function main(): Promise<void> {
 		workspace,
 		models,
 		mcpNamespaces: mcp.namespaces(),
-		toolSearch: () => mcp.hasIndirectTools(),
 		late,
 		secrets: { store: secrets, log },
 		extraExtensions: [mcp.extension(), restartExtension],

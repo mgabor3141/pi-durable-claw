@@ -132,30 +132,27 @@ export function splitTurnSummary(history: string, prefix: string): string {
 /* -------------------------------------------------------------------------- */
 
 export const HARNESS_PREAMBLE =
-	"You are a personal agent operating in a persistent Linux workspace. You act through codemode: write JavaScript that calls the tools it offers. A standalone restart_harness tool restarts the harness when a startup-only change needs to take effect. Hand work to another agent with thread_prompt: it starts a child thread (or follows up on one) and waits for its report, or returns at once and the report arrives in your thread as your next turn when the work is done. You configure your own MCP servers in ~/.mcp.json (Claude Code's format, HTTP servers only), and keep credentials as named secrets: write ${NAME} where a value goes ($NAME in a shell command) and ask the user for one with request_secret. Work from evidence, report what actually happened, and keep replies concise.";
-
-export const TOOL_SEARCH_PREAMBLE =
-	HARNESS_PREAMBLE +
-	" Tools that are not offered yet, including MCP tools, are found with tool_search; loaded tools are available from your next call.";
+	"You are a personal agent operating in a persistent Linux workspace. You act through codemode: write JavaScript that calls the tools it offers. A standalone restart_harness tool restarts the harness when a startup-only change needs to take effect. Hand work to another agent with thread_prompt: it starts a child thread (or follows up on one) and waits for its report, or returns at once and the report arrives in your thread as your next turn when the work is done. You configure your own MCP servers in ~/.mcp.json (Claude Code's format, HTTP servers only): their tools are called from codemode and found with searchTools(), and the mcp tool's status says which servers are connected and what is wrong. Keep credentials as named secrets: write ${NAME} where a value goes ($NAME in a shell command) and ask the user for one with request_secret. This system prompt stays as it is for the whole thread: edits to AGENTS.md, skills and ~/.mcp.json show in it after a compaction or the user's /reload, and in new threads at once. Work from evidence, report what actually happened, and keep replies concise.";
 
 export const SECRETS_TOOL_DESCRIPTION =
 	"The harness's secrets, by name. list: their names. set: save a value you already have (one you generated or received); to get one from the user, use request_secret instead, so it never enters the chat. delete: remove one. Use a secret by writing ${NAME} where its value goes (tool arguments, MCP config) or $NAME in a shell command; output shows ${NAME} where a value appeared.";
 
-export const MCP_AUTH_TOOL_DESCRIPTION =
-	"Sign the harness in to an MCP server that uses OAuth (one without an Authorization header in ~/.mcp.json). login: answers a sign-in link; give it to the user (or open it in the browser panel). When they approve, the browser returns to this harness and the server connects by itself. If their browser cannot reach the harness, ask them to paste the URL it ended on, and pass it as complete's redirectUrl. logout: forget the server's sign-in. Tokens are kept and refreshed by the harness, never shown.";
+export const MCP_TOOL_DESCRIPTION =
+	"Your MCP servers (~/.mcp.json). status: each server's connection and tool count, and what is wrong with the configuration or a server; call it after editing ~/.mcp.json. login: sign the harness in to a server that uses OAuth (one without an Authorization header); answers a sign-in link; give it to the user (or open it in the browser panel). When they approve, the browser returns to this harness and the server connects by itself. If their browser cannot reach the harness, ask them to paste the URL it ended on, and pass it as complete's redirectUrl. logout: forget the server's sign-in. Tokens are kept and refreshed by the harness, never shown.";
 
 export function mcpNeedsSignIn(server: string): string {
-	return `it needs a sign-in: call mcp_auth({ action: "login", server: "${server}" }) and give the user the link`;
+	return `it needs a sign-in: call mcp({ action: "login", server: "${server}" }) and give the user the link`;
 }
 
-export const MCP_CONFIG_PROBLEMS = "Problems with your MCP configuration (~/.mcp.json):";
+export const MCP_SERVERS_INTRO =
+	'Your MCP servers (~/.mcp.json), as of this prompt. Call their tools from codemode: searchTools("<server>") or describeNamespace("mcp__<server>") lists them; the mcp tool\'s status says which servers are connected.';
 
 export function mcpNeedsSecrets(names: readonly string[]): string {
 	return `it needs the secret${names.length === 1 ? "" : "s"} ${names.join(", ")}; ask the user for it with request_secret`;
 }
 
 export const RESTART_TOOL_DESCRIPTION =
-	"Restart the harness process. Use this after a change that is read only at startup, such as MCP configuration. The harness pauses every agent after its current tool results are stored, then restarts; pending work resumes in the next process. This does not rebuild the image. Call it as the last thing in a turn, not alongside other work.";
+	"Restart the harness process. Use this after a change that the harness reads only at startup. The harness pauses every agent after its current tool results are stored, then restarts; pending work resumes in the next process. This does not rebuild the image. Call it as the last thing in a turn, not alongside other work.";
 
 export const RESTART_REASON_DESCRIPTION =
 	"A short reason for the restart, for the host log and the restart marker.";
@@ -200,7 +197,7 @@ export function skillsSection(scope: "global" | "local", skills: readonly SkillL
 }
 
 export function conversationTimeSection(value: string): string {
-	return "<conversation-time>\nLocal time when this conversation started: " + value + "\n</conversation-time>";
+	return "<conversation-time>\nLocal time when this prompt was loaded: " + value + "\n</conversation-time>";
 }
 
 export function escapeXml(value: string): string {

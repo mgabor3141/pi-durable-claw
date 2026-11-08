@@ -88,15 +88,12 @@ describe("system prompt", () => {
 		}
 	});
 
-	it("freezes the conversation-start time from the shown sections", async () => {
+	it("renders the local time the prompt was loaded (the fixed prompt keeps it: test/fixed-prompt.test.ts)", async () => {
 		const extension = workspaceMemoryExtension({ now: () => new Date("2026-11-04T12:42:00Z") });
 		const time = section(extension, "conversation-time");
 		const first = await time!.render({ shown: {} } as never, BACKGROUND_CONTEXT);
 		expect(first).toContain("<conversation-time>");
-		expect(first).toContain("Local time when this conversation started:");
+		expect(first).toContain("Local time when this prompt was loaded:");
 		expect(first).toContain("2026-11-04");
-
-		const prior = "<conversation-time>\nLocal time when this conversation started: earlier\n</conversation-time>";
-		expect(await time!.render({ shown: { "conversation-time": prior } } as never, BACKGROUND_CONTEXT)).toBe(prior);
 	});
 });

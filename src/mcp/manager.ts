@@ -4,8 +4,9 @@
  * The manager connects at startup, lists each server's tools, and installs one extension per
  * server. A failed server does not stop the harness: its tools are absent, and the manager keeps
  * reconnecting it in the background (a model cannot call a tool it was never shown, so waiting for a
- * call would wait forever). A server that drops is reconnected the same way. Tools are exposed as deferred model tools by default, so `tool_search` loads
- * them for direct use, while codemode scripts can call them at any time.
+ * call would wait forever). A server that drops is reconnected the same way. Scripts call the tools, which codemode's
+ * listing leaves out: `searchTools()` finds them. The system prompt names the configured servers; the `mcp` tool says
+ * which are connected and what is wrong.
  */
 
 import type { CallToolResult, McpRequestOptions, McpTransport, Tool as McpTool } from "@earendil-works/pi-mcp";
@@ -18,11 +19,10 @@ import {
 	type ToolRegistration,
 } from "@earendil-works/pi-durable";
 import type { CodemodeNamespace } from "@earendil-works/pi-durable/codemode";
-import { createToolSearchExtension } from "@earendil-works/pi-durable/tool-search";
 import { GenerationTask, hook } from "@earendil-works/pi-durable";
 import {
 	getMcpToolExposure,
-	hasIndirectTools,
+	hasCallableTools,
 	parseMcpConfig,
 	resolveConnection,
 	type McpConfigSource,
@@ -30,11 +30,11 @@ import {
 	type McpServerConfig,
 	type SecretResolver,
 } from "./config.ts";
-import { MCP_AUTH_TOOL_DESCRIPTION, mcpNeedsSecrets, mcpNeedsSignIn } from "../prompts.ts";
+import { MCP_TOOL_DESCRIPTION, mcpNeedsSecrets, mcpNeedsSignIn } from "../prompts.ts";
 import { type McpOAuth, needsSignIn, usesOAuth } from "./oauth.ts";
 import { defineTool } from "@earendil-works/pi-durable";
 import { Type } from "@earendil-works/pi-ai";
-import { mcpServersSection, type McpReach, type McpServerSummary } from "./section.ts";
+import { mcpServersSection, type McpServerSummary } from "./section.ts";
 import { createMcpToolName, createMcpToolRegistration } from "./tools.ts";
 
 export interface McpLogger {
@@ -98,11 +98,6 @@ function withTimeout<T>(promise: Promise<T>, ms: number, message: string): Promi
 	});
 }
 
-function firstLine(text: string | undefined): string | undefined {
-	const line = text?.trim().split("\n", 1)[0]?.trim();
-	return line === undefined || line.length === 0 ? undefined : line;
-}
-
 /** Whether a server is enabled. */
 function enabled(config: McpServerConfig): boolean {
 	return config.enabled !== false;
@@ -121,7 +116,6 @@ export class McpManager {
 	private reloading: Promise<void> | undefined;
 	/** The namespaces codemode sees: one array, updated in place, since codemode reads it at each use. */
 	private readonly liveNamespaces: CodemodeNamespace[];
-	private toolSearch: Extension | undefined;
 
 	constructor(options: McpManagerOptions) {
 		this.options = options;
@@ -199,20 +193,22 @@ export class McpManager {
 		return server;
 	}
 
-	/** `mcp_auth`: start a sign-in, finish one from a pasted URL, or sign out. */
-	private authTool() {
+	/** `mcp`: the servers' status; start a sign-in, finish one from a pasted URL, or sign out. */
+	private tool() {
 		return defineTool({
-			name: "mcp_auth",
-			description: MCP_AUTH_TOOL_DESCRIPTION,
+			name: "mcp",
+			description: MCP_TOOL_DESCRIPTION,
 			parameters: Type.Object({
-				action: Type.Union([Type.Literal("login"), Type.Literal("complete"), Type.Literal("logout")]),
+				action: Type.Union([Type.Literal("status"), Type.Literal("login"), Type.Literal("complete"), Type.Literal("logout")]),
 				server: Type.Optional(Type.String({ description: "The server's name in ~/.mcp.json (login, logout)" })),
 				redirectUrl: Type.Optional(Type.String({ description: "The URL the user's browser ended on (complete)" })),
 			}),
 			callers: ["tools"],
 			execute: async (args) => {
 				const answer = (value: unknown) => ({ output: [{ type: "text" as const, text: JSON.stringify(value) }] });
-				const oauth = this.options.oauth!;
+				if (args.action === "status") return answer(await this.report());
+				const oauth = this.options.oauth;
+				if (oauth === undefined) throw new Error("OAuth sign-in is not configured on this harness");
 				if (args.action === "complete") {
 					if (args.redirectUrl === undefined || !URL.canParse(args.redirectUrl)) throw new Error("complete needs the full redirectUrl the browser ended on");
 					const server = await this.completeSignIn(new URL(args.redirectUrl).searchParams);
@@ -268,7 +264,6 @@ export class McpManager {
 			if (this.started && enabled(entry.config)) void this.connect(entry.name);
 		}
 		this.liveNamespaces.splice(0, this.liveNamespaces.length, ...(this.options.baseNamespaces ?? []), ...this.currentNamespaces());
-		this.updateToolSearch();
 	}
 
 	/** A server that left the configuration: close it, stop retrying, uninstall its tools. */
@@ -281,19 +276,6 @@ export class McpManager {
 		if (client !== undefined) await client.close().catch(() => {});
 		if (state.extension !== undefined) this.registry?.uninstall(state.extension);
 		this.options.logger?.info("MCP server removed", { server: state.entry.name });
-	}
-
-	/** `tool_search` is offered while some server's tools are reached through it. */
-	private updateToolSearch(): void {
-		if (this.registry === undefined) return;
-		const needed = this.hasIndirectTools();
-		if (needed && this.toolSearch === undefined) {
-			this.toolSearch = createToolSearchExtension() as Extension;
-			this.registry.install(this.toolSearch);
-		} else if (!needed && this.toolSearch !== undefined) {
-			this.registry.uninstall(this.toolSearch);
-			this.toolSearch = undefined;
-		}
 	}
 
 	/** Namespaces for codemode's `describeNamespace()`: a live array, kept current as the configuration changes. */
@@ -313,21 +295,14 @@ export class McpManager {
 			}));
 	}
 
-	/** Whether the model needs `tool_search` for any configured server. */
-	hasIndirectTools(): boolean {
-		return [...this.states.values()].some(
-			(state) => enabled(state.entry.config) && hasIndirectTools(state.entry.config),
-		);
-	}
-
-	/** The `mcp_servers` prompt section (servers, and what is wrong with the config or a server), and the hooks that
-	 * notice an edit of the config: its version is checked after each round of tools (the agent edits it with them, and
-	 * the next request sees the result) and before each request (an edit from outside). */
+	/** The `mcp-servers` prompt section (the configured servers), the `mcp` tool, and the hooks that notice an edit of the
+	 * config: its version is checked after each round of tools (the agent edits it with them) and before each request (an
+	 * edit from outside). An edit changes the tools scripts can call at once; the prompt shows it after a reload. */
 	extension(): Extension {
 		return defineExtension({
 			name: "mcp-servers",
-			sections: [section("mcp-servers", () => mcpServersSection(this.summaries(), this.problems()))],
-			...(this.options.oauth === undefined ? {} : { tools: [this.authTool()] }),
+			sections: [section("mcp-servers", () => mcpServersSection(this.summaries()))],
+			tools: [this.tool()],
 			hooks: [
 				hook(GenerationTask, {
 					beforeRequest: async () => {
@@ -346,6 +321,23 @@ export class McpManager {
 		return state === undefined ? undefined : { status: state.status, ...(state.error === undefined ? {} : { error: state.error }) };
 	}
 
+	/** `mcp`'s status: the config read afresh, and each server once its connection attempt settled. */
+	private async report() {
+		await this.recheck();
+		await Promise.all([...this.states.values()].map((state) => state.connecting?.catch(() => {})));
+		return {
+			config: this.options.source.describe,
+			problems: this.problems(),
+			servers: [...this.states.values()].map((state) => ({
+				name: state.entry.name,
+				namespace: state.entry.namespace,
+				...(enabled(state.entry.config) ? { status: state.status } : { status: "disabled" }),
+				...(state.error === undefined ? {} : { error: state.error }),
+				tools: state.registeredNames.length,
+			})),
+		};
+	}
+
 	/** What the agent should know is wrong: config errors, and servers that failed to connect. */
 	problems(): string[] {
 		const failing = [...this.states.values()].filter((state) => enabled(state.entry.config) && state.status === "failed" && state.error !== undefined);
@@ -356,7 +348,6 @@ export class McpManager {
 	attach(registry: Registry): void {
 		this.registry = registry;
 		for (const state of this.states.values()) this.install(state);
-		this.updateToolSearch();
 	}
 
 	/** Connect every enabled server. Failures are recorded and logged, not thrown. */
@@ -414,32 +405,15 @@ export class McpManager {
 		return client.callTool(tool, args, options);
 	}
 
+	/** The configured servers scripts can call, as ~/.mcp.json describes them (connected or not). */
 	private summaries(): McpServerSummary[] {
-		const result: McpServerSummary[] = [];
-		for (const state of this.states.values()) {
-			if (!enabled(state.entry.config)) continue;
-			const reaches = this.reaches(state);
-			if (reaches.length === 0) continue;
-			result.push({
+		return [...this.states.values()]
+			.filter((state) => enabled(state.entry.config) && hasCallableTools(state.entry.config))
+			.map((state) => ({
 				name: state.entry.name,
 				namespace: state.entry.namespace,
-				description: state.entry.config.description ?? firstLine(state.instructions),
-				reaches,
-			});
-		}
-		return result;
-	}
-
-	private reaches(state: McpState): McpReach[] {
-		const exposures = new Set(
-			state.tools.length > 0
-				? state.tools.map((tool) => getMcpToolExposure(state.entry.config, tool.name))
-				: [state.entry.config.exposure ?? "deferred", ...Object.values(state.entry.config.toolExposure ?? {})],
-		);
-		const reaches: McpReach[] = [];
-		if (exposures.has("deferred")) reaches.push("tool_search");
-		if (exposures.has("codemode")) reaches.push("codemode");
-		return reaches;
+				...(state.entry.config.description === undefined ? {} : { description: state.entry.config.description }),
+			}));
 	}
 
 	private async connect(server: string): Promise<void> {

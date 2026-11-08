@@ -12,7 +12,7 @@ the rest of the design is not built yet.
 **Agent-written code never runs where the keys are.**
 
 - The **harness container** runs the agent loop, holds your keys, and connects to your HTTP MCP servers. The agent
-  reaches them only through codemode (or a tool it has loaded with `tool_search`), never their keys.
+  reaches them only through codemode, never their keys.
 - **Execution containers** are where the agent runs bash, Python and its own scripts. They hold no keys, so they need
   no permission system.
 
@@ -63,9 +63,27 @@ and the workspace's host key is the one the harness trusts. The archive holds th
 The `read`, `write`, `edit` and `bash` tools run in the workspace over SSH and start in the conversation's own
 working directory: a project's root, a Scratch thread's folder, or `/home/agent`. The prompt carries the global
 `AGENTS.md` and global skills from `~/.agents/skills`, then the working directory, the project's `AGENTS.md` and
-its `.agents/skills`, and the local time when the conversation started. The agent owns its tools under
+its `.agents/skills`, and the local time the prompt was loaded. The agent owns its tools under
 `/home/agent`; the workspace image reads `PATH` from `~/.ssh/environment` and includes `jq`. The model tool list is
-`codemode` and `restart_harness`, plus `tool_search` when MCP servers with deferred tools are configured.
+`codemode`, `restart_harness` and the bridge's `request_secret`, and it never changes.
+
+## A fixed system prompt
+
+The system prompt is rendered at a thread's first request and then sent byte for byte the same, so the provider's
+prompt cache keeps the whole prefix. Edits to `AGENTS.md` and skills, `~/.mcp.json`, and tools registered while the
+harness runs change nothing in a running thread's prompt. New threads, child threads included, get the current prompt
+at once.
+
+A running thread renders it afresh after:
+
+- `/reload`, a T3 slash command. The bridge removes every shown section, and the next request renders all of them.
+- A compaction. Its first request writes the whole prompt again anyway. The one exception: if a `/reload` happened
+  within the history the compaction keeps (its last ~20k tokens), the prompt that reload rendered stays.
+
+The codemode section lists every harness tool in full, with no token budget. MCP tools are left out of it, since a
+server can bring dozens; scripts find them with `searchTools()`. A tool registered after the prompt was rendered can
+be called at once and is found the same way. `src/fixed-prompt.ts` keeps the prompt, and
+`test/fixed-prompt.test.ts` checks both that every section is kept and that a change sends the same bytes.
 
 ## Compaction
 
@@ -79,8 +97,8 @@ as the durable `pi.compaction` entry and shown as a completed item in T3.
 
 All model-facing prompts and tool copy this harness authors — system prompts, user-prompt templates, XML wrappers,
 tool descriptions and short tool output notes — lives in `src/prompts.ts`. Tool descriptions inherited from pi-durable's coding and
-codemode tools are not duplicated there. MCP tool descriptions come from the server and are shown only when
-`tool_search` loads them (or in a script's on-demand `describeTool()`).
+codemode tools are not duplicated there. MCP tool descriptions come from the server and are shown only in a
+script's on-demand `describeTool()`.
 
 ## Attachments
 
@@ -130,8 +148,8 @@ the device, so no host forwarder or proxy is needed.
 The agent owns its MCP configuration: `/home/agent/.mcp.json` in the workspace, in Claude Code's `.mcp.json`
 format, so a snippet from a server's documentation works as is. The agent adds, edits and removes servers itself. The
 harness checks the file before each model request and after each round of tools, and applies the change: a new server
-connects, a changed one reconnects, a removed one is closed. A broken file or entry is shown to the agent in
-`mcp_servers` and leaves the running servers alone. Project `.mcp.json` files are not read.
+connects, a changed one reconnects, a removed one is closed. A broken file or entry leaves the running servers alone.
+Project `.mcp.json` files are not read.
 
 ```json
 {
@@ -141,45 +159,44 @@ connects, a changed one reconnects, a removed one is closed. A broken file or en
       "url": "https://mcp.example.com/mcp",
       "headers": { "Authorization": "Bearer ${DOCS_TOKEN}" },
       "timeout": 60000,
-      "description": "Search and read the product documentation",
-      "exposure": "deferred"
+      "description": "Search and read the product documentation"
     }
   }
 }
 ```
 
 `type` is required: `"http"` (or its alias `"streamable-http"`). `timeout` is per request, in milliseconds.
-`alwaysLoad: true` means `exposure: "direct"`. stdio, `sse` and `ws` entries are refused with a message saying so.
-`${NAME}` (or `${NAME:-default}`) in `url` or `headers` names one of the harness's [secrets](#secrets), never an
+stdio, `sse` and `ws` entries are refused with a message saying so, as is `alwaysLoad: true`: every MCP tool is called
+from codemode.
+`${NAME}` (or `default`) in `url` or `headers` names one of the harness's [secrets](#secrets), never an
 environment variable. A server that names a missing secret is reported as needing it, and connects once the secret is
 saved. Changing a secret reconnects the servers that use it.
 
-Exposure, per server or per tool with `toolExposure`:
+Scripts call every MCP tool. `exposure: "hidden"` (per server, or per tool with `toolExposure`, exact names or `*`
+patterns) makes a tool unreachable; `"codemode"` is the default.
 
-- `deferred` (default): the tool is not in the first model request. `tool_search` loads it, and
-  the model can then call it directly; codemode scripts can call it at any time.
-- `codemode`: script-only. It is not offered to the model and `tool_search` cannot load it.
-- `direct`: offered to the model immediately, and callable from scripts.
-- `hidden`: not reachable.
+The system prompt names the configured servers with their `description`, as `~/.mcp.json` had them when the prompt was
+rendered (see [A fixed system prompt](#a-fixed-system-prompt)). Scripts find the tools with `searchTools()` and
+`describeNamespace("mcp__<server>")`. A successful connect installs the server's tools, callable at once. A server
+that fails to connect, or drops later, is logged and reconnected in the background (after 5 s, 15 s, 1 min, then
+every 5 min); its tools appear once it is back.
 
-`mcp_servers` lists the configured indirect servers and how to reach them. `describeNamespace()`
-and `searchTools()` see the `mcp__<server>` namespaces. A successful connect installs the
-server's tools. A server that fails to connect, or drops later, is logged and reconnected in the
-background (after 5 s, 15 s, 1 min, then every 5 min); its tools appear once it is back. `tool_search` is offered while
-some server's tools are reached through it.
+`mcp({ action: "status" })` answers what is live: the configuration read afresh, its problems, and each server's
+connection, error and tool count, once a connection in progress has settled. The agent calls it after editing
+`~/.mcp.json`.
 
 ### OAuth
 
-A server with no `Authorization` header signs in by OAuth when it answers 401, as in Claude Code. It shows in
-`mcp_servers` as needing a sign-in. The agent calls `mcp_auth({ action: "login", server })` and gives the user the link.
+A server with no `Authorization` header signs in by OAuth when it answers 401, as in Claude Code. `mcp`'s status shows
+it as needing a sign-in. The agent calls `mcp({ action: "login", server })` and gives the user the link.
 After the user approves, the browser returns to `<CLAW_PUBLIC_URL>/host/oauth/callback` and the server connects. If the
 user's browser cannot reach that URL, the page fails to load, but the address bar still holds the code: pasted back to
-the agent, `mcp_auth({ action: "complete", redirectUrl })` finishes the sign-in the same way. A callback works once.
+the agent, `mcp({ action: "complete", redirectUrl })` finishes the sign-in the same way. A callback works once.
 
 Discovery follows the MCP authorization spec (RFC 9728, then RFC 8414). The client registers dynamically, unless the
 server takes a Client ID Metadata Document or you configure a client. Tokens refresh on their own, including a
 step-up on `insufficient_scope`. They are kept with the secrets in `secrets.json` and appear in tool output only as
-`[<server> OAuth credential]`. `mcp_auth({ action: "logout", server })` forgets a sign-in.
+`[<server> OAuth credential]`. `mcp({ action: "logout", server })` forgets a sign-in.
 
 Claude Code's `oauth` block is read:
 
@@ -203,7 +220,7 @@ one with `request_secret`: T3 shows a private card in the thread, the value you 
 chose (`GITHUB_TOKEN`), and it never enters the chat. Scripts can also `list`, `set` (a value the agent already has) and
 `delete` secrets with the `secrets` tool.
 
-The agent uses a secret by writing `${NAME}` (or `${NAME:-default}`) where the value goes: tool arguments, MCP config,
+The agent uses a secret by writing `${NAME}` (or `default`) where the value goes: tool arguments, MCP config,
 browser form fields. A shell command uses `$NAME`: the secrets it names are exported to it. The value is substituted only
 inside the running tool, so the recorded call keeps the placeholder, and any value that appears in a tool's output comes
 back as `${NAME}`. This keeps secrets out of the model's context and the transcript; it is not a wall between the agent

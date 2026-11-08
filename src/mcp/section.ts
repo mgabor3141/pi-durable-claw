@@ -1,76 +1,32 @@
 /**
- * The `mcp_servers` system prompt section.
- *
- * It names only servers whose tools are reached indirectly. A `deferred` server is loaded with
- * `tool_search`; a `codemode` server is called from scripts. Tools exposed directly are already
- * in the model's tool list and are not listed here. The section is bounded like pi's.
+ * The `mcp-servers` system prompt section: the servers in ~/.mcp.json whose tools scripts can call, each with the
+ * description its entry gives. It is rendered with the rest of the prompt and kept for the thread, so it comes from the
+ * configuration, not from what is connected at the moment; the `mcp` tool's status says that.
  */
 
-import { MCP_CONFIG_PROBLEMS } from "../prompts.ts";
-
-export type McpReach = "tool_search" | "codemode";
+import { MCP_SERVERS_INTRO } from "../prompts.ts";
 
 export interface McpServerSummary {
 	readonly name: string;
 	readonly namespace: string;
 	readonly description?: string;
-	readonly reaches: readonly McpReach[];
 }
 
-const MAX_SERVER_DESCRIPTION_CHARS = 250;
-const MAX_SECTION_CHARS = 4096;
+const MAX_DESCRIPTION_CHARS = 250;
 
-function truncate(text: string, max: number): string {
-	if (text.length <= max) return text;
-	return max <= 1 ? "" : `${text.slice(0, max - 1).trimEnd()}…`;
+function firstLine(text: string): string {
+	const line = text.trim().split("\n", 1)[0]?.trim() ?? "";
+	return line.length <= MAX_DESCRIPTION_CHARS ? line : `${line.slice(0, MAX_DESCRIPTION_CHARS - 1).trimEnd()}…`;
 }
 
-function intro(reaches: ReadonlySet<McpReach>): string {
-	let text = "MCP servers whose tools are not declared to you.";
-	if (reaches.has("codemode")) text += " Call the tools of codemode servers from codemode scripts.";
-	if (reaches.has("tool_search")) text += " Load the tools of tool_search servers with tool_search.";
-	return text;
-}
-
-/** Render the section, or undefined when no server needs one and nothing is wrong. `problems` (a broken config, a
- * server that cannot connect) come first, so the agent that edited the config sees what to fix. */
-export function mcpServersSection(servers: readonly McpServerSummary[], problems: readonly string[] = []): string | undefined {
-	const listed = servers
-		.filter((server) => server.reaches.length > 0)
-		.slice()
-		.sort((a, b) => a.name.localeCompare(b.name));
-	const trouble = problems.length === 0 ? [] : [MCP_CONFIG_PROBLEMS, ...problems.map((problem) => `- ${truncate(problem, 400)}`)];
-	if (listed.length === 0) return trouble.length === 0 ? undefined : trouble.join("\n");
-	const servers_ = renderServers(listed);
-	return trouble.length === 0 ? servers_ : [...trouble, "", servers_].join("\n");
-}
-
-function renderServers(listed: readonly McpServerSummary[]): string {
-
-	const reaches = new Set(listed.flatMap((server) => server.reaches));
-	const introText = intro(reaches);
-	const heads = listed.map(
-		(server) => `- ${server.namespace} (${server.reaches.join(", ")})`,
-	);
-	const omitted = (count: number) =>
-		count > 0
-			? [`- … ${count} more server${count === 1 ? "" : "s"}; find their tools with searchTools()`]
-			: [];
-	const size = (kept: number) => [introText, ...heads.slice(0, kept), ...omitted(listed.length - kept)].join("\n").length;
-
-	let kept = listed.length;
-	while (kept > 0 && size(kept) > MAX_SECTION_CHARS) kept--;
-	const perServer =
-		kept === 0
-			? 0
-			: Math.min(
-					MAX_SERVER_DESCRIPTION_CHARS,
-					Math.floor((MAX_SECTION_CHARS - size(kept)) / kept) - 2,
-				);
-	const lines = listed.slice(0, kept).map((server, index) => {
-		const summary =
-			perServer > 0 && server.description !== undefined ? truncate(server.description.trim().split("\n", 1)[0] ?? "", perServer) : "";
-		return summary.length > 0 ? `${heads[index]}: ${summary}` : heads[index];
-	});
-	return [introText, ...lines, ...omitted(listed.length - kept)].join("\n");
+/** Render the section, or undefined without servers. */
+export function mcpServersSection(servers: readonly McpServerSummary[]): string | undefined {
+	if (servers.length === 0) return undefined;
+	const lines = servers
+		.toSorted((a, b) => a.name.localeCompare(b.name))
+		.map((server) => {
+			const description = server.description === undefined ? "" : firstLine(server.description);
+			return `- ${server.name} (${server.namespace})${description === "" ? "" : `: ${description}`}`;
+		});
+	return [MCP_SERVERS_INTRO, ...lines].join("\n");
 }

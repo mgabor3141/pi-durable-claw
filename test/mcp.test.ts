@@ -2,9 +2,8 @@ import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
-import { createRegistry, type ToolRegistration } from "@earendil-works/pi-durable";
+import { createRegistry } from "@earendil-works/pi-durable";
 import { createInMemoryTransportPair } from "@earendil-works/pi-mcp/testing";
-import { createToolSearchTool } from "@earendil-works/pi-durable/tool-search";
 import { afterEach, describe, expect, it } from "vitest";
 import { fileSource, getMcpToolExposure, parseMcpConfig, resolveConnection } from "../src/mcp/config.ts";
 import { SecretStore } from "../src/secrets.ts";
@@ -55,9 +54,9 @@ describe("MCP configuration", () => {
 				docs: {
 					type: "http",
 					url: "https://example.test/mcp?key=${DOCS_KEY}",
-					headers: { Authorization: "Bearer ${DOCS_TOKEN}", "X-Region": "${REGION:-eu}" },
+					headers: { Authorization: "Bearer ${DOCS_TOKEN}", "X-Region": "eu" },
 					timeout: 30000,
-					alwaysLoad: true,
+					alwaysLoad: false,
 					description: "Documentation",
 				},
 				// Claude Code's alias for the same transport.
@@ -67,7 +66,8 @@ describe("MCP configuration", () => {
 		expect(loaded.errors).toEqual([]);
 		const docs = loaded.servers[0]!;
 		expect(docs.namespace).toBe("mcp__docs");
-		expect(docs.config).toMatchObject({ timeout: 30000, exposure: "direct" });
+		expect(docs.config).toMatchObject({ timeout: 30000, description: "Documentation" });
+		expect(getMcpToolExposure(docs.config, "search"), "scripts call every tool by default").toBe("codemode");
 		const secrets = { substitute: (text: string) => {
 			const known: Record<string, string> = { DOCS_KEY: "k1", DOCS_TOKEN: "t1" };
 			const missing: string[] = [];
@@ -92,6 +92,10 @@ describe("MCP configuration", () => {
 		expect(loaded.errors.join("\n")).toContain('has a "url" but no "type"; add "type": "http"');
 		expect(loaded.servers.map((server) => server.name)).toEqual(["good"]);
 		expect(load({ mcpServers: { x: { type: "http", url: "https://x.test", timeout: -1 } } }).errors[0]).toContain("milliseconds");
+		// Every tool is called from codemode: Claude Code's alwaysLoad, and model-facing exposures, fail loudly.
+		expect(load({ mcpServers: { x: { type: "http", url: "https://x.test", alwaysLoad: true } } }).errors[0]).toContain("alwaysLoad is not supported here");
+		expect(load({ mcpServers: { x: { type: "http", url: "https://x.test", exposure: "deferred" } } }).errors[0]).toContain('exposure must be one of "codemode", "hidden"');
+		expect(load({ mcpServers: { x: { type: "http", url: "https://x.test", toolExposure: { a: "direct" } } } }).errors[0]).toContain('toolExposure "a" must be one of');
 		expect(parseMcpConfig("{ nope", "~/.mcp.json").errors[0]).toMatch(/^~\/\.mcp\.json: /);
 		expect(parseMcpConfig(undefined, "~/.mcp.json")).toEqual({ servers: [], errors: [] });
 	});
@@ -99,12 +103,13 @@ describe("MCP configuration", () => {
 	it("uses exact tool overrides, then patterns, then the server default", () => {
 		const config = {
 			url: "https://example.test/mcp",
-			exposure: "codemode" as const,
-			toolExposure: { search: "deferred" as const, "delete_*": "hidden" as const },
+			exposure: "hidden" as const,
+			toolExposure: { "delete_*": "hidden" as const, delete_draft: "codemode" as const, "*": "codemode" as const },
 		};
-		expect(getMcpToolExposure(config, "search")).toBe("deferred");
+		expect(getMcpToolExposure(config, "delete_draft")).toBe("codemode");
 		expect(getMcpToolExposure(config, "delete_all")).toBe("hidden");
 		expect(getMcpToolExposure(config, "other")).toBe("codemode");
+		expect(getMcpToolExposure({ url: "https://example.test/mcp", exposure: "hidden" }, "other")).toBe("hidden");
 	});
 });
 
@@ -132,58 +137,33 @@ describe("MCP tool names and schemas", () => {
 });
 
 describe("MCP prompt section", () => {
-	it("renders only indirect servers and explains both reaches", () => {
+	it("lists the configured servers with their descriptions, and how to reach their tools", () => {
 		const text = mcpServersSection([
-			{ name: "docs", namespace: "mcp__docs", description: "Docs", reaches: ["tool_search"] },
-			{ name: "issues", namespace: "mcp__issues", description: "Issues", reaches: ["codemode"] },
-			{ name: "direct", namespace: "mcp__direct", reaches: [] },
+			{ name: "issues", namespace: "mcp__issues", description: "Issues and pull requests\nmore detail" },
+			{ name: "docs", namespace: "mcp__docs" },
 		]);
-		expect(text).toContain("MCP servers whose tools are not declared to you.");
-		expect(text).toContain("Load the tools of tool_search servers with tool_search.");
-		expect(text).toContain("Call the tools of codemode servers from codemode scripts.");
-		expect(text).toContain("- mcp__docs (tool_search): Docs");
-		expect(text).toContain("- mcp__issues (codemode): Issues");
-		expect(text).not.toContain("mcp__direct");
-	});
-
-	it("returns undefined without indirect servers", () => {
-		expect(mcpServersSection([{ name: "x", namespace: "mcp__x", reaches: [] }])).toBeUndefined();
-	});
-
-	it("puts problems first, even with no server to list", () => {
-		expect(mcpServersSection([], ['server "docs" is not connected: refused'])).toBe(
-			'Problems with your MCP configuration (~/.mcp.json):\n- server "docs" is not connected: refused',
+		expect(text).toBe(
+			[
+				'Your MCP servers (~/.mcp.json), as of this prompt. Call their tools from codemode: searchTools("<server>") or describeNamespace("mcp__<server>") lists them; the mcp tool\'s status says which servers are connected.',
+				"- docs (mcp__docs)",
+				"- issues (mcp__issues): Issues and pull requests",
+			].join("\n"),
 		);
+	});
+
+	it("returns undefined without servers", () => {
+		expect(mcpServersSection([])).toBeUndefined();
 	});
 });
 
-describe("tool search and the MCP manager", () => {
-	it("tool_search loads a deferred MCP tool for the next call", async () => {
-		const tool = createToolSearchTool();
-		const deferred = [
-			{
-				name: "mcp__docs__search",
-				description: "Search the documentation",
-				parameters: { type: "object", properties: { query: { type: "string" } } },
-			},
-		] as unknown as ToolRegistration[];
-		const result = await tool.execute(
-			{ query: "documentation" },
-			{ agent: async () => ({ deferred }) } as never,
-			BACKGROUND_CONTEXT,
-		);
-		expect(result.control?.addTools).toEqual(["mcp__docs__search"]);
-		expect(result.output).toEqual([{ type: "text", text: expect.stringContaining("mcp__docs__search") }]);
-	});
-
-	it("connects an HTTP-style server over an in-memory transport and registers deferred tools", async () => {
+describe("the MCP manager", () => {
+	it("connects an HTTP-style server over an in-memory transport and registers tools only scripts call", async () => {
 		const path = await tempConfig({
 			mcpServers: {
 				docs: {
 					type: "http",
 					url: "http://example.test/mcp",
 					description: "Documentation",
-					exposure: "deferred",
 				},
 			},
 		});
@@ -242,9 +222,10 @@ describe("tool search and the MCP manager", () => {
 		const extension = registry.snapshot().extension("mcp:docs");
 		expect(extension?.tools?.map((tool) => tool.name)).toEqual(["mcp__docs__search"]);
 		const registered = extension!.tools![0]!;
+		// Script-only, and `deferred` keeps it out of the codemode listing: `searchTools()` finds it.
+		expect(registered.callers).toEqual(["tools"]);
 		expect(registered.deferred).toBe(true);
-		expect(registered.callers).toEqual(["model", "tools"]);
-		expect(manager.hasIndirectTools()).toBe(true);
+		expect(manager.extension().sections?.[0]?.render({} as never, BACKGROUND_CONTEXT)).toContain("- docs (mcp__docs): Documentation");
 
 		const result = await manager.callTool("docs", "search", { query: "x" });
 		expect(result.structuredContent).toEqual({ answer: "found it" });
@@ -252,7 +233,7 @@ describe("tool search and the MCP manager", () => {
 	});
 
 	it("reconnects a server that failed at startup in the background, and stops when closed", async () => {
-		const path = await tempConfig({ mcpServers: { docs: { type: "http", url: "http://example.test/mcp", exposure: "deferred" } } });
+		const path = await tempConfig({ mcpServers: { docs: { type: "http", url: "http://example.test/mcp" } } });
 		let attempts = 0;
 		const manager = new McpManager({
 			source: fileSource(path),
@@ -288,21 +269,19 @@ describe("tool search and the MCP manager", () => {
 		expect(attempts, "no retry after close").toBe(after);
 	});
 
-	it("applies an edit of the config: a new server connects, a removed one leaves, tool_search follows", async () => {
+	it("applies an edit of the config: a new server connects, a removed one leaves", async () => {
 		const path = await tempConfig({ mcpServers: {} });
 		const manager = new McpManager({ source: fileSource(path), transportFactory: () => fakeServer(), connectTimeoutMs: 1000 });
 		await manager.load();
 		const registry = createRegistry();
 		manager.attach(registry);
 		await manager.start();
-		expect(registry.snapshot().extension("tool-search")).toBeUndefined();
 
 		await writeFile(path, JSON.stringify({ mcpServers: { docs: { type: "http", url: "http://example.test/mcp" } } }));
 		await manager.reload();
 		await until(() => (registry.snapshot().extension("mcp:docs")?.tools?.length ?? 0) > 0);
 		expect(registry.snapshot().extension("mcp:docs")?.tools?.map((tool) => tool.name)).toEqual(["mcp__docs__search"]);
 		expect(manager.namespaces().map((namespace) => namespace.name)).toEqual(["mcp__docs"]);
-		expect(registry.snapshot().extension("tool-search"), "deferred tools: tool_search is offered").toBeDefined();
 
 		// A broken file, or a broken entry, is reported and leaves the running server alone.
 		await writeFile(path, "{ broken");
@@ -318,7 +297,27 @@ describe("tool search and the MCP manager", () => {
 		await manager.reload();
 		expect(registry.snapshot().extension("mcp:docs")).toBeUndefined();
 		expect(manager.namespaces()).toEqual([]);
-		expect(registry.snapshot().extension("tool-search")).toBeUndefined();
+		await manager.close();
+	});
+
+	it("mcp's status reads an edited config at once and answers once the server's connection settled", async () => {
+		const path = await tempConfig({ mcpServers: {} });
+		const manager = new McpManager({ source: fileSource(path), transportFactory: () => fakeServer(), connectTimeoutMs: 1000 });
+		await manager.load();
+		manager.attach(createRegistry());
+		await manager.start();
+		const tool = manager.extension().tools!.find((candidate) => candidate.name === "mcp")!;
+		const status = async () => {
+			const result = await tool.execute({ action: "status" } as never, {} as never, BACKGROUND_CONTEXT);
+			return JSON.parse((result.output as { text: string }[])[0]!.text) as { problems: string[]; servers: { name: string; status: string; tools: number }[] };
+		};
+		expect(await status()).toMatchObject({ problems: [], servers: [] });
+		// No reload in between: the status call itself notices the edit.
+		await writeFile(path, JSON.stringify({ mcpServers: { docs: { type: "http", url: "http://example.test/mcp" }, broken: { url: "http://x.test" } } }));
+		const after = await status();
+		expect(after.servers).toEqual([expect.objectContaining({ name: "docs", status: "connected", tools: 1 })]);
+		expect(after.problems).toEqual([expect.stringContaining('add "type": "http"')]);
+		await expect(tool.execute({ action: "login", server: "docs" } as never, {} as never, BACKGROUND_CONTEXT)).rejects.toThrow("OAuth sign-in is not configured");
 		await manager.close();
 	});
 

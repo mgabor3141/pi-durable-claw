@@ -17,7 +17,7 @@ export interface WorkspaceMemoryOptions {
 /**
  * The system context after the preamble and tools: the global AGENTS.md, the
  * global skills, the working directory, the project's AGENTS.md and skills,
- * and the local time when the conversation started. A missing or unreadable
+ * and the local time when the prompt was rendered. A missing or unreadable
  * file is omitted; the prompt is never truncated.
  *
  * The files live in the workspace, so every read goes through pi-env over SSH.
@@ -80,11 +80,7 @@ export function workspaceMemoryExtension(options: WorkspaceMemoryOptions = {}): 
 
 			section(
 				"conversation-time",
-				(input) => {
-					const prior = input.shown["conversation-time"];
-					if (prior !== undefined) return prior;
-					return conversationTimeSection(formatLocalTime(now()));
-				},
+				() => conversationTimeSection(formatLocalTime(now())),
 				{ tag: false },
 			),
 		],

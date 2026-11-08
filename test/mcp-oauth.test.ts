@@ -1,5 +1,5 @@
 // OAuth sign-in to an MCP server, end to end against a fake that is both the MCP server and its authorization server:
-// the first connect reports a sign-in, mcp_auth answers the link, the redirect's code is exchanged (discovery, dynamic
+// the first connect reports a sign-in, mcp's login answers the link, the redirect's code is exchanged (discovery, dynamic
 // registration, PKCE), the server connects, an expired token is refreshed by itself, and tokens are scrubbed.
 import { createHash } from "node:crypto";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
@@ -109,7 +109,7 @@ async function fakeServer() {
 	return { base, fake };
 }
 
-it("signs in through mcp_auth, connects, refreshes by itself, and keeps tokens out of output", async () => {
+it("signs in through mcp, connects, refreshes by itself, and keeps tokens out of output", async () => {
 	const { base, fake } = await fakeServer();
 	const dir = await mkdtemp(join(tmpdir(), "pdc-oauth-"));
 	cleanup.push(() => rm(dir, { recursive: true, force: true }));
@@ -125,9 +125,9 @@ it("signs in through mcp_auth, connects, refreshes by itself, and keeps tokens o
 	await manager.start();
 
 	expect(manager.status("docs")).toMatchObject({ status: "failed" });
-	expect(manager.problems()).toEqual([expect.stringContaining('call mcp_auth({ action: "login", server: "docs" })')]);
+	expect(manager.problems()).toEqual([expect.stringContaining('call mcp({ action: "login", server: "docs" })')]);
 
-	const tool = manager.extension().tools!.find((candidate) => candidate.name === "mcp_auth")!;
+	const tool = manager.extension().tools!.find((candidate) => candidate.name === "mcp")!;
 	const run = async (args: unknown) => JSON.parse(((await tool.execute(args as never, {} as never, {} as never)) as { output: { text: string }[] }).output[0]!.text);
 	const login = await run({ action: "login", server: "docs" });
 	expect(login.redirectUri).toBe("http://127.0.0.1:4999/host/oauth/callback");
@@ -173,6 +173,6 @@ it("a server with its own Authorization header does not sign in", async () => {
 	const manager = new McpManager({ source: fileSource(config), oauth: new McpOAuth({ redirectUrl: "http://h/host/oauth/callback", store: secrets }), connectTimeoutMs: 500, retryDelaysMs: [60_000] });
 	cleanup.push(() => manager.close());
 	await manager.load();
-	const tool = manager.extension().tools!.find((candidate) => candidate.name === "mcp_auth")!;
+	const tool = manager.extension().tools!.find((candidate) => candidate.name === "mcp")!;
 	await expect(tool.execute({ action: "login", server: "docs" } as never, {} as never, {} as never)).rejects.toThrow("sends its own Authorization header");
 });

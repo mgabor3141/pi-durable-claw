@@ -1,8 +1,9 @@
 /**
  * MCP server configuration for the claw harness: the agent's own `~/.mcp.json` in the workspace, in Claude Code's
- * `.mcp.json` format (`mcpServers`, `"type": "http"`, `url`, `headers`, `timeout` in milliseconds, `alwaysLoad`), so a
- * config copied from a server's documentation works. HTTP only: a stdio server would be a child process beside the
- * harness, and servers run as their own containers. `${NAME}` (and `${NAME:-default}`) in `url` and `headers` name the
+ * `.mcp.json` format (`mcpServers`, `"type": "http"`, `url`, `headers`, `timeout` in milliseconds), so a config copied
+ * from a server's documentation works. Every tool is called from codemode scripts, so Claude Code's `alwaysLoad: true`
+ * is refused. HTTP only: a stdio server would be a child process beside the
+ * harness, and servers run as their own containers. `${NAME}` (and `default`) in `url` and `headers` name the
  * harness's secrets (`../secrets.ts`), resolved when the server connects. Our own extensions: `exposure`,
  * `toolExposure`, `description`, `enabled`.
  */
@@ -10,15 +11,16 @@
 import { readFile, stat } from "node:fs/promises";
 import type { McpOAuthConfig } from "./oauth.ts";
 
-/** How the model reaches a server's tools. */
-export type McpExposure = "codemode" | "deferred" | "direct" | "hidden";
+/** How the model reaches a server's tools: from codemode scripts (found with `searchTools()`), or not at all. */
+export type McpExposure = "codemode" | "hidden";
 
 export interface McpServerConfig {
 	readonly url: string;
 	readonly headers?: Readonly<Record<string, string>>;
-	/** What the server offers, in a sentence. Shown in `mcp_servers` and used by codemode. */
+	/** What the server offers, in a sentence: the system prompt lists it beside the server's name, and codemode's
+	 * `describeNamespace()` answers it. */
 	readonly description?: string;
-	/** Default: `deferred`. */
+	/** Default: `codemode`. */
 	readonly exposure?: McpExposure;
 	/** Per-tool exposure overrides. Keys are exact tool names or `*` patterns. */
 	readonly toolExposure?: Readonly<Record<string, McpExposure>>;
@@ -108,7 +110,7 @@ export class McpConfigError extends Error {
 }
 
 const SERVER_NAME = /^[A-Za-z0-9_-]+$/;
-const MCP_EXPOSURES: readonly McpExposure[] = ["codemode", "deferred", "direct", "hidden"];
+const MCP_EXPOSURES: readonly McpExposure[] = ["codemode", "hidden"];
 
 /** Namespace of a server's tools: `mcp__<server>` with `-` replaced by `_`, like the tool names. */
 export function mcpNamespace(server: string): string {
@@ -132,7 +134,7 @@ export function getMcpToolExposure(config: McpServerConfig, toolName: string): M
 	for (const [pattern, exposure] of Object.entries(overrides)) {
 		if (pattern.includes("*") && toolPatternRegExp(pattern).test(toolName)) return exposure;
 	}
-	return config.exposure ?? "deferred";
+	return config.exposure ?? "codemode";
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -189,6 +191,9 @@ export function validateMcpServerConfig(name: string, raw: unknown): McpServerCo
 	if (raw.alwaysLoad !== undefined && typeof raw.alwaysLoad !== "boolean") {
 		return `server "${name}": alwaysLoad must be a boolean`;
 	}
+	if (raw.alwaysLoad === true) {
+		return `server "${name}": alwaysLoad is not supported here: every MCP tool is called from codemode scripts and found with searchTools(); remove it`;
+	}
 	if (raw.oauth !== undefined) {
 		if (!isRecord(raw.oauth)) return `server "${name}": oauth must be an object`;
 		for (const field of ["clientId", "clientSecret", "authServerMetadataUrl", "scopes"]) {
@@ -203,8 +208,7 @@ export function validateMcpServerConfig(name: string, raw: unknown): McpServerCo
 		url: raw.url as string,
 		...(raw.headers === undefined ? {} : { headers: raw.headers }),
 		...(raw.description === undefined ? {} : { description: raw.description }),
-		// Claude Code's `alwaysLoad`: the tools are in every request, which is `direct` here.
-		...(raw.exposure !== undefined ? { exposure: raw.exposure } : raw.alwaysLoad === true ? { exposure: "direct" as const } : {}),
+		...(raw.exposure === undefined ? {} : { exposure: raw.exposure }),
 		...(raw.toolExposure === undefined ? {} : { toolExposure: raw.toolExposure as Record<string, McpExposure> }),
 		...(raw.enabled === undefined ? {} : { enabled: raw.enabled }),
 		...(raw.timeout === undefined ? {} : { timeout: raw.timeout }),
@@ -212,11 +216,11 @@ export function validateMcpServerConfig(name: string, raw: unknown): McpServerCo
 	};
 }
 
-/** Whether any tool of the server is reached indirectly: loaded by `tool_search` or called from codemode. */
-export function hasIndirectTools(config: McpServerConfig): boolean {
-	const exposures = new Set<McpExposure>([config.exposure ?? "deferred"]);
+/** Whether scripts can call any of the server's tools (not every one of them is `hidden`). */
+export function hasCallableTools(config: McpServerConfig): boolean {
+	const exposures = new Set<McpExposure>([config.exposure ?? "codemode"]);
 	for (const exposure of Object.values(config.toolExposure ?? {})) exposures.add(exposure);
-	return exposures.has("deferred") || exposures.has("codemode");
+	return exposures.has("codemode");
 }
 
 /** Parse a configuration file's text (`origin` names it in messages). A broken entry is an error; the others load. */

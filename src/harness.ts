@@ -6,6 +6,7 @@ import { openNodeSqliteStorage } from "@earendil-works/pi-durable/storage/sqlite
 import { CodemodeSandbox } from "@earendil-works/pi-codemode";
 import { workspaceMemoryExtension } from "./memory.ts";
 import { preambleExtension } from "./preamble.ts";
+import { fixedPromptExtension } from "./fixed-prompt.ts";
 import { compactionExtension } from "./compaction.ts";
 import { browserTools, type SharedBrowserProvider } from "./browser.ts";
 import type { TextGenerationModel } from "@mgabor3141/pi-durable-t3";
@@ -44,12 +45,10 @@ export interface HarnessExtensionOptions {
 	readonly extraTools?: readonly ToolRegistration[];
 	/** Extensions installed after the built-in tools, such as the MCP server section. */
 	readonly extraExtensions?: readonly Extension[];
-	/** Namespaces of MCP servers, for codemode's `describeNamespace()` and tool search. */
+	/** Namespaces of MCP servers, for codemode's `describeNamespace()`. */
 	readonly mcpNamespaces?: readonly CodemodeNamespace[];
 	/** Offer the `browser_*` tools: only when T3's preview browser is configured, since it is the only browser. */
 	readonly browser?: boolean;
-	/** Whether `tool_search` is offered (the MCP manager installs it as its configuration changes); the preamble asks. */
-	readonly toolSearch?: () => boolean;
 	/** What exists only once the bridge is attached: the host fills it in after `attachT3`, and the tools read it at each
 	 * call. */
 	readonly late?: HarnessLate;
@@ -58,12 +57,12 @@ export interface HarnessExtensionOptions {
 }
 
 /**
- * The extensions of the assistant conversation: the preamble, upstream's durable `codemode` extension, the optional
- * `tool_search` tool for deferred tools, and the harness's own tools — the workspace's `read`/`write`/`bash`
- * (pi-durable's coding tools over the call's `ExecutionEnv`, i.e. pi-env SSH to the workspace container; plus any
- * `extraTools`) — all with `callers: ["tools"]`, so only codemode scripts call them. MCP tools are registered
- * separately by the MCP manager and are deferred by default. The host adds the model-facing restart_harness tool as
- * an extra extension.
+ * The extensions of the assistant conversation: the preamble, upstream's durable `codemode` extension, and the
+ * harness's own tools — the workspace's `read`/`write`/`bash` (pi-durable's coding tools over the call's
+ * `ExecutionEnv`, i.e. pi-env SSH to the workspace container; plus any `extraTools`) — all with `callers: ["tools"]`,
+ * so only codemode scripts call them. The codemode section lists every one of them, without a budget; MCP tools, which
+ * the MCP manager registers, are left out of it and found with `searchTools()`. The system prompt is fixed for a thread
+ * (`fixed-prompt.ts`). The host adds the model-facing restart_harness tool as an extra extension.
  */
 export function harnessExtensions(options: HarnessExtensionOptions = {}): readonly Extension[] {
 	const tools: ToolRegistration[] = [
@@ -76,8 +75,9 @@ export function harnessExtensions(options: HarnessExtensionOptions = {}): readon
 	const secrets = options.secrets;
 	const harnessTools = secrets === undefined ? tools : [...tools.map((tool) => withSecrets(tool, secrets.store, secrets.log)), secretsTool(secrets.store)];
 	return [
-		preambleExtension({ toolSearch: options.toolSearch }),
-		createCodemodeExtension({ sandbox: codemodeSandbox(), namespaces: options.mcpNamespaces ?? [] }) as Extension,
+		fixedPromptExtension(),
+		preambleExtension(),
+		createCodemodeExtension({ sandbox: codemodeSandbox(), namespaces: options.mcpNamespaces ?? [], inlineBudget: Number.POSITIVE_INFINITY }) as Extension,
 		defineExtension({ name: "harness-tools", tools: harnessTools }),
 		...(options.extraExtensions ?? []),
 		workspaceMemoryExtension(),

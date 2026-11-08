@@ -229,15 +229,14 @@ export function createMcpToolRegistration(options: McpToolOptions): ToolRegistra
 	const { server, tool, exposure } = options;
 	const title = tool.title ?? tool.annotations?.title;
 	const description = tool.description?.trim() || title || `MCP tool ${tool.name} from server ${server}`;
-	const modelCallable = exposure === "deferred" || exposure === "direct";
 	return {
 		name: options.name,
 		description,
 		parameters: toParameters(tool.inputSchema),
 		structuredOutputSchema: createMcpResultSchema(tool.outputSchema),
-		// `codemode` and `deferred` both keep the tool out of the immediate model declaration.
-		callers: modelCallable ? ["model", "tools"] : exposure === "codemode" ? ["tools"] : [],
-		...(exposure === "direct" ? {} : { deferred: true as const }),
+		// Only scripts call it, and `deferred` keeps it out of the codemode section's listing: `searchTools()` finds it.
+		callers: exposure === "codemode" ? ["tools"] : [],
+		deferred: true,
 		replay: "unsafe",
 		async execute(args, api, context) {
 			const client = await options.getClient();
