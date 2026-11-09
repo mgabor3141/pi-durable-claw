@@ -5,6 +5,7 @@ import { createCodemodeExtension, type CodemodeNamespace } from "@earendil-works
 import { openNodeSqliteStorage } from "@earendil-works/pi-durable/storage/sqlite/node";
 import { CodemodeSandbox } from "@earendil-works/pi-codemode";
 import { recordConversationStart, workspaceContextExtension } from "./context.ts";
+import { codemodeTimersExtension, timerGlobal } from "./codemode-timers.ts";
 import { preambleExtension } from "./preamble.ts";
 import { fixedPromptExtension } from "./fixed-prompt.ts";
 import { compactionExtension } from "./compaction.ts";
@@ -78,7 +79,8 @@ export function harnessExtensions(options: HarnessExtensionOptions = {}): readon
 	return [
 		fixedPromptExtension(),
 		preambleExtension(),
-		createCodemodeExtension({ sandbox: codemodeSandbox(), namespaces: options.mcpNamespaces ?? [], inlineBudget: Number.POSITIVE_INFINITY }) as Extension,
+		createCodemodeExtension({ sandbox: codemodeSandbox(), namespaces: options.mcpNamespaces ?? [], inlineBudget: Number.POSITIVE_INFINITY, globals: [timerGlobal()] }) as Extension,
+		codemodeTimersExtension(),
 		defineExtension({ name: "harness-tools", tools: harnessTools }),
 		...(options.extraExtensions ?? []),
 		workspaceContextExtension(),
