@@ -333,3 +333,32 @@ export const BROWSER_CLOSE_TOOL_DESCRIPTION = "Close an open browser page and en
 
 export const BROWSER_SCREENSHOT_NOTE = "Screenshot ready; call image(shot) to attach it.";
 export const BROWSER_CLOSED_NOTE = "Browser session closed.";
+
+/* -------------------------------------------------------------------------- */
+/* Memory (Hindsight)                                                         */
+/* -------------------------------------------------------------------------- */
+
+/** The block recalled memories arrive in, stored hidden with the user's message they were recalled for. */
+export function memoriesBlock(lines: readonly string[]): string {
+	return [
+		"<memories>",
+		"Recalled from long-term memory for this message. They may be out of date or not apply; the conversation wins where they disagree.",
+		...lines,
+		"</memories>",
+	].join("\n");
+}
+
+export function memoriesUnavailable(reason: string): string {
+	return `<memories>\nLong-term memory could not be searched for this message: ${reason}\n</memories>`;
+}
+
+/** Hindsight's `context` for a turn it stores: what the text is, which steers what it extracts. */
+export const MEMORY_TURN_CONTEXT =
+	"A turn of a conversation between the user and their personal agent: the user's messages, any messages from other agents or the scheduler, and the agent's replies.";
+
+export const MEMORY_RECALL_DESCRIPTION =
+	"Search long-term memory for what is known from earlier conversations: facts about the user, their preferences, decisions and past work. Each user message already arrives with memories recalled for it (<memories>); search when you need more or something else. Returns the memories, newest knowledge first, each with the date it was learned.";
+export const MEMORY_RETAIN_DESCRIPTION =
+	"Save something to long-term memory for future conversations: a fact, preference or decision worth keeping. Every finished turn is saved automatically; use this for what should be remembered on its own, such as something learned from a file or a tool rather than said in the conversation.";
+export const MEMORY_REFLECT_DESCRIPTION =
+	"Ask long-term memory a question that needs reasoning over everything it holds, such as what the user would likely want or how something changed over time. Slower than hindsight_recall; returns an answer, not the memories.";

@@ -12,6 +12,7 @@
 // SCRATCH_DIR (T3's scratch project root, an absolute path in the workspace environment; default /home/agent/scratch).
 // Models: <root>/pi/auth.json (and models.json).
 import { join } from "node:path";
+import { Hindsight, hindsightConfig } from "./hindsight.ts";
 import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
 import type { Registry } from "@earendil-works/pi-durable";
 import { ModelRuntime } from "@earendil-works/pi-coding-agent";
@@ -137,6 +138,12 @@ async function main(): Promise<void> {
 	// tools are not offered, and the log says why.
 	const browserlessUrl = process.env.BROWSERLESS_URL?.trim() ?? "";
 	if (browserlessUrl === "") log.info("browser tools off: BROWSERLESS_URL is not set");
+	// Long-term memory is Hindsight, which you deploy yourself, as with Browserless (`hindsight.ts`). Without
+	// HINDSIGHT_URL there is no memory: no recall, nothing stored, no memory tools.
+	const memoryConfig = hindsightConfig(process.env);
+	const memory = memoryConfig === undefined ? undefined : new Hindsight(memoryConfig, log);
+	if (memory === undefined) log.info("memory off: HINDSIGHT_URL is not set");
+	else await memory.check();
 	// Filled in once the bridge is attached (below); the harness's own tools read it at each call.
 	const late: HarnessLate = {};
 	const harness = await openHarness({
@@ -147,7 +154,8 @@ async function main(): Promise<void> {
 		mcpNamespaces: mcp.namespaces(),
 		late,
 		secrets: { store: secrets, log },
-		extraExtensions: [mcp.extension()],
+		...(memory === undefined ? {} : { extraTools: memory.tools() }),
+		extraExtensions: [mcp.extension(), ...(memory === undefined ? [] : [memory.extension()])],
 		onRegistry: (registry) => {
 			mcp.attach(registry);
 			toolRegistry = registry;
@@ -171,6 +179,8 @@ async function main(): Promise<void> {
 			label: LABEL,
 			routes: [{ method: "GET", path: OAUTH_CALLBACK_PATH, handle: (request) => oauthCallback(mcp, request) }],
 			titleThread: titleThread(harness, models),
+			// Each message arrives with the memories recalled for it, stored with it (hidden in T3).
+			...(memory === undefined ? {} : { messageContext: (request) => memory.recallFor(request) }),
 			...(browserlessUrl === ""
 				? {}
 				: { preview: { cdpUrl: browserlessUrl, ...(process.env.BROWSERLESS_TOKEN === undefined ? {} : { token: process.env.BROWSERLESS_TOKEN }), storageStatePath: join(stateDir, "browser-profile.json") } }),

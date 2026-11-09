@@ -33,8 +33,11 @@ importers:
         specifier: 1.5.0
         version: 1.5.0
       '@mgabor3141/pi-durable-t3':
-        specifier: github:mgabor3141/pi-durable-t3#79e5036bebde33c50aa251a7baa19e8f1535b9b6
-        version: https://codeload.github.com/mgabor3141/pi-durable-t3/tar.gz/79e5036bebde33c50aa251a7baa19e8f1535b9b6(@earendil-works/chord@1.5.0(esbuild@0.28.2))(@earendil-works/pi-ai@1.5.0(@aws-sdk/credential-provider-node@3.972.88)(@smithy/signature-v4@5.7.4)(undici@8.12.3))(@earendil-works/pi-durable@1.5.0(@aws-sdk/credential-provider-node@3.972.88)(@smithy/signature-v4@5.7.4)(esbuild@0.28.2)(undici@8.12.3))(@earendil-works/pi-schema@1.5.0)(redis@6.3.0)
+        specifier: github:mgabor3141/pi-durable-t3#50db40cd66a89af9f08f953b3f5ab08972264779
+        version: https://codeload.github.com/mgabor3141/pi-durable-t3/tar.gz/50db40cd66a89af9f08f953b3f5ab08972264779(@earendil-works/chord@1.5.0(esbuild@0.28.2))(@earendil-works/pi-ai@1.5.0(@aws-sdk/credential-provider-node@3.972.88)(@smithy/signature-v4@5.7.4)(undici@8.12.3))(@earendil-works/pi-durable@1.5.0(@aws-sdk/credential-provider-node@3.972.88)(@smithy/signature-v4@5.7.4)(esbuild@0.28.2)(undici@8.12.3))(@earendil-works/pi-schema@1.5.0)(redis@6.3.0)
+      '@vectorize-io/hindsight-client':
+        specifier: 1.2.0
+        version: 1.2.0
       playwright-core:
         specifier: 1.64.1
         version: 1.64.1
@@ -437,8 +440,8 @@ packages:
   '@jridgewell/sourcemap-codec@1.6.0':
     resolution: {integrity: sha512-T7jf+5zgsZHwNJ4lvQ7/aezbyk0nNX+zJVWpmHA7VYsEx7a7qr5Rg5IbtJFqkgze5Y2sruq1RUY8Q837Od7iFw==}
 
-  '@mgabor3141/pi-durable-t3@https://codeload.github.com/mgabor3141/pi-durable-t3/tar.gz/79e5036bebde33c50aa251a7baa19e8f1535b9b6':
-    resolution: {tarball: https://codeload.github.com/mgabor3141/pi-durable-t3/tar.gz/79e5036bebde33c50aa251a7baa19e8f1535b9b6}
+  '@mgabor3141/pi-durable-t3@https://codeload.github.com/mgabor3141/pi-durable-t3/tar.gz/50db40cd66a89af9f08f953b3f5ab08972264779':
+    resolution: {tarball: https://codeload.github.com/mgabor3141/pi-durable-t3/tar.gz/50db40cd66a89af9f08f953b3f5ab08972264779}
     version: 0.2.18
     engines: {node: '>=22.19.0'}
     peerDependencies:
@@ -668,6 +671,9 @@ packages:
 
   '@types/ws@8.18.2':
     resolution: {integrity: sha512-67MQl+fpWKVTT1NYdnmo3U4sc/xPo/zQBncVnI74qmQa0z/b+1g6iYqNmGCPbxO+zz2aklb08a0oHfegiVd0/w==}
+
+  '@vectorize-io/hindsight-client@1.2.0':
+    resolution: {integrity: sha512-4KYsxLZhe9Hqyp6EQYMMHFmQKaP+7XBwclHD2cLjuHfR/b/KJgnieMK6YYIsWEifhRSR0llv45q5xXDObjILoQ==}
 
   '@vitest/expect@4.1.11':
     resolution: {integrity: sha512-VX2x5vNJXET47KAFzwERI+KRMtTTCSWTfSMKsW7JsUsXV4psq++e3DvZpuTDOpHcxytiDs6p2nhVb2tVDiiUYw==}
@@ -1842,7 +1848,7 @@ snapshots:
 
   '@jridgewell/sourcemap-codec@1.6.0': {}
 
-  '@mgabor3141/pi-durable-t3@https://codeload.github.com/mgabor3141/pi-durable-t3/tar.gz/79e5036bebde33c50aa251a7baa19e8f1535b9b6(@earendil-works/chord@1.5.0(esbuild@0.28.2))(@earendil-works/pi-ai@1.5.0(@aws-sdk/credential-provider-node@3.972.88)(@smithy/signature-v4@5.7.4)(undici@8.12.3))(@earendil-works/pi-durable@1.5.0(@aws-sdk/credential-provider-node@3.972.88)(@smithy/signature-v4@5.7.4)(esbuild@0.28.2)(undici@8.12.3))(@earendil-works/pi-schema@1.5.0)(redis@6.3.0)':
+  '@mgabor3141/pi-durable-t3@https://codeload.github.com/mgabor3141/pi-durable-t3/tar.gz/50db40cd66a89af9f08f953b3f5ab08972264779(@earendil-works/chord@1.5.0(esbuild@0.28.2))(@earendil-works/pi-ai@1.5.0(@aws-sdk/credential-provider-node@3.972.88)(@smithy/signature-v4@5.7.4)(undici@8.12.3))(@earendil-works/pi-durable@1.5.0(@aws-sdk/credential-provider-node@3.972.88)(@smithy/signature-v4@5.7.4)(esbuild@0.28.2)(undici@8.12.3))(@earendil-works/pi-schema@1.5.0)(redis@6.3.0)':
     dependencies:
       '@earendil-works/chord': 1.5.0(esbuild@0.28.2)
       '@earendil-works/pi-ai': 1.5.0(@aws-sdk/credential-provider-node@3.972.88)(@smithy/signature-v4@5.7.4)(undici@8.12.3)
@@ -2004,6 +2010,8 @@ snapshots:
   '@types/ws@8.18.2':
     dependencies:
       '@types/node': 24.10.1
+
+  '@vectorize-io/hindsight-client@1.2.0': {}
 
   '@vitest/expect@4.1.11':
     dependencies:

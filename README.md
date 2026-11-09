@@ -170,6 +170,33 @@ error; there is no other browser to fall back to. This is a live view, not a pag
 upload/download or file chooser; closing the panel closes its tab. The URL is reached from Browserless, not from
 the device, so no host forwarder or proxy is needed.
 
+## Memory
+
+Long-term memory is [Hindsight](https://github.com/vectorize-io/hindsight), which you deploy yourself, as with
+Browserless; the harness only connects to it. `HINDSIGHT_URL` turns it on (for example `http://hindsight:8888`),
+`HINDSIGHT_API_KEY` is sent as a bearer token when your server requires one, and `HINDSIGHT_BANK` names the memory bank
+(default `claw`). Without `HINDSIGHT_URL` there is no memory: nothing is recalled or stored, the memory tools are not
+offered, and the harness logs that at start. A malformed value stops the harness; a server that does not answer yet
+does not (the log says so, and recalls say so until it answers).
+
+It works as Hindsight's own agent integrations do (`src/hindsight.ts`):
+
+- **Recall.** Each message that starts or steers a turn (from you, another thread or the scheduler; not a note or a
+  child's report) is searched for, and what comes back is stored with the message as a hidden `<memories>` block,
+  through the bridge's `messageContext`. Stored with the message, not added to each request, so the prompt cache
+  holds; hidden, so T3 shows only your message. The bridge waits at most 5 seconds; a failed search becomes a line in
+  the block saying memory could not be searched.
+- **Retain.** Each finished turn is stored: the messages and the agent's replies, without tool calls or results and
+  without the hidden blocks, so recalled memories are not stored again as new facts. The document id is the
+  conversation and the turn's first entry, so storing a turn again replaces it. A failure is logged, never fatal.
+- **Tools** for scripts: `hindsight_recall`, `hindsight_retain` (for what is learned outside the conversation) and
+  `hindsight_reflect`, listed in the codemode catalog.
+
+What Hindsight does with it (the model it calls to extract facts, the embedding model, its database) is your
+deployment's configuration. Choose the embedding model before storing anything: changing it later re-embeds every
+memory. Hindsight's default is English-only, and its multilingual `hs-embed-1` covers English, Spanish, French,
+German, Portuguese, Japanese, Korean and Chinese.
+
 ## MCP servers
 
 The agent owns its MCP configuration: `/home/agent/.mcp.json` in the workspace, in Claude Code's `.mcp.json`

@@ -3,7 +3,7 @@
 Status: `docker compose up` runs the harness and a workspace (the README has the install). Built: codemode over the
 workspace, web search and page fetch, the browser through T3's preview, MCP servers over HTTP (with OAuth and the
 harness's secrets), the thread tools, scheduled tasks (not the webhook trigger) and a system prompt fixed per thread.
-Not built: memory (Hindsight, under discussion), spending caps, notifications, the release flow and self-update,
+Memory is Hindsight, deployed by you and connected by `HINDSIGHT_URL`. Not built: spending caps, notifications, the release flow and self-update,
 devcontainers, host conversations. Sections marked **unverified** are assumptions a spike must confirm.
 
 ## Goal
@@ -173,10 +173,14 @@ Three layers:
 
 ## Memory
 
-Not built. The plan is to adopt [Hindsight](https://github.com/vectorize-io/hindsight) as a service rather than build
-one: retain, recall and reflect over memory banks, with consolidated observations, and recall by vector, keyword,
-entity graph and time. The harness would recall before each turn and retain after it, as Hindsight's own agent plugins
-do. Open: the model Hindsight calls, where it runs and how agents share it, the bank layout, and the embedding model.
+[Hindsight](https://github.com/vectorize-io/hindsight), adopted as a service rather than built: retain, recall and
+reflect over memory banks, with consolidated observations, and recall by vector, keyword, entity graph and time. It is
+an integration point, like Browserless: you deploy Hindsight, `HINDSIGHT_URL` connects it, and without it there is no
+memory. The harness recalls for each message (stored with it, hidden, so the prompt cache holds) and retains each
+finished turn, as Hindsight's own agent plugins do; scripts get `hindsight_recall`, `hindsight_retain` and
+`hindsight_reflect` (the README's "Memory"). Left to the deployment: the model Hindsight calls, its embedding model,
+where it runs and whether agents share it (one bank each, `HINDSIGHT_BANK`; separate keys need Hindsight's tenant
+extension). Not built: importing past threads.
 
 Today every new conversation starts with the same conventions (global `AGENTS.md`, global skills, cwd, project
 `AGENTS.md` and skills, and the conversation-start time); anything else the agent keeps is files it reads on demand.
@@ -219,7 +223,7 @@ custom app on T3's client runtime. **To check:** the pi mobile UI mentioned on t
 4. Done: MCP servers over HTTP, one container each for key-bearing ones, configured by the agent in `~/.mcp.json`,
    with OAuth and the harness's secrets; tools are called from codemode. stdio servers are refused.
 5. Done: orchestration (the thread tools, and T3's orchestrator toolkit on `/mcp`). Not done: dev-project devcontainers.
-6. Memory (Hindsight); spending caps; ntfy.
+6. Done: memory (Hindsight, as an integration point). Not done: spending caps; ntfy.
 7. Release flow: store snapshot, deploy, health check, rollback; then self-update.
 8. Host conversations.
 
