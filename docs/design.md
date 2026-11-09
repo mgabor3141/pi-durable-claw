@@ -72,7 +72,7 @@ pi-durable ships it: `@earendil-works/pi-durable/codemode`'s `createCodemodeExte
 the tool is replay-safe — after a restart the script is replayed deterministically from a journal of the results it
 already got, completed nested calls never run twice, and the script continues live. The workspace's
 `read`/`write`/`bash` and every other harness tool are registered with `callers: ["tools"]`, so only scripts call
-them, and so are MCP tools: the codemode section lists the harness's tools in full and leaves MCP tools out, which
+them, and so are MCP tools: the codemode section is a catalog of the harness's tools (four in full, the rest on one line each, with `describeTool()` for their declarations) and leaves MCP tools out, which
 scripts find with `searchTools()`. The model is offered `codemode` and the bridge's `request_secret`, and that list
 never changes, so the prompt cache holds (the README's "A fixed system prompt").
 **Verified (spike):** upstream's extension runs a model script whose only capabilities are the conversation's

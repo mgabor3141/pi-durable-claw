@@ -6,6 +6,7 @@ import { openNodeSqliteStorage } from "@earendil-works/pi-durable/storage/sqlite
 import { CodemodeSandbox } from "@earendil-works/pi-codemode";
 import { recordConversationStart, workspaceContextExtension } from "./context.ts";
 import { codemodeTimersExtension, timerGlobal } from "./codemode-timers.ts";
+import { codemodeCatalogExtension } from "./codemode-catalog.ts";
 import { preambleExtension } from "./preamble.ts";
 import { fixedPromptExtension } from "./fixed-prompt.ts";
 import { compactionExtension } from "./compaction.ts";
@@ -61,8 +62,9 @@ export interface HarnessExtensionOptions {
  * The extensions of the assistant conversation: the preamble, upstream's durable `codemode` extension, and the
  * harness's own tools — the workspace's `read`/`write`/`bash` (pi-durable's coding tools over the call's
  * `ExecutionEnv`, i.e. pi-env SSH to the workspace container; plus any `extraTools`) — all with `callers: ["tools"]`,
- * so only codemode scripts call them. The codemode section lists every one of them, without a budget; MCP tools, which
- * the MCP manager registers, are left out of it and found with `searchTools()`. The system prompt is fixed for a thread
+ * so only codemode scripts call them. The codemode section is a catalog (`codemode-catalog.ts`): every one of them on
+ * one line, `read`/`write`/`edit`/`bash` in full, the rest's declarations from `describeTool()`; MCP tools, which the
+ * MCP manager registers, are left out of it and found with `searchTools()`. The system prompt is fixed for a thread
  * (`fixed-prompt.ts`).
  */
 export function harnessExtensions(options: HarnessExtensionOptions = {}): readonly Extension[] {
@@ -77,6 +79,8 @@ export function harnessExtensions(options: HarnessExtensionOptions = {}): readon
 	const secrets = options.secrets;
 	const harnessTools = secrets === undefined ? tools : [...tools.map((tool) => withSecrets(tool, secrets.store, secrets.log)), secretsTool(secrets.store)];
 	return [
+		// Before the fixed prompt: wraps apply in this order, so the fixed prompt keeps the catalog it renders.
+		codemodeCatalogExtension({ namespaces: options.mcpNamespaces ?? [] }),
 		fixedPromptExtension(),
 		preambleExtension(),
 		createCodemodeExtension({ sandbox: codemodeSandbox(), namespaces: options.mcpNamespaces ?? [], inlineBudget: Number.POSITIVE_INFINITY, globals: [timerGlobal()] }) as Extension,

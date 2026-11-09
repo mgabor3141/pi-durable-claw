@@ -94,8 +94,11 @@ A running thread renders it afresh after:
 - A compaction. Its first request writes the whole prompt again anyway. The one exception: if a `/reload` happened
   within the history the compaction keeps (its last ~20k tokens), the prompt that reload rendered stays.
 
-The codemode section lists every harness tool in full, with no token budget. MCP tools are left out of it, since a
-server can bring dozens; scripts find them with `searchTools()`. A tool registered after the prompt was rendered can
+The codemode section is a catalog (`src/codemode-catalog.ts`): `read`, `write`, `edit` and `bash` are declared in
+full, every other harness tool has one line (its description's first sentence), and a script reads a tool's
+declaration with `describeTool(name)` before first using it, as tool search works in Claude Code and Codex. The
+whole system prompt is about 2,000 tokens; declaring every tool in full made it about 7,000. MCP tools are left out
+of it, since a server can bring dozens; scripts find them with `searchTools()`. A tool registered after the prompt was rendered can
 be called at once and is found the same way. `src/fixed-prompt.ts` keeps the prompt, and
 `test/fixed-prompt.test.ts` checks both that every section is kept and that a change sends the same bytes.
 
@@ -128,7 +131,7 @@ The agent can show a finished page (a chart, a diagram, a mockup) inline in its 
 `html_render`, from codemode. T3's rules apply: the page uses T3's theme variables, has no viewport-height units, and
 local images given as absolute paths are inlined. The page is kept in `/home/agent/attachments/` and shown in T3's
 sandboxed frame. With the browser configured, `html_preview` renders a page first and returns a screenshot, its height
-and its console, and published pages are measured for phones and wide windows. The system prompt mentions
+and its console, and published pages are measured for phones and wide windows. The codemode catalog lists
 `html_render`; when to use it is in its description.
 
 ## Web tools
