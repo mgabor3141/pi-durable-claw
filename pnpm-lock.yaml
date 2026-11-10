@@ -33,8 +33,8 @@ importers:
         specifier: 1.5.0
         version: 1.5.0
       '@mgabor3141/pi-durable-t3':
-        specifier: github:mgabor3141/pi-durable-t3#a707d4ce698a44583fdfea99ad2a6ac2bbf0bcbf
-        version: https://codeload.github.com/mgabor3141/pi-durable-t3/tar.gz/a707d4ce698a44583fdfea99ad2a6ac2bbf0bcbf(@earendil-works/chord@1.5.0(esbuild@0.28.2))(@earendil-works/pi-ai@1.5.0(@aws-sdk/credential-provider-node@3.972.88)(@smithy/signature-v4@5.7.4)(undici@8.12.3))(@earendil-works/pi-durable@1.5.0(@aws-sdk/credential-provider-node@3.972.88)(@smithy/signature-v4@5.7.4)(esbuild@0.28.2)(undici@8.12.3))(@earendil-works/pi-schema@1.5.0)(redis@6.3.0)
+        specifier: github:mgabor3141/pi-durable-t3#9f16e9d0ebe9946e938270d3a84debfd76f6aa80
+        version: https://codeload.github.com/mgabor3141/pi-durable-t3/tar.gz/9f16e9d0ebe9946e938270d3a84debfd76f6aa80(@earendil-works/chord@1.5.0(esbuild@0.28.2))(@earendil-works/pi-ai@1.5.0(@aws-sdk/credential-provider-node@3.972.88)(@smithy/signature-v4@5.7.4)(undici@8.12.3))(@earendil-works/pi-durable@1.5.0(@aws-sdk/credential-provider-node@3.972.88)(@smithy/signature-v4@5.7.4)(esbuild@0.28.2)(undici@8.12.3))(@earendil-works/pi-schema@1.5.0)(redis@6.3.0)
       '@vectorize-io/hindsight-client':
         specifier: 1.2.0
         version: 1.2.0
@@ -440,8 +440,8 @@ packages:
   '@jridgewell/sourcemap-codec@1.6.0':
     resolution: {integrity: sha512-T7jf+5zgsZHwNJ4lvQ7/aezbyk0nNX+zJVWpmHA7VYsEx7a7qr5Rg5IbtJFqkgze5Y2sruq1RUY8Q837Od7iFw==}
 
-  '@mgabor3141/pi-durable-t3@https://codeload.github.com/mgabor3141/pi-durable-t3/tar.gz/a707d4ce698a44583fdfea99ad2a6ac2bbf0bcbf':
-    resolution: {tarball: https://codeload.github.com/mgabor3141/pi-durable-t3/tar.gz/a707d4ce698a44583fdfea99ad2a6ac2bbf0bcbf}
+  '@mgabor3141/pi-durable-t3@https://codeload.github.com/mgabor3141/pi-durable-t3/tar.gz/9f16e9d0ebe9946e938270d3a84debfd76f6aa80':
+    resolution: {tarball: https://codeload.github.com/mgabor3141/pi-durable-t3/tar.gz/9f16e9d0ebe9946e938270d3a84debfd76f6aa80}
     version: 0.2.18
     engines: {node: '>=22.19.0'}
     peerDependencies:
@@ -1848,7 +1848,7 @@ snapshots:
 
   '@jridgewell/sourcemap-codec@1.6.0': {}
 
-  '@mgabor3141/pi-durable-t3@https://codeload.github.com/mgabor3141/pi-durable-t3/tar.gz/a707d4ce698a44583fdfea99ad2a6ac2bbf0bcbf(@earendil-works/chord@1.5.0(esbuild@0.28.2))(@earendil-works/pi-ai@1.5.0(@aws-sdk/credential-provider-node@3.972.88)(@smithy/signature-v4@5.7.4)(undici@8.12.3))(@earendil-works/pi-durable@1.5.0(@aws-sdk/credential-provider-node@3.972.88)(@smithy/signature-v4@5.7.4)(esbuild@0.28.2)(undici@8.12.3))(@earendil-works/pi-schema@1.5.0)(redis@6.3.0)':
+  '@mgabor3141/pi-durable-t3@https://codeload.github.com/mgabor3141/pi-durable-t3/tar.gz/9f16e9d0ebe9946e938270d3a84debfd76f6aa80(@earendil-works/chord@1.5.0(esbuild@0.28.2))(@earendil-works/pi-ai@1.5.0(@aws-sdk/credential-provider-node@3.972.88)(@smithy/signature-v4@5.7.4)(undici@8.12.3))(@earendil-works/pi-durable@1.5.0(@aws-sdk/credential-provider-node@3.972.88)(@smithy/signature-v4@5.7.4)(esbuild@0.28.2)(undici@8.12.3))(@earendil-works/pi-schema@1.5.0)(redis@6.3.0)':
     dependencies:
       '@earendil-works/chord': 1.5.0(esbuild@0.28.2)
       '@earendil-works/pi-ai': 1.5.0(@aws-sdk/credential-provider-node@3.972.88)(@smithy/signature-v4@5.7.4)(undici@8.12.3)
