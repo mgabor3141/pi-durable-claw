@@ -208,8 +208,9 @@ It works as Hindsight's own agent integrations do (`src/hindsight.ts`):
 - **Recall.** Each message that starts or steers a turn (from you, another thread or the scheduler; not a note or a
   child's report) is searched for, and what comes back is stored with the message as a hidden `<memories>` block,
   through the bridge's `messageContext`. Stored with the message, not added to each request, so the prompt cache
-  holds; hidden, so T3 shows only your message. The bridge waits at most 5 seconds; a failed search becomes a line in
-  the block saying memory could not be searched.
+  holds. T3 shows it right after your message as a `hindsight_recall` row (no tool ran): open it to see the query and
+  exactly what the model was given. The bridge waits at most 5 seconds; a failed search becomes a line in the block
+  saying memory could not be searched. Messages from before this row existed keep their memories hidden.
 - **Retain.** Each finished turn is stored: the messages and the agent's replies, without tool calls or results and
   without the hidden blocks, so recalled memories are not stored again as new facts. The document id is the
   conversation and the turn's first entry, so storing a turn again replaces it. A failure is logged, never fatal.

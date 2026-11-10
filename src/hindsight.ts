@@ -17,7 +17,7 @@
 import type { Context } from "@earendil-works/chord";
 import { defineExtension, defineTool, GenerationTask, hook, type EntryRecord, type Extension, type HookApi, type RunSummary, type ToolRegistration } from "@earendil-works/pi-durable";
 import { HindsightClient } from "@vectorize-io/hindsight-client";
-import type { MessageContextRequest } from "@mgabor3141/pi-durable-t3";
+import type { MessageContextAnswer, MessageContextRequest } from "@mgabor3141/pi-durable-t3";
 import { int, opt, str } from "@earendil-works/pi-schema";
 import { MEMORY_RECALL_DESCRIPTION, MEMORY_REFLECT_DESCRIPTION, MEMORY_RETAIN_DESCRIPTION, MEMORY_TURN_CONTEXT, memoriesBlock, memoriesUnavailable } from "./prompts.ts";
 import { object } from "./schema.ts";
@@ -124,10 +124,14 @@ export class Hindsight {
 		}
 	}
 
-	/** The bridge's `messageContext`: the memories recalled for a message, or a note that memory could not be searched. */
-	async recallFor(request: MessageContextRequest): Promise<string | undefined> {
+	/**
+	 * The bridge's `messageContext`: the memories recalled for a message, or a note that memory could not be searched.
+	 * T3 shows it after the message as a `hindsight_recall` call with the query it was recalled for.
+	 */
+	async recallFor(request: MessageContextRequest): Promise<MessageContextAnswer | undefined> {
 		const query = request.text.trim().slice(0, QUERY_MAX_CHARS);
 		if (query === "") return undefined;
+		const shownAs = { name: "hindsight_recall", input: { query } };
 		try {
 			const response = await this.#client.recall(this.config.bank, query, {
 				types: ["world", "experience", "observation"],
@@ -137,10 +141,10 @@ export class Hindsight {
 				signal: request.signal,
 			});
 			const memories = (response.results ?? []) as Recalled[];
-			return memories.length === 0 ? undefined : memoriesBlock(memories.map(memoryLine));
+			return memories.length === 0 ? undefined : { text: memoriesBlock(memories.map(memoryLine)), shownAs };
 		} catch (error) {
 			if (request.signal.aborted) throw error;
-			return memoriesUnavailable((error as Error).message);
+			return { text: memoriesUnavailable((error as Error).message), shownAs };
 		}
 	}
 

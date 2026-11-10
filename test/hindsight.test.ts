@@ -59,7 +59,7 @@ describe("hindsightConfig", () => {
 });
 
 describe("recall for a message", () => {
-	it("is the memories as dated lines in a <memories> block, searched with the message's start, with the key", async () => {
+	it("is the memories as dated lines in a <memories> block, searched with the message's start, with the key, shown as a hindsight_recall row", async () => {
 		const server = await fakeHindsight({
 			"/memories/recall": () => ({
 				json: { results: [{ id: "1", text: "The user prefers short answers.", type: "observation", mentioned_at: "2026-10-03T08:00:00Z" }, { id: "2", text: "The user\nlives in Budapest.", type: "world", occurred_start: "2026-01-01T00:00:00Z" }] },
@@ -67,7 +67,8 @@ describe("recall for a message", () => {
 		});
 		const memory = new Hindsight({ url: server.url, bank: "gabor", apiKey: "secret-key" }, log().log);
 		const block = await memory.recallFor({ threadId: "t", conversationId: 1 as never, text: `what do I like? ${"x".repeat(2_000)}`, signal: new AbortController().signal });
-		expect(block).toBe("<memories>\nRecalled from long-term memory for this message. They may be out of date or not apply; the conversation wins where they disagree.\n- [2026-10-03] The user prefers short answers.\n- [2026-01-01] The user lives in Budapest.\n</memories>");
+		expect(block?.shownAs).toEqual({ name: "hindsight_recall", input: { query: `what do I like? ${"x".repeat(784)}` } });
+		expect(block?.text).toBe("<memories>\nRecalled from long-term memory for this message. They may be out of date or not apply; the conversation wins where they disagree.\n- [2026-10-03] The user prefers short answers.\n- [2026-01-01] The user lives in Budapest.\n</memories>");
 		const [recall] = server.seen;
 		expect(recall).toMatchObject({ method: "POST", path: "/v1/default/banks/gabor/memories/recall", auth: "Bearer secret-key" });
 		expect((recall!.body.query as string).length).toBe(800);
@@ -83,7 +84,7 @@ describe("recall for a message", () => {
 		expect(await ask("   ")).toBeUndefined();
 		expect(server.seen).toHaveLength(1);
 		status = 500;
-		expect(await ask("hello")).toMatch(/^<memories>\nLong-term memory could not be searched for this message: .*database is down/);
+		expect((await ask("hello"))?.text).toMatch(/^<memories>\nLong-term memory could not be searched for this message: .*database is down/);
 	});
 });
 
