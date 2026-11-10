@@ -26,7 +26,8 @@ RUN pnpm install --frozen-lockfile && pnpm typecheck && pnpm prune --prod
 
 # --- run ------------------------------------------------------------------------------------------------------------
 FROM ${NODE_IMAGE}
-RUN apt-get update && apt-get install -y --no-install-recommends openssh-client \
+# ca-certificates: claw-tailnet verifies Let's Encrypt with the system roots when it gets its HTTPS certificate.
+RUN apt-get update && apt-get install -y --no-install-recommends openssh-client ca-certificates \
 	&& rm -rf /var/lib/apt/lists/* \
 	&& mkdir -p /data /pubkey && chown node:node /data /pubkey
 COPY --from=build --chown=node:node /app /app
