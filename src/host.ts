@@ -13,7 +13,7 @@
 import { statSync } from "node:fs";
 import { parseArgs } from "node:util";
 import { join } from "node:path";
-import { Hindsight, hindsightConfig } from "./hindsight.ts";
+import { Hindsight, harnessMemoryHost, hindsightConfig } from "./hindsight.ts";
 import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
 import type { Registry } from "@earendil-works/pi-durable";
 import { ModelRuntime } from "@earendil-works/pi-coding-agent";
@@ -204,6 +204,9 @@ async function main(): Promise<void> {
 			toolRegistry = registry;
 		},
 	});
+	// Memory reads conversations' model context (what a recall leaves out, what the memory step reads) and writes its
+	// notes with T3's text-generation model once the bridge is attached.
+	memory?.attach(harnessMemoryHost(harness, () => late.textGenerationModel?.()));
 	// Connect MCP servers before the T3 bridge accepts input, so the first prompt sees their tools.
 	await mcp.start();
 
@@ -237,7 +240,7 @@ async function main(): Promise<void> {
 			titleThread: titleThread(harness, models),
 			// T3 learns the tailnet URL and the SSH host its editors open paths on ("Open in VS Code").
 			remoteAccess: tailnet,
-			// Each message arrives with the memories recalled for it, stored with it (hidden in T3).
+			// Each message arrives with the memories recalled for it, stored with it; T3 shows them as a hindsight_recall row.
 			...(memory === undefined ? {} : { messageContext: (request) => memory.recallFor(request) }),
 			...(browserlessUrl === ""
 				? {}
@@ -274,6 +277,7 @@ async function main(): Promise<void> {
 	let stopping = false;
 	const shutdown = async () => {
 		stopping = true;
+		memory?.close();
 		await tailnet.close();
 		await mcp.close();
 		await t3.close();

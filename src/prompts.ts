@@ -352,9 +352,41 @@ export function memoriesUnavailable(reason: string): string {
 	return `<memories>\nLong-term memory could not be searched for this message: ${reason}\n</memories>`;
 }
 
-/** Hindsight's `context` for a turn it stores: what the text is, which steers what it extracts. */
-export const MEMORY_TURN_CONTEXT =
-	"A turn of a conversation between the user and their personal agent: the user's messages, any messages from other agents or the scheduler, and the agent's replies.";
+/**
+ * The memory step after a turn: one more user message on a copy of the conversation (nothing is written to it), answered
+ * by the text-generation model. `turnStart` is the start of the turn's first message, so the model knows where the
+ * latest turn begins.
+ */
+export function memoryNotesPrompt(turnStart: string): string {
+	return [
+		"Memory step. This message is not from the user, and your answer is not shown to anyone: it is saved to your long-term memory.",
+		"",
+		`Look at the latest turn of the conversation above, from the message that begins "${turnStart}" to the end. Write down what in it is worth remembering in a conversation weeks from now:`,
+		"- facts about the user and the people, places and things in their life;",
+		"- their preferences, plans, decisions and commitments, with the reasons;",
+		"- what was agreed or settled, and lessons learned.",
+		"",
+		"Leave out:",
+		"- what is in a <memories> block: it is already saved;",
+		"- what earlier turns already said: use them only to understand the latest one;",
+		"- progress, status and results that only mattered while the work went on (test runs, commit ids, step-by-step reports);",
+		"- what can be looked up again in files, code or on the web, unless the user decided something about it;",
+		"- small talk.",
+		"",
+		'Write one statement per line. Each must make sense on its own, without this conversation, and say who it is about ("The user ...", "The agent ...").',
+		"",
+		"Most turns hold nothing worth remembering, routine scheduled tasks especially. Then answer with exactly: NOTHING",
+		"",
+		"Answer in text. No tools are available in this step.",
+	].join("\n");
+}
+
+/** What a tool call in the memory step gets back. */
+export const MEMORY_NOTES_NO_TOOLS = "No tools are available in the memory step. Answer in text: the statements worth remembering, or NOTHING.";
+
+/** Hindsight's `context` for the notes it stores: what the text is, which steers what it extracts. */
+export const MEMORY_NOTES_CONTEXT =
+	'Notes a personal agent wrote after one turn of its conversation with the user: one statement per line, each something worth remembering. "The user" is the person the agent works for; "the agent" is the assistant itself, and what it says it did is its own account.';
 
 export const MEMORY_RECALL_DESCRIPTION =
 	"Search long-term memory for what is known from earlier conversations: facts about the user, their preferences, decisions and past work. Each user message already arrives with memories recalled for it (<memories>); search when you need more or something else. Returns the memories, newest knowledge first, each with the date it was learned.";

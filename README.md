@@ -203,19 +203,36 @@ Browserless; the harness only connects to it. `HINDSIGHT_URL` turns it on (for e
 offered, and the harness logs that at start. A malformed value stops the harness; a server that does not answer yet
 does not (the log says so, and recalls say so until it answers).
 
-It works as Hindsight's own agent integrations do (`src/hindsight.ts`):
+How it works (`src/hindsight.ts`):
 
 - **Recall.** Each message that starts or steers a turn (from you, another thread or the scheduler; not a note or a
-  child's report) is searched for, and what comes back is stored with the message as a hidden `<memories>` block,
-  through the bridge's `messageContext`. Stored with the message, not added to each request, so the prompt cache
-  holds. T3 shows it right after your message as a `hindsight_recall` row (no tool ran): open it to see the query and
-  exactly what the model was given. The bridge waits at most 5 seconds; a failed search becomes a line in the block
-  saying memory could not be searched. Messages from before this row existed keep their memories hidden.
-- **Retain.** Each finished turn is stored: the messages and the agent's replies, without tool calls or results and
-  without the hidden blocks, so recalled memories are not stored again as new facts. The document id is the
-  conversation and the turn's first entry, so storing a turn again replaces it. A failure is logged, never fatal.
-- **Tools** for scripts: `hindsight_recall`, `hindsight_retain` (for what is learned outside the conversation) and
-  `hindsight_reflect`, listed in the codemode catalog.
+  child's report) is searched for, and the observations that come back are stored with the message as a hidden
+  `<memories>` block, through the bridge's `messageContext`. Observations are what Hindsight consolidates from the
+  facts it extracted: de-duplicated, each backed by its sources. Stored with the message, not added to each request,
+  so the prompt cache holds. Hindsight fills a 1,024-token budget with the best matches; claw then leaves out:
+  - a match whose reranker score is below 0.01 (`RECALL_MIN_SCORE`): low on purpose, since the scores order well but
+    are not absolute, so it only drops what has nothing to do with the message;
+  - one recalled for an earlier message and still in the model's context;
+  - one drawn only from turns still in the model's context.
+
+  After a compaction, what it removed from the context can be recalled again. T3 shows the block right after your
+  message as a `hindsight_recall` row (no tool ran): the query, exactly what the model was given, and below a "shown
+  here only, not sent to the model" line each memory's score and sources and what was left out and why. The bridge
+  waits at most 5 seconds; a failed search becomes a line in the block saying memory could not be searched.
+- **Remembering.** After each finished turn, a copy of the conversation (as the model saw it when the turn ended;
+  nothing is written to the thread) gets one more message: what in the latest turn is worth remembering weeks from
+  now, one self-contained statement per line, or `NOTHING`, which is the usual answer. A tool call there is turned
+  down. The notes are stored as the turn's document (the conversation and its entry range, which is how recall knows
+  where a memory came from); `NOTHING` stores nothing. Turns are written one at a time, off the run; one not written
+  yet when the harness stops is lost. A failure is logged, never fatal.
+
+  **This sends the whole conversation to T3's text-generation model (Settings → Models) after every turn**, of every
+  thread, scheduled tasks and child threads included, falling back to the thread's own model when that setting names
+  none of ours. Use a model you can afford to call that much: a local one, ideally with prompt caching (llama.cpp,
+  vLLM), so each call mostly reads the new turn. A conversation larger than that model's context window is cut from
+  its oldest turns; a turn that alone does not fit is not stored.
+- **Tools** for scripts: `hindsight_recall` (every kind of memory, not only observations), `hindsight_retain` (for
+  what is learned outside the conversation) and `hindsight_reflect`, listed in the codemode catalog.
 
 What Hindsight does with it (the model it calls to extract facts, the embedding model, its database) is your
 deployment's configuration. Choose the embedding model before storing anything: changing it later re-embeds every
@@ -247,7 +264,7 @@ Project `.mcp.json` files are not read.
 `type` is required: `"http"` (or its alias `"streamable-http"`). `timeout` is per request, in milliseconds.
 stdio, `sse` and `ws` entries are refused with a message saying so, as is `alwaysLoad: true`: every MCP tool is called
 from codemode.
-`${NAME}` (or `default`) in `url` or `headers` names one of the harness's [secrets](#secrets), never an
+`${NAME}` (or `${NAME:-default}`) in `url` or `headers` names one of the harness's [secrets](#secrets), never an
 environment variable. A server that names a missing secret is reported as needing it, and connects once the secret is
 saved. Changing a secret reconnects the servers that use it.
 
@@ -301,8 +318,9 @@ one with `request_secret`: T3 shows a private card in the thread, the value you 
 chose (`GITHUB_TOKEN`), and it never enters the chat. Scripts can also `list`, `set` (a value the agent already has) and
 `delete` secrets with the `secrets` tool.
 
-The agent uses a secret by writing `${NAME}` (or `default`) where the value goes: tool arguments, MCP config,
-browser form fields. A shell command uses `$NAME`: the secrets it names are exported to it. The value is substituted only
+The agent uses a secret by writing `${NAME}` where the value goes: tool arguments, MCP config, browser form
+fields. Only the names of saved secrets are replaced; any other `${...}` in a tool's arguments (a shell or compose
+default in a file being written) is left as written. A shell command uses `$NAME`: the secrets it names are exported to it. The value is substituted only
 inside the running tool, so the recorded call keeps the placeholder, and any value that appears in a tool's output comes
 back as `${NAME}`. This keeps secrets out of the model's context and the transcript; it is not a wall between the agent
 and its secrets (a transformed value is not recognised, and the agent may read a secret on purpose). Each use is logged

@@ -183,8 +183,11 @@ Three layers:
 [Hindsight](https://github.com/vectorize-io/hindsight), adopted as a service rather than built: retain, recall and
 reflect over memory banks, with consolidated observations, and recall by vector, keyword, entity graph and time. It is
 an integration point, like Browserless: you deploy Hindsight, `HINDSIGHT_URL` connects it, and without it there is no
-memory. The harness recalls for each message (stored with it, hidden, so the prompt cache holds) and retains each
-finished turn, as Hindsight's own agent plugins do; scripts get `hindsight_recall`, `hindsight_retain` and
+memory. The harness recalls observations for each message (stored with it, hidden, so the prompt cache holds),
+leaving out what the model's context already holds, which it knows from the entry range each stored turn records and
+the ids each recall stores with its block. After each turn, a copy of the conversation is asked what is worth
+remembering, on T3's text-generation model; only that answer is stored, so Hindsight extracts from notes rather than
+from transcripts full of passing detail. Scripts get `hindsight_recall`, `hindsight_retain` and
 `hindsight_reflect` (the README's "Memory"). Left to the deployment: the model Hindsight calls, its embedding model,
 where it runs and whether agents share it (one bank each, `HINDSIGHT_BANK`; separate keys need Hindsight's tenant
 extension). Not built: importing past threads.
