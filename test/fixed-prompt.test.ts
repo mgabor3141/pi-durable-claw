@@ -43,7 +43,7 @@ const promptOf = (context: TranscriptContext) => JSON.stringify(getCurrentSystem
 describe("the fixed system prompt", () => {
 	it("covers every section of the harness's prompt", () => {
 		const mcp = new McpManager({ source: fileSource("/nonexistent/mcp.json") });
-		const extensions: Extension[] = [...harnessExtensions({ browser: true }), mcp.extension()];
+		const extensions: Extension[] = [...harnessExtensions({ browser: true, web: { searxngUrl: "http://searxng:8080", readerUrl: "http://reader:8000" } }), mcp.extension()];
 		const keys = new Set(extensions.flatMap((extension) => extension.sections?.map((section) => section.key) ?? []));
 		expect([...keys].sort()).toEqual([...PROMPT_SECTIONS].sort());
 	});

@@ -22,8 +22,8 @@ That is why there are no approval prompts: a full-autonomy agent can use what yo
 
 Requirements: a Linux server with Docker (Compose v2) and git, and a model provider you can reach from it.
 
-1. **Clone** this repo on the server and `cp .env.example .env`. Compose reads `.env` for every command, so settings
-   such as `CLAW_PORT` stay put.
+1. **Clone** this repo on the server and `cp .env.example .env`. `.env` is where every setting goes: it lists them
+   all, and compose passes it to the harness whole. Change it, then `docker compose up -d` to apply.
 2. **Credentials.** Put pi's credentials file at `data/harness/pi/auth.json`, with an API key per provider, for
    example `{"anthropic":{"type":"api_key","key":"sk-..."}}`. If you use pi, you can copy yours from `~/.pi/agent/`,
    but prefer API keys: an OAuth login shared with another machine may be signed out on one of them when its token
@@ -160,10 +160,11 @@ and its console, and published pages are measured for phones and wide windows. T
 ## Web tools
 
 The harness offers `web_search`, `web_fetch`, `summarize` and the `browser_*` tools to codemode scripts. They are local
-services, not cloud APIs:
+services, not cloud APIs, that you run; like every outside service, each tool is offered only when its URL is set in
+`.env`, and the harness logs which are off at start:
 
-- `web_search` calls a SearXNG JSON endpoint (`SEARXNG_URL`, default `http://searxng:8080`).
-- `web_fetch` calls a page-reader service (`READER_URL`, default `http://reader:8000`) and returns the complete page as main-content Markdown. There is no tool-level character limit; the codemode output limit decides what reaches the model.
+- `web_search` calls a SearXNG JSON endpoint (`SEARXNG_URL`, e.g. `http://searxng:8080`).
+- `web_fetch` calls a page-reader service (`READER_URL`, e.g. `http://reader:8000`) and returns the complete page as main-content Markdown. There is no tool-level character limit; the codemode output limit decides what reaches the model.
 - `summarize` makes one model call over supplied text or a workspace file; it is not a subagent and cannot run tools.
 - `browser_open`, `browser_act`, `browser_snapshot`, `browser_screenshot` and `browser_close` drive T3's preview
   browser, a Browserless Chromium the harness reaches over CDP (`BROWSERLESS_URL`, for example

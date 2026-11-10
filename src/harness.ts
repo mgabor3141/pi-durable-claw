@@ -13,9 +13,9 @@ import { compactionExtension } from "./compaction.ts";
 import { browserTools, type SharedBrowserProvider } from "./browser.ts";
 import { abortable, imageCheckExtension, type TextGenerationModel } from "@mgabor3141/pi-durable-t3";
 import { workspaceTools } from "./tools.ts";
-import { webTools } from "./web.ts";
+import { webTools, type WebConfig } from "./web.ts";
 import { summarizeTools } from "./summarize.ts";
-import { workspaceEnv, type WorkspaceConnection } from "./workspace.ts";
+import { workspaceEnv, type WorkspaceConnection, WORKSPACE_HOME } from "./workspace.ts";
 import { type SecretStore, secretsTool, withSecrets } from "./secrets.ts";
 
 type SecretsLogger = Parameters<typeof withSecrets>[2];
@@ -49,6 +49,8 @@ export interface HarnessExtensionOptions {
 	readonly extraExtensions?: readonly Extension[];
 	/** Namespaces of MCP servers, for codemode's `describeNamespace()`. */
 	readonly mcpNamespaces?: readonly CodemodeNamespace[];
+	/** The web services: `web_search` and `web_fetch`, each only when configured. */
+	readonly web?: WebConfig;
 	/** Offer the `browser_*` tools: only when T3's preview browser is configured, since it is the only browser. */
 	readonly browser?: boolean;
 	/** What exists only once the bridge is attached: the host fills it in after `attachT3`, and the tools read it at each
@@ -71,7 +73,7 @@ export function harnessExtensions(options: HarnessExtensionOptions = {}): readon
 	const tools: ToolRegistration[] = [
 		...(options.extraTools ?? []),
 		...workspaceTools(),
-		...webTools(),
+		...webTools(options.web ?? {}),
 		// The browser's sessions do not listen for Stop; each call returns the moment it is stopped.
 		...(options.browser === true ? browserTools(options.late).map(abortable) : []),
 		...summarizeTools(options.late),
@@ -125,7 +127,7 @@ export async function openHarness(
 			registry,
 			// Every tool call's environment is the workspace container over SSH, starting where this conversation
 			// says it works: a project's root, a Scratch thread's own folder, or the home fallback.
-			env: (target) => workspaceEnv(options.workspace.connection, target.cwd ?? options.cwd ?? "/home/agent"),
+			env: (target) => workspaceEnv(options.workspace.connection, target.cwd ?? options.cwd ?? WORKSPACE_HOME),
 			settings: { toolExecution: "sequential" },
 			conversationCreated: recordConversationStart(),
 		},

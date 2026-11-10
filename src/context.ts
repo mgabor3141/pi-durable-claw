@@ -3,9 +3,9 @@ import type { Context } from "@earendil-works/chord";
 import { defineDoc, defineExtension, section, type ConversationRecord, type Extension, type Tx } from "@earendil-works/pi-durable";
 import type { ExecutionEnv } from "@earendil-works/pi-durable/env";
 import { loadSkills } from "./skills.ts";
+import { WORKSPACE_HOME as DEFAULT_HOME } from "./workspace.ts";
 import { LOCAL_PRECEDENCE, agentsSection, conversationTimeSection, cwdSection, skillsSection } from "./prompts.ts";
 
-const DEFAULT_HOME = "/home/agent";
 
 /** When a conversation started (epoch ms). A fork keeps its parent's: T3's undo and edit fork a thread's conversation. */
 export const ConversationStartDoc = defineDoc<{ at: number | null }>({

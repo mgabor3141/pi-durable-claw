@@ -66,6 +66,14 @@ it("a tool gets the value where it runs; the model and the record see the placeh
 	expect(logs).toContainEqual(["secrets used", { tool: "web_fetch", names: ["GITHUB_TOKEN"], conversationId: 7 }]);
 });
 
+it("a file's own templates are left as written: only the names of secrets are replaced", async () => {
+	const { secrets } = await store();
+	const tool = echo("write");
+	const content = 'ports: ["127.0.0.1:${CLAW_PORT:-3775}:3775"]\nhome: ${HOME}\npin: ${PIN:-0}\n';
+	await withSecrets(tool, secrets, log).execute({ path: "compose.yaml", content } as never, api([]), {} as never);
+	expect(tool.seen[0]).toEqual({ path: "compose.yaml", content: 'ports: ["127.0.0.1:${CLAW_PORT:-3775}:3775"]\nhome: ${HOME}\npin: 1234\n' });
+});
+
 it("a shell command gets the secrets it names as environment variables, not as text", async () => {
 	const { secrets } = await store();
 	const tool = echo("bash");

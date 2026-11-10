@@ -14,6 +14,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestGateLetsTheOwnerAndTheAllowListIn(t *testing.T) {
@@ -109,8 +110,7 @@ func TestProxyRefusesPeersTheGateRefuses(t *testing.T) {
 
 func TestReporterWritesChangesOnly(t *testing.T) {
 	file := filepath.Join(t.TempDir(), "status.json")
-	var lines []string
-	reporter := &Reporter{File: file, Out: func(line []byte) { lines = append(lines, string(line)) }}
+	reporter := &Reporter{File: file}
 	running := Status{State: "running", DNSName: "claw.tail1234.ts.net", MagicDNS: true, HTTPS: false, Owner: "owner@example.com"}
 	running.Problems = problems(running)
 	for i := 0; i < 3; i++ {
@@ -118,8 +118,12 @@ func TestReporterWritesChangesOnly(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	if len(lines) != 1 {
-		t.Fatalf("reported %d times", len(lines))
+	info, _ := os.Stat(file)
+	written := info.ModTime()
+	time.Sleep(20 * time.Millisecond)
+	_ = reporter.Report(running)
+	if info, _ = os.Stat(file); !info.ModTime().Equal(written) {
+		t.Fatal("an unchanged status was written again")
 	}
 	raw, _ := os.ReadFile(file)
 	var read Status

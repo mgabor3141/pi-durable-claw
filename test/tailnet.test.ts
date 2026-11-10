@@ -1,6 +1,6 @@
 // Remote access built in (`tailnet.ts`): the harness starts `claw-tailnet` when `claw remote` turns it on, restarts it
 // when it exits, stops it when turned off, and tells T3 what it reports. A stand-in program records how it was started
-// and prints the status lines the test gives it.
+// and writes the statuses the test gives it to its status file, one at a time.
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -13,12 +13,21 @@ afterEach(async () => void (await Promise.all(cleanups.splice(0).map((cleanup) =
 
 const STAND_IN = `
 const fs = require("node:fs");
+const path = require("node:path");
 const [control, ...args] = process.argv.slice(2);
 const plan = JSON.parse(fs.readFileSync(control, "utf8"));
 fs.appendFileSync(control + ".runs", JSON.stringify(args) + "\\n");
-for (const line of plan.lines) console.log(typeof line === "string" ? line : JSON.stringify(line));
+const status = path.join(args[args.indexOf("--state-dir") + 1], "status.json");
 console.error("tsnet says hello");
-if (plan.exit) process.exit(3);
+let step = 0;
+const next = () => {
+	if (step < plan.lines.length) {
+		fs.writeFileSync(status + ".tmp", JSON.stringify(plan.lines[step++]));
+		fs.renameSync(status + ".tmp", status);
+		setTimeout(next, 250);
+	} else if (plan.exit) process.exit(3);
+};
+next();
 process.on("SIGTERM", () => { fs.appendFileSync(control + ".runs", "stopped\\n"); process.exit(0); });
 setInterval(() => {}, 1000);
 `;

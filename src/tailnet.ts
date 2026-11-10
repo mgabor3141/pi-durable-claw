@@ -5,11 +5,11 @@
  * owner (the account that logged it in) and `CLAW_TAILNET_ALLOW` get through.
  *
  * `claw remote` turns it on (`<root>/remote.json`) and prints the login link; the running host notices, starts the
- * program, restarts it if it exits, and stops it when turned off. Its status (one JSON line per change on stdout, also
- * `<root>/tailscale/status.json` for the CLI) is what the bridge advertises to T3 (`remoteAccess`).
+ * program, restarts it if it exits, and stops it when turned off. Its status, `<root>/tailscale/status.json` (the CLI
+ * reads the same file), is what the bridge advertises to T3 (`remoteAccess`).
  */
 import { spawn, type ChildProcess } from "node:child_process";
-import { existsSync, mkdirSync, readFileSync, renameSync, unwatchFile, watchFile, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, renameSync, unwatchFile, watchFile, writeFileSync, type Stats } from "node:fs";
 import { dirname, join } from "node:path";
 import { createInterface } from "node:readline";
 import type { RemoteAccess, RemoteAccessState } from "@mgabor3141/pi-durable-t3";
@@ -104,6 +104,8 @@ export class Tailnet implements RemoteAccess {
 	#closed = false;
 	#backoffMs = BACKOFF_FIRST_MS;
 	#restartTimer: NodeJS.Timeout | undefined;
+	/** When the running program started: an older status file is a previous run's. */
+	#spawnedAt = 0;
 
 	constructor(options: TailnetOptions) {
 		this.#options = options;
@@ -112,7 +114,9 @@ export class Tailnet implements RemoteAccess {
 	/** Follow `remote.json`: start the program when it says on, stop it when it says off. */
 	start(): void {
 		this.#apply();
-		watchFile(remoteFile(this.#options.root), { interval: this.#options.pollMs ?? 2_000 }, () => this.#apply());
+		const interval = this.#options.pollMs ?? 1_000;
+		watchFile(remoteFile(this.#options.root), { interval }, () => this.#apply());
+		watchFile(statusFile(this.#options.root), { interval }, (current) => this.#statusChanged(current));
 	}
 
 	current(): RemoteAccessState {
@@ -131,6 +135,7 @@ export class Tailnet implements RemoteAccess {
 	async close(): Promise<void> {
 		this.#closed = true;
 		unwatchFile(remoteFile(this.#options.root));
+		unwatchFile(statusFile(this.#options.root));
 		await this.#stop();
 	}
 
@@ -172,10 +177,10 @@ export class Tailnet implements RemoteAccess {
 			...(allow.length === 0 ? [] : ["--allow", allow.join(",")]),
 		];
 		const startedAt = Date.now();
+		this.#spawnedAt = startedAt;
 		const child = spawn(command[0]!, args, { stdio: ["ignore", "pipe", "pipe"] });
 		this.#child = child;
-		createInterface({ input: child.stdout! }).on("line", (line) => this.#onStatus(line));
-		createInterface({ input: child.stderr! }).on("line", (line) => log.info(`tailnet: ${line}`));
+		for (const stream of [child.stdout!, child.stderr!]) createInterface({ input: stream }).on("line", (line) => log.info(`tailnet: ${line}`));
 		child.once("error", (error) => log.warn("remote access: claw-tailnet did not start", { error: error.message }));
 		child.once("exit", (code, signal) => {
 			if (this.#child === child) this.#child = undefined;
@@ -192,12 +197,13 @@ export class Tailnet implements RemoteAccess {
 		});
 	}
 
-	#onStatus(line: string): void {
+	/** A new status file: this run's report, once the program runs (the program rewrites it on every change). */
+	#statusChanged(current: Stats): void {
+		if (this.#child === undefined || current.mtimeMs === 0 || current.mtimeMs < this.#spawnedAt - 1_000) return;
 		let status: TailnetStatus;
 		try {
-			status = JSON.parse(line) as TailnetStatus;
+			status = JSON.parse(readFileSync(statusFile(this.#options.root), "utf8")) as TailnetStatus;
 		} catch {
-			this.#options.log.info(`tailnet: ${line}`);
 			return;
 		}
 		const before = this.#status;

@@ -6,4 +6,6 @@ if [ "$(id -u)" = 0 ]; then
 	chown -R node:node /data
 	exec setpriv --reuid=node --regid=node --init-groups "$0" "$@"
 fi
-exec node /app/src/host.ts "$@"
+# The image's wiring: its data dir, listening inside the container (compose publishes the port on 127.0.0.1 only), and
+# the volume the workspace reads the harness's public key from. Your settings come from .env.
+exec node /app/src/host.ts --root /data --listen 0.0.0.0 --pubkey-dir /pubkey "$@"

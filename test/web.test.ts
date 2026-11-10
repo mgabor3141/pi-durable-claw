@@ -1,5 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { assertFetchableUrl, searchWeb, fetchWeb, webTools } from "../src/web.ts";
+import { assertFetchableUrl, searchWeb, fetchWeb, webConfig, webTools } from "../src/web.ts";
+
+const SEARXNG = "http://searxng:8080";
+const READER = "http://reader:8000";
 
 function response(value: unknown, status = 200): Response {
 	return new Response(JSON.stringify(value), { status, headers: { "content-type": "application/json" } });
@@ -12,7 +15,7 @@ function fakeFetch(handler: (input: string | URL | Request, init?: RequestInit) 
 describe("web search", () => {
 	it("sends the query to SearXNG and caps the result count", async () => {
 		let seen = "";
-		const out = await searchWeb("rust async", {
+		const out = await searchWeb(SEARXNG, "rust async", {
 			maxResults: 2,
 			timeRange: "week",
 			fetch: fakeFetch(async (input) => {
@@ -34,7 +37,7 @@ describe("web search", () => {
 	});
 
 	it("clips long snippets", async () => {
-		const out = await searchWeb("long", {
+		const out = await searchWeb(SEARXNG, "long", {
 			fetch: fakeFetch(async () => response({ results: [{ title: "T", url: "https://x.example", content: "x".repeat(900) }] })),
 		});
 		expect(out.results[0].snippet).toHaveLength(500);
@@ -42,19 +45,19 @@ describe("web search", () => {
 
 	it("reports backend errors with the response detail", async () => {
 		await expect(
-			searchWeb("fail", { fetch: fakeFetch(async () => response({ detail: "engine unavailable" }, 502)) }),
+			searchWeb(SEARXNG, "fail", { fetch: fakeFetch(async () => response({ detail: "engine unavailable" }, 502)) }),
 		).rejects.toThrow("searxng returned HTTP 502: engine unavailable");
 	});
 
 	it("rejects an empty query", async () => {
-		await expect(searchWeb("   ", { fetch: fakeFetch(async () => response({})) })).rejects.toThrow("non-empty query");
+		await expect(searchWeb(SEARXNG, "   ", { fetch: fakeFetch(async () => response({})) })).rejects.toThrow("non-empty query");
 	});
 });
 
 describe("web view", () => {
 	it("reads markdown from the page reader and reports the final URL", async () => {
 		let body = "";
-		const out = await fetchWeb("https://example.com/start", {
+		const out = await fetchWeb(READER, "https://example.com/start", {
 			fetch: fakeFetch(async (_input, init) => {
 				body = String(init?.body ?? "");
 				return response({ url: "https://example.com/end", markdown: "# Title\n\nBody" });
@@ -72,14 +75,14 @@ describe("web view", () => {
 			return response({});
 		});
 		for (const url of ["http://127.0.0.1/", "http://10.1.2.3/", "http://searxng:8080/", "file:///etc/passwd"]) {
-			await expect(fetchWeb(url, { fetch: never })).rejects.toThrow();
+			await expect(fetchWeb(READER, url, { fetch: never })).rejects.toThrow();
 		}
 		expect(called).toBe(false);
 	});
 
 	it("refuses a redirect into a private address", async () => {
 		await expect(
-			fetchWeb("https://example.com", {
+			fetchWeb(READER, "https://example.com", {
 				fetch: fakeFetch(async () => response({ url: "http://127.0.0.1/", markdown: "# private" })),
 			}),
 		).rejects.toThrow(/private|internal/);
@@ -93,11 +96,11 @@ describe("web view", () => {
 		);
 		const stop = new AbortController();
 		const started = Date.now();
-		const pending = fetchWeb("https://example.com", { fetch: hanging, signal: stop.signal });
+		const pending = fetchWeb(READER, "https://example.com", { fetch: hanging, signal: stop.signal });
 		setTimeout(() => stop.abort(new Error("stopped")), 50);
 		await expect(pending).rejects.toThrow("stopped");
 		const search = new AbortController();
-		const searching = searchWeb("query", { fetch: hanging, signal: search.signal });
+		const searching = searchWeb(SEARXNG, "query", { fetch: hanging, signal: search.signal });
 		search.abort(new Error("stopped too"));
 		await expect(searching).rejects.toThrow("stopped too");
 		expect(Date.now() - started).toBeLessThan(2_000);
@@ -105,16 +108,25 @@ describe("web view", () => {
 
 	it("reports an empty page as an error", async () => {
 		await expect(
-			fetchWeb("https://example.com", { fetch: fakeFetch(async () => response({ url: "https://example.com", markdown: " " })) }),
+			fetchWeb(READER, "https://example.com", { fetch: fakeFetch(async () => response({ url: "https://example.com", markdown: " " })) }),
 		).rejects.toThrow("no readable content");
 	});
 });
 
 describe("tool registration", () => {
-	it("registers both web tools as script-callable only", () => {
-		const tools = webTools();
+	it("registers each web tool only when its service is configured, as script-callable only", () => {
+		const tools = webTools({ searxngUrl: SEARXNG, readerUrl: READER });
 		expect(tools.map((tool) => tool.name).sort()).toEqual(["web_fetch", "web_search"]);
 		for (const tool of tools) expect(tool.callers).toEqual(["tools"]);
+		expect(webTools({}).map((tool) => tool.name)).toEqual([]);
+		expect(webTools({ readerUrl: READER }).map((tool) => tool.name)).toEqual(["web_fetch"]);
+	});
+
+	it("reads its services from the environment: unset or empty is off, a malformed URL fails loudly", () => {
+		expect(webConfig({})).toEqual({});
+		expect(webConfig({ SEARXNG_URL: "", READER_URL: "  " })).toEqual({});
+		expect(webConfig({ SEARXNG_URL: "http://searxng:8080/", READER_URL: "http://reader:8000" })).toEqual({ searxngUrl: SEARXNG, readerUrl: READER });
+		expect(() => webConfig({ SEARXNG_URL: "searxng:8080" })).toThrow(/SEARXNG_URL must be an http\(s\) URL/);
 	});
 
 	it("accepts only http(s) public URLs", () => {

@@ -59,7 +59,7 @@ it("the harness's prompt is the catalog, fixed for the thread, and describeTool(
 	const dir = await mkdtemp(join(tmpdir(), "claw-catalog-"));
 	dirs.push(dir);
 	const registry = createRegistry();
-	for (const extension of harnessExtensions({ browser: true })) registry.install(extension);
+	for (const extension of harnessExtensions({ browser: true, web: { searxngUrl: "http://searxng:8080", readerUrl: "http://reader:8000" } })) registry.install(extension);
 	const faux = fauxProvider({ provider: "faux" });
 	const models = createModels();
 	models.setProvider(faux.provider);

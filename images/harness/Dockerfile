@@ -33,7 +33,7 @@ COPY --from=build --chown=node:node /app /app
 COPY images/harness/claw /usr/local/bin/claw
 COPY --from=tailnet /claw-tailnet /usr/local/bin/claw-tailnet
 WORKDIR /app
-# /data holds everything the harness keeps: storage, bridge state, SSH keys. `claw` runs the host as node.
-ENV CLAW_ROOT=/data CLAW_HOST=0.0.0.0 CLAW_PUBKEY_DIR=/pubkey
+# /data holds everything the harness keeps: storage, bridge state, SSH keys. `claw` runs the host as node, with the
+# image's paths as flags.
 EXPOSE 3775
 CMD ["claw"]

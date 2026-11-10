@@ -1,21 +1,17 @@
-// The always-on assistant: the codemode-first harness (workspace read/write/bash over pi-env SSH)
-// behind the T3 bridge
+// The always-on assistant: the codemode-first harness (workspace read/write/bash over pi-env SSH) behind the T3 bridge
 // (`attachT3` from @mgabor3141/pi-durable-t3, which serves T3's web app), plus the title hook and shutdown copied from
 // the bridge's example agent.
 //
-//   node src/host.ts [--root <dir>]        serve (root: CLAW_ROOT; storage, bridge state, SSH keys live under it)
-//   node src/host.ts pair                  mint a single-use pairing code and print the link
-//   node src/host.ts remote [on|off|status] remote access over your tailnet (`tailnet.ts`): on prints the login link
+//   node src/host.ts --root <dir> [--listen <host>] [--workspace <host:port>] [--pubkey-dir <dir>]   serve
+//   node src/host.ts --root <dir> pair                    mint a single-use pairing code and print the link
+//   node src/host.ts --root <dir> remote [on|off|status]  remote access over your tailnet (`tailnet.ts`)
 //
-// Configuration (all CLAW_*): ROOT, HOST (listen address, default 127.0.0.1), PORT (3775), PUBLIC_URL (what `pair`
-// prints; default http://127.0.0.1:PORT), LABEL (the T3 environment label; default claw), WORKSPACE_HOST (workspace),
-// WORKSPACE_PORT (22), PUBKEY_DIR (where to publish the harness's public key for the workspace; unset: not published),
-// SCRATCH_DIR (T3's scratch project root, an absolute path in the workspace environment; default /home/agent/scratch),
-// TAILNET_HOSTNAME (the device name on your tailnet; default from LABEL), TAILNET_ALLOW (comma-separated logins or tags
-// allowed besides the node's owner), TAILNET_BIN (the claw-tailnet program; default on PATH). TS_AUTHKEY, when set,
-// logs the node in without the link.
-// Models: <root>/pi/auth.json (and models.json).
+// The flags are the image's wiring, set by its `claw` launcher: the data dir (`--root`: storage, bridge state, SSH
+// keys), the listen address (default 127.0.0.1), the workspace's SSH address (default workspace:22), and where the
+// harness's public key is published for the workspace (default: not published). Your settings are environment
+// variables, listed in .env.example; compose passes .env whole. Models: <root>/pi/auth.json (and models.json).
 import { statSync } from "node:fs";
+import { parseArgs } from "node:util";
 import { join } from "node:path";
 import { Hindsight, hindsightConfig } from "./hindsight.ts";
 import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
@@ -26,15 +22,15 @@ import { McpManager } from "./mcp/manager.ts";
 import { workspaceSource } from "./mcp/config.ts";
 import { McpOAuth } from "./mcp/oauth.ts";
 import { SecretStore, withSecrets } from "./secrets.ts";
-import { connectWorkspace, ensureKeypair, workspaceEnv, workspaceTarget } from "./workspace.ts";
+import { connectWorkspace, ensureKeypair, WORKSPACE_HOME, workspaceEnv, workspaceTarget } from "./workspace.ts";
+import { webConfig } from "./web.ts";
 import { deviceName, readRemoteEnabled, readStatusFile, Tailnet, tailnetUrl, writeRemoteEnabled, type TailnetStatus } from "./tailnet.ts";
 import { attachT3, mintPairingCode } from "@mgabor3141/pi-durable-t3";
 import { installShutdown } from "./shutdown.ts";
 import { titleThread } from "./title.ts";
 
-const PORT = Number(process.env.CLAW_PORT ?? 3775);
-const LISTEN = { host: process.env.CLAW_HOST ?? "127.0.0.1", port: PORT };
-// Compose passes an unset CLAW_PUBLIC_URL as empty: empty is unset.
+// An empty setting is an unset one (an `.env` line left blank).
+const PORT = Number(process.env.CLAW_PORT?.trim() || 3775);
 const PUBLIC_URL_SET = (process.env.CLAW_PUBLIC_URL?.trim() ?? "") !== "";
 const PUBLIC_URL = (PUBLIC_URL_SET ? process.env.CLAW_PUBLIC_URL!.trim() : `http://127.0.0.1:${PORT}`).replace(/\/+$/, "");
 /** Where your browser reaches this host (pairing links, OAuth callbacks): CLAW_PUBLIC_URL when set, else the tailnet
@@ -42,7 +38,7 @@ const PUBLIC_URL = (PUBLIC_URL_SET ? process.env.CLAW_PUBLIC_URL!.trim() : `http
 const publicUrl = (root: string): string => (PUBLIC_URL_SET ? PUBLIC_URL : (tailnetUrl(root) ?? PUBLIC_URL));
 const LABEL = process.env.CLAW_LABEL?.trim() || "claw";
 /** The agent's MCP configuration, in the workspace (Claude Code's user-scope file). */
-const MCP_CONFIG_PATH = "/home/agent/.mcp.json";
+const MCP_CONFIG_PATH = join(WORKSPACE_HOME, ".mcp.json");
 
 const log = {
 	info: (message: string, fields?: Record<string, unknown>) => console.log(JSON.stringify({ t: new Date().toISOString(), level: "info", message, ...fields })),
@@ -79,35 +75,61 @@ function escapeHtml(text: string): string {
 	return text.replace(/[&<>"']/g, (char) => `&#${char.charCodeAt(0)};`);
 }
 
-/** The value after `--root`, if any (undefined at the end or before another flag). */
-function rootFromArgv(argv: readonly string[]): string | undefined {
-	const index = argv.indexOf("--root");
-	const value = index >= 0 ? argv[index + 1] : undefined;
-	return value !== undefined && !value.startsWith("--") ? value : undefined;
+const USAGE = `usage: node src/host.ts --root <dir> [--listen <host>] [--workspace <host:port>] [--pubkey-dir <dir>]
+       node src/host.ts --root <dir> pair
+       node src/host.ts --root <dir> remote [on|off|status]`;
+
+/** The command line: the image's wiring as flags (unknown ones refused), then the command and its argument. */
+function parseCommandLine(argv: readonly string[]) {
+	const { values, positionals } = parseArgs({
+		args: [...argv],
+		options: { root: { type: "string" }, listen: { type: "string" }, workspace: { type: "string" }, "pubkey-dir": { type: "string" } },
+		allowPositionals: true,
+		strict: true,
+	});
+	const workspace = values.workspace ?? "workspace:22";
+	const match = /^(.+):(\d+)$/u.exec(workspace);
+	if (match === null) throw new Error(`--workspace must be host:port, not ${workspace}`);
+	return {
+		root: values.root,
+		listen: values.listen ?? "127.0.0.1",
+		workspace: { host: match[1]!, port: Number(match[2]) },
+		pubkeyDir: values["pubkey-dir"],
+		command: positionals[0],
+		argument: positionals[1],
+	};
 }
 
 async function main(): Promise<void> {
 	const argv = process.argv.slice(2);
 	while (argv[0] === "--") argv.shift();
-	const root = rootFromArgv(argv) ?? process.env.CLAW_ROOT;
-	if (root === undefined) {
-		console.error("usage: node src/host.ts [--root <dir>]   (or set CLAW_ROOT)\n       node src/host.ts pair");
+	let line: ReturnType<typeof parseCommandLine>;
+	try {
+		line = parseCommandLine(argv);
+	} catch (error) {
+		console.error(`${(error as Error).message}\n${USAGE}`);
+		process.exit(2);
+	}
+	const { root } = line;
+	if (root === undefined || (line.command !== undefined && line.command !== "pair" && line.command !== "remote")) {
+		console.error(USAGE);
 		process.exit(2);
 	}
 	const stateDir = join(root, "t3");
-	const scratchDir = process.env.CLAW_SCRATCH_DIR?.trim() || "/home/agent/scratch";
+	const scratchDir = join(WORKSPACE_HOME, "scratch");
+	const listen = { host: line.listen, port: PORT };
 
 	// `pair`: mint a code against the state dir's auth store and exit; the running host reads the store per attempt.
 	// With remote access on and serving HTTPS, the link is the tailnet's, unless CLAW_PUBLIC_URL names another.
-	if (argv[0] === "pair") {
+	if (line.command === "pair") {
 		const { code } = mintPairingCode(stateDir);
 		const base = publicUrl(root);
 		console.log(`Pairing code (single use): ${code}`);
 		console.log(`\n  Open in a browser (pairs and opens the web app), or paste into the T3 desktop app's Add computer:\n  ${base}/pair#token=${code}\n`);
 		return;
 	}
-	if (argv[0] === "remote") {
-		process.exit(await remoteCommand(root, argv[1] ?? "on"));
+	if (line.command === "remote") {
+		process.exit(await remoteCommand(root, line.argument ?? "on"));
 	}
 
 	// Models: pi's own files under <root>/pi (auth.json with keys, optionally models.json), read and refreshed in place.
@@ -122,8 +144,8 @@ async function main(): Promise<void> {
 	// The workspace: our keypair (made on first start, public half published for the workspace), then connected once;
 	// its host key is accepted on first use and kept under the root.
 	const sshDir = join(root, "ssh");
-	ensureKeypair(sshDir, process.env.CLAW_PUBKEY_DIR);
-	const workspaceConfig = { host: process.env.CLAW_WORKSPACE_HOST ?? "workspace", port: Number(process.env.CLAW_WORKSPACE_PORT ?? 22), sshDir };
+	ensureKeypair(sshDir, line.pubkeyDir);
+	const workspaceConfig = { ...line.workspace, sshDir };
 	let workspace;
 	try {
 		workspace = await connectWorkspace(workspaceConfig);
@@ -154,6 +176,10 @@ async function main(): Promise<void> {
 	// tools are not offered, and the log says why.
 	const browserlessUrl = process.env.BROWSERLESS_URL?.trim() ?? "";
 	if (browserlessUrl === "") log.info("browser tools off: BROWSERLESS_URL is not set");
+	// Web search and page fetch are services you run, as with Browserless: each tool only with its URL.
+	const web = webConfig(process.env);
+	if (web.searxngUrl === undefined) log.info("web_search off: SEARXNG_URL is not set");
+	if (web.readerUrl === undefined) log.info("web_fetch off: READER_URL is not set");
 	// Long-term memory is Hindsight, which you deploy yourself, as with Browserless (`hindsight.ts`). Without
 	// HINDSIGHT_URL there is no memory: no recall, nothing stored, no memory tools.
 	const memoryConfig = hindsightConfig(process.env);
@@ -165,6 +191,7 @@ async function main(): Promise<void> {
 	const harness = await openHarness({
 		storagePath: join(root, "durable.db"),
 		browser: browserlessUrl !== "",
+		web,
 		workspace,
 		models,
 		mcpNamespaces: mcp.namespaces(),
@@ -188,7 +215,6 @@ async function main(): Promise<void> {
 		allow: (process.env.CLAW_TAILNET_ALLOW ?? "").split(",").map((item) => item.trim()).filter((item) => item !== ""),
 		port: PORT,
 		workspace: { host: workspaceConfig.host, port: workspaceConfig.port, user: target.user!, sshDir, hostKeyAlias: target.hostKeyAlias! },
-		command: [process.env.CLAW_TAILNET_BIN?.trim() || "claw-tailnet"],
 		log,
 	});
 
@@ -199,11 +225,11 @@ async function main(): Promise<void> {
 			stateDir,
 			scratchDir,
 			// Every image and file a user sends lives here, where the agent works, named to it by path.
-			attachmentsDir: "/home/agent/attachments",
+			attachmentsDir: join(WORKSPACE_HOME, "attachments"),
 			// T3 works in the workspace container, with `/` as its root: every absolute path in the protocol is an
 			// environment path, and there is no harness-filesystem fallback.
 			env: workspaceEnv(workspace.connection, "/"),
-			listen: LISTEN,
+			listen,
 			label: LABEL,
 			routes: [{ method: "GET", path: OAUTH_CALLBACK_PATH, handle: (request) => oauthCallback(mcp, request) }],
 			titleThread: titleThread(harness, models),
@@ -213,11 +239,11 @@ async function main(): Promise<void> {
 			...(memory === undefined ? {} : { messageContext: (request) => memory.recallFor(request) }),
 			...(browserlessUrl === ""
 				? {}
-				: { preview: { cdpUrl: browserlessUrl, ...(process.env.BROWSERLESS_TOKEN === undefined ? {} : { token: process.env.BROWSERLESS_TOKEN }), storageStatePath: join(stateDir, "browser-profile.json") } }),
+				: { preview: { cdpUrl: browserlessUrl, ...(process.env.BROWSERLESS_TOKEN?.trim() ? { token: process.env.BROWSERLESS_TOKEN.trim() } : {}), storageStatePath: join(stateDir, "browser-profile.json") } }),
 			log,
 		});
 	} catch (error) {
-		console.error(`failed to listen on http://${LISTEN.host}:${LISTEN.port}: ${(error as NodeJS.ErrnoException).code ?? "unknown"} (${(error as Error).message ?? ""})`);
+		console.error(`failed to listen on http://${listen.host}:${listen.port}: ${(error as NodeJS.ErrnoException).code ?? "unknown"} (${(error as Error).message ?? ""})`);
 		await mcp.close();
 		await harness.close(BACKGROUND_CONTEXT);
 		process.exit(1);
@@ -262,7 +288,7 @@ async function main(): Promise<void> {
 	});
 
 	log.info("pi-durable-claw host ready", {
-		address: `http://${LISTEN.host}:${LISTEN.port}`,
+		address: `http://${listen.host}:${listen.port}`,
 		root,
 		stateDir,
 		workspace: `${workspaceConfig.host}:${workspaceConfig.port} (${workspace.remote.platform}/${workspace.remote.arch})`,

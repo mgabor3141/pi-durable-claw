@@ -11,11 +11,28 @@ import { literal, object } from "./schema.ts";
  * credentials, so the tools only need these two URLs; the harness never asks
  * the workspace to run network code.
  *
- * The defaults are the common compose service names. A deployment can override
- * them in the harness environment when its services use other names.
+ * Like every outside service, each is on only when configured (`SEARXNG_URL`, `READER_URL`): without its URL the tool is
+ * not offered, and the host logs that at start.
  */
-const SEARXNG_URL = (process.env.SEARXNG_URL ?? "http://searxng:8080").replace(/\/+$/, "");
-const READER_URL = (process.env.READER_URL ?? "http://reader:8000").replace(/\/+$/, "");
+export interface WebConfig {
+	/** A SearXNG with its JSON API on: `web_search`. */
+	readonly searxngUrl?: string;
+	/** A page reader answering `POST /read`: `web_fetch`. */
+	readonly readerUrl?: string;
+}
+
+/** The configuration from the environment; a malformed URL fails loudly. */
+export function webConfig(env: Readonly<Record<string, string | undefined>>): WebConfig {
+	const url = (name: string): string | undefined => {
+		const value = env[name]?.trim() ?? "";
+		if (value === "") return undefined;
+		if (!URL.canParse(value) || !/^https?:$/u.test(new URL(value).protocol)) throw new Error(`${name} must be an http(s) URL: ${value}`);
+		return value.replace(/\/+$/u, "");
+	};
+	const searxngUrl = url("SEARXNG_URL");
+	const readerUrl = url("READER_URL");
+	return { ...(searxngUrl === undefined ? {} : { searxngUrl }), ...(readerUrl === undefined ? {} : { readerUrl }) };
+}
 
 const DEFAULT_SEARCH_TIMEOUT_MS = 20_000;
 // The reader may fall back from HTTP to a browser.
@@ -160,13 +177,14 @@ function isPrivateAddress(host: string): boolean {
 }
 
 export async function searchWeb(
+	searxngUrl: string,
 	query: string,
 	options: WebRequestOptions & { maxResults?: number; timeRange?: "day" | "week" | "month" | "year" } = {},
 ): Promise<SearchOutput> {
 	const trimmed = query.trim();
 	if (trimmed === "") throw new Error("web_search needs a non-empty query");
 	const count = Math.max(1, Math.min(options.maxResults ?? DEFAULT_MAX_RESULTS, MAX_RESULTS));
-	const url = new URL(`${SEARXNG_URL}/search`);
+	const url = new URL(`${searxngUrl}/search`);
 	url.searchParams.set("q", trimmed);
 	url.searchParams.set("format", "json");
 	if (options.timeRange !== undefined) url.searchParams.set("time_range", options.timeRange);
@@ -200,9 +218,9 @@ export async function searchWeb(
 	return { query: trimmed, results };
 }
 
-export async function fetchWeb(value: string, options: WebRequestOptions = {}): Promise<WebFetchOutput> {
+export async function fetchWeb(readerUrl: string, value: string, options: WebRequestOptions = {}): Promise<WebFetchOutput> {
 	const url = assertFetchableUrl(value);
-	const response = await fetcher(options)(`${READER_URL}/read`, {
+	const response = await fetcher(options)(`${readerUrl}/read`, {
 		method: "POST",
 		headers: { "content-type": "application/json", accept: "application/json" },
 		body: JSON.stringify({ url }),
@@ -228,9 +246,17 @@ export async function fetchWeb(value: string, options: WebRequestOptions = {}): 
 	return { url, finalUrl, markdown };
 }
 
-export function webTools(): ToolRegistration[] {
+/** `web_search` and `web_fetch`, each only when its service is configured. */
+export function webTools(config: WebConfig): ToolRegistration[] {
+	const { searxngUrl, readerUrl } = config;
 	return [
-		defineTool({
+		...(searxngUrl === undefined ? [] : [searchTool(searxngUrl)]),
+		...(readerUrl === undefined ? [] : [fetchTool(readerUrl)]),
+	];
+}
+
+function searchTool(searxngUrl: string): ToolRegistration {
+	return defineTool({
 			name: "web_search",
 			description: WEB_SEARCH_TOOL_DESCRIPTION,
 			parameters: object({
@@ -252,12 +278,15 @@ export function webTools(): ToolRegistration[] {
 			}),
 			callers: ["tools"],
 			async execute(args, _api, context) {
-				const output = await searchWeb(args.query, { maxResults: args.max_results, timeRange: args.time_range, signal: context.abortSignal });
+				const output = await searchWeb(searxngUrl, args.query, { maxResults: args.max_results, timeRange: args.time_range, signal: context.abortSignal });
 				const text = untrusted("web-search", args.query, JSON.stringify(output.results, null, 2));
 				return { output: [{ type: "text", text }], structuredOutput: output as unknown as JsonValue };
 			},
-		}),
-		defineTool({
+		});
+}
+
+function fetchTool(readerUrl: string): ToolRegistration {
+	return defineTool({
 			name: "web_fetch",
 			description: WEB_FETCH_TOOL_DESCRIPTION,
 			parameters: object({
@@ -270,13 +299,12 @@ export function webTools(): ToolRegistration[] {
 			}),
 			callers: ["tools"],
 			async execute(args, _api, context) {
-				const page = await fetchWeb(args.url, { signal: context.abortSignal });
+				const page = await fetchWeb(readerUrl, args.url, { signal: context.abortSignal });
 				const text = untrusted("web-page", page.finalUrl, page.markdown);
 				return {
 					output: [{ type: "text", text }],
 					structuredOutput: page as unknown as JsonValue,
 				};
 			},
-		}),
-	];
+		});
 }

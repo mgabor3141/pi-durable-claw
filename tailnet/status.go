@@ -8,7 +8,7 @@ import (
 	"sync"
 )
 
-// Status is what the harness and `claw remote` read: one JSON line on stdout per change, and the same in a file.
+// Status is what the harness and `claw remote` read, from one file (`status.json` in the state dir), rewritten on change.
 type Status struct {
 	// "starting", "needs-login", "needs-approval", "running" or "stopped" (tailscaled's backend states, named).
 	State    string   `json:"state"`
@@ -23,7 +23,6 @@ type Status struct {
 
 type Reporter struct {
 	File string
-	Out  func(line []byte)
 
 	mu   sync.Mutex
 	last *Status
@@ -41,7 +40,6 @@ func (r *Reporter) Report(status Status) error {
 	if err != nil {
 		return err
 	}
-	r.Out(line)
 	temp := filepath.Join(filepath.Dir(r.File), ".status.json.tmp")
 	if err := os.WriteFile(temp, append(line, '\n'), 0o600); err != nil {
 		return err

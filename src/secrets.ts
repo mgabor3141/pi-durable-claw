@@ -106,8 +106,8 @@ export class SecretStore {
 		return { text: result, used: [...used], missing: [...missing] };
 	}
 
-	/** Replace `${NAME}` only where NAME is a secret: every other `${...}` (a fallback included) is left as written, for a
-	 * remote shell. */
+	/** Replace `${NAME}` only where NAME is a secret: every other `${...}` (a fallback included) is left as written, : a
+	 * tool's arguments (a file's content, a remote shell's command). */
 	substituteKnown(text: string, used: Set<string>): string {
 		return text.replace(PLACEHOLDER, (match, name: string) => {
 			const value = this.get(name);
@@ -196,11 +196,10 @@ export function withSecrets(tool: ToolRegistration, store: SecretStore, log: Log
 				}
 				runArgs = mapStrings(args, (text) => store.substituteKnown(text, used));
 			} else {
-				runArgs = mapStrings(args, (text) => {
-					const result = store.substitute(text);
-					for (const name of result.used) used.add(name);
-					return result.text;
-				});
+				// Only the names of secrets: anything else that looks like a template (a compose or shell default such as
+				// `${PORT:-8080}` in a file being written) is the tool's text, left as written. Defaults for unknown names
+				// are `.mcp.json`'s expansion (`substitute`), not a tool argument's.
+				runArgs = mapStrings(args, (text) => store.substituteKnown(text, used));
 			}
 			if (used.size > 0) log.info("secrets used", { tool: tool.name, names: [...used], conversationId: api.conversationId });
 			const scrubbing = new Proxy(api, {

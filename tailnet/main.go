@@ -1,7 +1,7 @@
 // claw-tailnet joins your tailnet as its own device (embedded Tailscale, tsnet), as gmux does, and serves claw there:
 // HTTPS on 443 to the harness's T3 app, and SSH on 22 into the workspace, keyless, for "Open in VS Code" and the like.
 // Only the node's owner and the allow list get through. The harness starts and stops it (`src/tailnet.ts`) and reads
-// its status from stdout; `claw remote` reads the same status from a file.
+// its status from a file, as `claw remote` does.
 package main
 
 import (
@@ -124,7 +124,7 @@ func run(opts options, logger *log.Logger) error {
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGTERM, syscall.SIGINT)
 	defer stop()
 	// Status first: until the node is logged in the listeners wait, and the login link is what the user needs.
-	reporter := &Reporter{File: filepath.Join(opts.stateDir, "status.json"), Out: func(line []byte) { fmt.Println(string(line)) }}
+	reporter := &Reporter{File: filepath.Join(opts.stateDir, "status.json")}
 	go watch(ctx, client, gate, opts.allow, reporter, logger)
 
 	relay := &Relay{

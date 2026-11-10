@@ -3,6 +3,12 @@ import { copyFileSync, existsSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { HostKeyUnknownError, RemoteExecutionEnv, acceptHostKey, connectSsh, scanHostKey, type Connection, type SshTarget } from "@earendil-works/pi-env";
 
+/** The workspace's one user and its home, where the agent works: its files, AGENTS.md, skills, `~/.mcp.json`. */
+export const WORKSPACE_USER = "agent";
+export const WORKSPACE_HOME = "/home/agent";
+/** The name the workspace's host key is kept under, whatever address reaches it. */
+export const WORKSPACE_HOST_KEY_ALIAS = "claw-workspace";
+
 /** Where the workspace container is and where the harness keeps its SSH material (never inside the workspace). */
 export interface WorkspaceConfig {
 	host: string;
@@ -16,10 +22,10 @@ export function workspaceTarget(config: WorkspaceConfig): SshTarget {
 	return {
 		host: config.host,
 		port: config.port,
-		user: "agent",
+		user: WORKSPACE_USER,
 		identityFile: join(config.sshDir, "id_ed25519"),
 		knownHostsFile: join(config.sshDir, "known_hosts"),
-		hostKeyAlias: "claw-workspace",
+		hostKeyAlias: WORKSPACE_HOST_KEY_ALIAS,
 	};
 }
 
