@@ -35,6 +35,8 @@ export interface TailnetOptions {
 	readonly allow: readonly string[];
 	/** This host's port, for the HTTPS side. */
 	readonly port: number;
+	/** The harness's HTTP address, when it does not listen on loopback (default `http://127.0.0.1:<port>`). */
+	readonly upstream?: string;
 	readonly workspace: { readonly host: string; readonly port: number; readonly user: string; readonly sshDir: string; readonly hostKeyAlias: string };
 	/** The program and leading arguments; default `claw-tailnet` on PATH. */
 	readonly command?: readonly string[];
@@ -161,14 +163,14 @@ export class Tailnet implements RemoteAccess {
 	}
 
 	#spawn(): void {
-		const { root, hostname, allow, port, workspace, command = ["claw-tailnet"], log } = this.#options;
+		const { root, hostname, allow, port, upstream, workspace, command = ["claw-tailnet"], log } = this.#options;
 		const stateDir = join(root, "tailscale");
 		mkdirSync(stateDir, { recursive: true, mode: 0o700 });
 		const args = [
 			...command.slice(1),
 			"--state-dir", stateDir,
 			"--hostname", hostname,
-			"--upstream", `http://127.0.0.1:${port}`,
+			"--upstream", upstream ?? `http://127.0.0.1:${port}`,
 			"--workspace", `${workspace.host}:${workspace.port}`,
 			"--workspace-user", workspace.user,
 			"--identity", join(workspace.sshDir, "id_ed25519"),

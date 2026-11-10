@@ -214,6 +214,8 @@ async function main(): Promise<void> {
 		hostname: process.env.CLAW_TAILNET_HOSTNAME?.trim() || deviceName(LABEL),
 		allow: (process.env.CLAW_TAILNET_ALLOW ?? "").split(",").map((item) => item.trim()).filter((item) => item !== ""),
 		port: PORT,
+		// The harness may listen on one interface (`--listen`, as this image does) rather than loopback.
+		upstream: `http://${listen.host === "0.0.0.0" || listen.host === "::" ? "127.0.0.1" : listen.host}:${PORT}`,
 		workspace: { host: workspaceConfig.host, port: workspaceConfig.port, user: target.user!, sshDir, hostKeyAlias: target.hostKeyAlias! },
 		log,
 	});
