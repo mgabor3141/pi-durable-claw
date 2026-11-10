@@ -33,7 +33,7 @@ Two kinds of people use it, as with Home Assistant or Immich:
 
 ```
             T3 Code: desktop · web · mobile app
-                          │  (pi-durable-t3 bridge, Tailscale Serve)
+                          │  (pi-durable-t3 bridge; claw-tailnet: its own tailnet device)
 ┌─────────────────────────┴──────────────────────────┐
 │ harness container (server)                         │
 │   pi-durable: conversations, storage, schedules    │
@@ -115,6 +115,13 @@ code. Verified in T3's web app (playwright + chromium, screenshots in `.memory/`
   including scheduled-task threads, from the first user entry.
 - **Auth boundary.** The bridge binds loopback and guards no `Host` header — pairing is the boundary. Serving T3's
   web app from the host's own origin makes it "This machine"; no Tailscale is needed for local use.
+- **Remote access** (`claw remote`, the README's "Remote access"): `claw-tailnet`, a Go program with embedded
+  Tailscale (`tsnet`) that the harness runs, joins the tailnet as its own device, as gmux does. It owns the whole
+  path: HTTPS on 443 to the harness, and SSH on 22 relayed into the workspace, so T3's editor links (which carry a host
+  and no port) reach the agent's files. Who gets in is the tailnet's answer (the device's owner and
+  `CLAW_TAILNET_ALLOW`), checked before T3's pairing; SSH takes no key and relays with the harness's. Chosen over a
+  Tailscale sidecar container (no compose service, switched on live) and over Tailscale SSH in the workspace (no
+  tailnet identity where agent code runs). The bridge advertises it through `remoteAccess`.
 - **Crash resume holds through the UI:** kill -9 mid-script, restart, and the codemode call resumes from its
   journal and completes — the completed nested call's side effect lands exactly once.
 - **What the UI shows:** a codemode call renders as one tool card (the script's code and its final output). Nested

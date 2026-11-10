@@ -5,12 +5,17 @@
 //
 //   node src/host.ts [--root <dir>]        serve (root: CLAW_ROOT; storage, bridge state, SSH keys live under it)
 //   node src/host.ts pair                  mint a single-use pairing code and print the link
+//   node src/host.ts remote [on|off|status] remote access over your tailnet (`tailnet.ts`): on prints the login link
 //
 // Configuration (all CLAW_*): ROOT, HOST (listen address, default 127.0.0.1), PORT (3775), PUBLIC_URL (what `pair`
 // prints; default http://127.0.0.1:PORT), LABEL (the T3 environment label; default claw), WORKSPACE_HOST (workspace),
 // WORKSPACE_PORT (22), PUBKEY_DIR (where to publish the harness's public key for the workspace; unset: not published),
-// SCRATCH_DIR (T3's scratch project root, an absolute path in the workspace environment; default /home/agent/scratch).
+// SCRATCH_DIR (T3's scratch project root, an absolute path in the workspace environment; default /home/agent/scratch),
+// TAILNET_HOSTNAME (the device name on your tailnet; default from LABEL), TAILNET_ALLOW (comma-separated logins or tags
+// allowed besides the node's owner), TAILNET_BIN (the claw-tailnet program; default on PATH). TS_AUTHKEY, when set,
+// logs the node in without the link.
 // Models: <root>/pi/auth.json (and models.json).
+import { statSync } from "node:fs";
 import { join } from "node:path";
 import { Hindsight, hindsightConfig } from "./hindsight.ts";
 import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
@@ -21,14 +26,20 @@ import { McpManager } from "./mcp/manager.ts";
 import { workspaceSource } from "./mcp/config.ts";
 import { McpOAuth } from "./mcp/oauth.ts";
 import { SecretStore, withSecrets } from "./secrets.ts";
-import { connectWorkspace, ensureKeypair, workspaceEnv } from "./workspace.ts";
+import { connectWorkspace, ensureKeypair, workspaceEnv, workspaceTarget } from "./workspace.ts";
+import { deviceName, readRemoteEnabled, readStatusFile, Tailnet, tailnetUrl, writeRemoteEnabled, type TailnetStatus } from "./tailnet.ts";
 import { attachT3, mintPairingCode } from "@mgabor3141/pi-durable-t3";
 import { installShutdown } from "./shutdown.ts";
 import { titleThread } from "./title.ts";
 
 const PORT = Number(process.env.CLAW_PORT ?? 3775);
 const LISTEN = { host: process.env.CLAW_HOST ?? "127.0.0.1", port: PORT };
-const PUBLIC_URL = (process.env.CLAW_PUBLIC_URL ?? `http://127.0.0.1:${PORT}`).replace(/\/+$/, "");
+// Compose passes an unset CLAW_PUBLIC_URL as empty: empty is unset.
+const PUBLIC_URL_SET = (process.env.CLAW_PUBLIC_URL?.trim() ?? "") !== "";
+const PUBLIC_URL = (PUBLIC_URL_SET ? process.env.CLAW_PUBLIC_URL!.trim() : `http://127.0.0.1:${PORT}`).replace(/\/+$/, "");
+/** Where your browser reaches this host (pairing links, OAuth callbacks): CLAW_PUBLIC_URL when set, else the tailnet
+ * address while remote access is on and serves HTTPS, else loopback. */
+const publicUrl = (root: string): string => (PUBLIC_URL_SET ? PUBLIC_URL : (tailnetUrl(root) ?? PUBLIC_URL));
 const LABEL = process.env.CLAW_LABEL?.trim() || "claw";
 /** The agent's MCP configuration, in the workspace (Claude Code's user-scope file). */
 const MCP_CONFIG_PATH = "/home/agent/.mcp.json";
@@ -87,11 +98,16 @@ async function main(): Promise<void> {
 	const scratchDir = process.env.CLAW_SCRATCH_DIR?.trim() || "/home/agent/scratch";
 
 	// `pair`: mint a code against the state dir's auth store and exit; the running host reads the store per attempt.
+	// With remote access on and serving HTTPS, the link is the tailnet's, unless CLAW_PUBLIC_URL names another.
 	if (argv[0] === "pair") {
 		const { code } = mintPairingCode(stateDir);
+		const base = publicUrl(root);
 		console.log(`Pairing code (single use): ${code}`);
-		console.log(`\n  Open in a browser (pairs and opens the web app), or paste into the T3 desktop app's Add computer:\n  ${PUBLIC_URL}/pair#token=${code}\n`);
+		console.log(`\n  Open in a browser (pairs and opens the web app), or paste into the T3 desktop app's Add computer:\n  ${base}/pair#token=${code}\n`);
 		return;
+	}
+	if (argv[0] === "remote") {
+		process.exit(await remoteCommand(root, argv[1] ?? "on"));
 	}
 
 	// Models: pi's own files under <root>/pi (auth.json with keys, optionally models.json), read and refreshed in place.
@@ -121,7 +137,7 @@ async function main(): Promise<void> {
 	// The agent's own MCP configuration, `~/.mcp.json` in the workspace: it adds and edits servers itself; an edit is
 	// picked up before its next request, and a broken entry is reported in its prompt, not fatal.
 	// OAuth sign-ins come back to this host: the user's browser reaches it already (`mcp/oauth.ts`).
-	const oauth = new McpOAuth({ redirectUrl: `${PUBLIC_URL}${OAUTH_CALLBACK_PATH}`, store: secrets, secrets });
+	const oauth = new McpOAuth({ redirectUrl: `${publicUrl(root)}${OAUTH_CALLBACK_PATH}`, store: secrets, secrets });
 	const mcp = new McpManager({
 		source: workspaceSource(workspaceEnv(workspace.connection), MCP_CONFIG_PATH, BACKGROUND_CONTEXT),
 		logger: log,
@@ -164,6 +180,18 @@ async function main(): Promise<void> {
 	// Connect MCP servers before the T3 bridge accepts input, so the first prompt sees their tools.
 	await mcp.start();
 
+	// Remote access over your tailnet, when `claw remote` turned it on: HTTPS to this host, SSH into the workspace.
+	const target = workspaceTarget(workspaceConfig);
+	const tailnet = new Tailnet({
+		root,
+		hostname: process.env.CLAW_TAILNET_HOSTNAME?.trim() || deviceName(LABEL),
+		allow: (process.env.CLAW_TAILNET_ALLOW ?? "").split(",").map((item) => item.trim()).filter((item) => item !== ""),
+		port: PORT,
+		workspace: { host: workspaceConfig.host, port: workspaceConfig.port, user: target.user!, sshDir, hostKeyAlias: target.hostKeyAlias! },
+		command: [process.env.CLAW_TAILNET_BIN?.trim() || "claw-tailnet"],
+		log,
+	});
+
 	let t3;
 	try {
 		t3 = await attachT3(harness, {
@@ -179,6 +207,8 @@ async function main(): Promise<void> {
 			label: LABEL,
 			routes: [{ method: "GET", path: OAUTH_CALLBACK_PATH, handle: (request) => oauthCallback(mcp, request) }],
 			titleThread: titleThread(harness, models),
+			// T3 learns the tailnet URL and the SSH host its editors open paths on ("Open in VS Code").
+			remoteAccess: tailnet,
 			// Each message arrives with the memories recalled for it, stored with it (hidden in T3).
 			...(memory === undefined ? {} : { messageContext: (request) => memory.recallFor(request) }),
 			...(browserlessUrl === ""
@@ -210,9 +240,13 @@ async function main(): Promise<void> {
 	const previewBrowser = t3.previewBrowser;
 	if (previewBrowser !== undefined) late.previewBrowser = (conversationId, url) => previewBrowser.open(conversationId, url);
 
+	tailnet.start();
+	if (!readRemoteEnabled(root)) log.info("remote access off: `docker compose exec harness claw remote` turns it on");
+
 	let stopping = false;
 	const shutdown = async () => {
 		stopping = true;
+		await tailnet.close();
 		await mcp.close();
 		await t3.close();
 		await harness.close(BACKGROUND_CONTEXT);
@@ -244,4 +278,60 @@ try {
 } catch (error) {
 	console.error(`pi-durable-claw host failed: ${(error as Error).stack ?? error}`);
 	process.exit(1);
+}
+
+/** `claw remote [on|off|status]`: turn remote access on or off, and say where it stands: the login link, the tailnet
+ * settings it still needs, or its address. The running host does the work; this waits for its report. */
+async function remoteCommand(root: string, action: string): Promise<number> {
+	if (action === "off") {
+		writeRemoteEnabled(root, false);
+		console.log("Remote access is off. The device stays in your tailnet's machine list until you remove it there.");
+		return 0;
+	}
+	if (action !== "on" && action !== "status") {
+		console.error("usage: claw remote [on|off|status]");
+		return 2;
+	}
+	const wasOn = readRemoteEnabled(root);
+	if (action === "status" && !wasOn) {
+		console.log("Remote access is off. `claw remote` turns it on.");
+		return 0;
+	}
+	const since = Date.now();
+	if (!wasOn) {
+		writeRemoteEnabled(root, true);
+		console.log("Remote access is on. Waiting for the harness to start it...");
+	}
+	// A status written before it was turned on is an old run's.
+	const fresh = (): TailnetStatus | undefined => {
+		const status = readStatusFile(root);
+		if (status === undefined) return undefined;
+		if (!wasOn && statSync(join(root, "tailscale", "status.json")).mtimeMs < since) return undefined;
+		return status;
+	};
+	for (let waited = 0; waited < 90_000; waited += 1_000) {
+		const status = fresh();
+		if (status?.state === "needs-login" && status.authUrl) {
+			console.log(`\n  Log this device in to your tailnet (once):\n  ${status.authUrl}\n\n  Then run \`claw remote\` again to check.\n`);
+			return 0;
+		}
+		if (status?.state === "needs-approval") {
+			console.log("\n  Logged in; the device waits for approval in your tailnet's admin console (Machines).\n");
+			return 0;
+		}
+		if (status?.state === "running") {
+			const problems = status.problems ?? [];
+			console.log(`\n  On your tailnet as ${status.dnsName}${status.owner ? `, owned by ${status.owner}` : ""}.`);
+			if (problems.length > 0) {
+				console.log(`\n  Still needed:\n${problems.map((problem) => `  - ${problem}`).join("\n")}\n\n  Then run \`claw remote\` again.\n`);
+				return 1;
+			}
+			console.log(`\n  T3:  https://${status.dnsName}  (claw pair prints a link to it)\n  SSH: ssh agent@${status.dnsName}  (no key: your tailnet login is the key; T3's "Open in VS Code" uses it)\n`);
+			return 0;
+		}
+		if (waited === 15_000 && status === undefined) console.log("  The harness has not reported yet. Is it running? (docker compose ps; docker compose logs harness)");
+		await new Promise((resolve) => setTimeout(resolve, 1_000));
+	}
+	console.log("  No answer yet; `docker compose logs harness` shows what claw-tailnet says.");
+	return 1;
 }

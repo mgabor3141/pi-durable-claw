@@ -1,6 +1,15 @@
 # The harness: the agent loop and the T3 bridge, which serves T3's web app. It holds the keys; it never runs agent code.
 # Build context: the repo root (compose does this).
 ARG NODE_IMAGE=node:24-bookworm-slim
+ARG GO_IMAGE=golang:1.27.3-bookworm
+
+# --- claw-tailnet: remote access over your tailnet (tailnet/, Go with embedded Tailscale) ---------------------------
+FROM ${GO_IMAGE} AS tailnet
+WORKDIR /src
+COPY tailnet/go.mod tailnet/go.sum ./
+RUN go mod download
+COPY tailnet/*.go ./
+RUN go vet . && go test . && CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /claw-tailnet .
 
 # --- build ---------------------------------------------------------------------------------------------------------
 FROM ${NODE_IMAGE} AS build
@@ -22,6 +31,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends openssh-client 
 	&& mkdir -p /data /pubkey && chown node:node /data /pubkey
 COPY --from=build --chown=node:node /app /app
 COPY images/harness/claw /usr/local/bin/claw
+COPY --from=tailnet /claw-tailnet /usr/local/bin/claw-tailnet
 WORKDIR /app
 # /data holds everything the harness keeps: storage, bridge state, SSH keys. `claw` runs the host as node.
 ENV CLAW_ROOT=/data CLAW_HOST=0.0.0.0 CLAW_PUBKEY_DIR=/pubkey

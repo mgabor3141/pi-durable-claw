@@ -8,10 +8,15 @@ services:
     restart: unless-stopped
     init: true
     environment:
-      CLAW_PORT: ${CLAW_PORT:-3775}
-      CLAW_PUBLIC_URL: ${CLAW_PUBLIC_URL:-http://127.0.0.1:${CLAW_PORT:-3775}}
+      CLAW_PORT: 3775
+      CLAW_PUBLIC_URL: 
+      CLAW_LABEL: 
+      # Remote access over your tailnet (`claw remote`): optional, see the README.
+      CLAW_TAILNET_ALLOW: 
+      CLAW_TAILNET_HOSTNAME: 
+      TS_AUTHKEY: 
     ports:
-      - "127.0.0.1:${CLAW_PORT:-3775}:${CLAW_PORT:-3775}"
+      - "127.0.0.1:3775:3775"
     volumes:
       - ./data/harness:/data
       - pubkey:/pubkey

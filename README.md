@@ -42,10 +42,33 @@ pairings, settings, the harness's SSH key), `workspace/` (the agent's files, at 
 and `workspace-ssh/` (the workspace's host key). The containers own them as uid 1000. The workspace's sshd is not published, and the Docker
 socket is never mounted. There is no hako sshd image yet, so the workspace is a plain Debian image (python3, git, curl).
 
-### Tailscale (optional)
+### Remote access (optional)
 
-On the host (nothing here runs it for you): `tailscale serve --bg --https=443 http://127.0.0.1:3775`, and set
-`CLAW_PUBLIC_URL` to the URL it serves.
+Claw can join your [Tailscale](https://tailscale.com) tailnet as its own device, as gmux does: nothing to install on
+the server, no ports to open. It serves T3 over HTTPS with a real certificate, and SSH into the workspace, so T3's
+"Open in VS Code" (also Cursor, Zed and JetBrains), file links and the file preview open the agent's files on your
+computer. SSH needs no key: your tailnet login is the key.
+
+1. Have a tailnet with **MagicDNS** and **HTTPS Certificates** on (https://login.tailscale.com/admin/dns), and
+   Tailscale on the devices you connect from.
+2. `docker compose exec harness claw remote` turns it on and prints a login link; open it and log the device in.
+   (Or set `TS_AUTHKEY` in `.env` to log in without the link.)
+3. `claw remote` again checks: it names what the tailnet still needs, or prints the addresses, e.g.
+   `https://claw.<tailnet>.ts.net` and `ssh agent@claw.<tailnet>.ts.net`. `claw pair` now prints tailnet links.
+
+Only the account that logged the device in gets through, on both HTTPS and SSH; `CLAW_TAILNET_ALLOW` adds logins or
+tags (`partner@example.com,tag:laptops`), and T3's pairing still guards T3 as before. The device is named after
+`CLAW_LABEL` (or `CLAW_TAILNET_HOSTNAME`). `claw remote off` turns it off; `claw remote status` reports. The first
+SSH connection asks you to trust the device's key, which is kept with its state under `data/harness/tailscale`.
+
+How it works: the harness runs `claw-tailnet` (`tailnet/`, Go with embedded Tailscale) while remote access is on,
+restarting it if it exits. It forwards 443 to the harness and relays SSH to the workspace's sshd with the harness's
+own key, checking the workspace's host key as the harness does; the agent's workspace gets no route into your tailnet.
+Its state, the device's identity, lives in `data/harness/tailscale` and is part of your backup.
+
+Without it, reach the app as before: on the server, an SSH tunnel to `127.0.0.1:3775`, or your own `tailscale serve`
+with `CLAW_PUBLIC_URL` set to its URL (then "Open in VS Code" stays greyed out: it needs an SSH route to the
+workspace).
 
 ### Update
 
@@ -265,7 +288,9 @@ Claude Code's `oauth` block is read:
 `clientSecret` is our addition (Claude Code prompts for it); write it as a secret. `callbackPort` is accepted and not
 used: the redirect URI is always the host's. Register `<CLAW_PUBLIC_URL>/host/oauth/callback` with a server that needs
 a pre-registered client. Many authorization servers accept plain `http` only on loopback, so with a non-loopback
-`CLAW_PUBLIC_URL`, use `https` (Tailscale Serve) or the paste fallback.
+`CLAW_PUBLIC_URL`, use `https` (remote access, or Tailscale Serve) or the paste fallback. With remote access on and
+`CLAW_PUBLIC_URL` unset, the callback is the tailnet address, chosen at start: restart the harness after turning
+remote access on for the first time.
 
 ## Secrets
 
@@ -355,6 +380,9 @@ from git at a pinned commit and builds on install (it fetches T3's contracts and
 allowlists. Its pi packages are peers, so the pi versions are ours: keep every `@earendil-works` package on one
 version (`test/one-copy.test.ts` checks it). To try a bridge change, point the dependency at a local checkout
 (`link:../pi-durable-t3`, built with `pnpm build` there).
+
+`claw-tailnet` (remote access) is Go, in `tailnet/`: `go test ./...` there (Go 1.27). The harness image builds and tests it;
+for a local `pnpm test` it is not needed (a stand-in program covers the harness's side).
 
 ## License
 
