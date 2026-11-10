@@ -3,6 +3,7 @@ import type { Context } from "@earendil-works/chord";
 import { createRegistry, defineExtension, Harness, type Extension, type HarnessOptions, type Registry, type ToolRegistration } from "@earendil-works/pi-durable";
 import { createCodemodeExtension, type CodemodeNamespace } from "@earendil-works/pi-durable/codemode";
 import { openNodeSqliteStorage } from "@earendil-works/pi-durable/storage/sqlite/node";
+import type { ImageProcessor } from "@earendil-works/pi-durable/tools";
 import { CodemodeSandbox } from "@earendil-works/pi-codemode";
 import { recordConversationStart, workspaceContextExtension } from "./context.ts";
 import { codemodeTimersExtension, timerGlobal } from "./codemode-timers.ts";
@@ -58,6 +59,8 @@ export interface HarnessExtensionOptions {
 	readonly late?: HarnessLate;
 	/** The harness's secrets: every harness tool resolves and scrubs them (`secrets.ts`), and scripts get the `secrets` tool. */
 	readonly secrets?: { readonly store: SecretStore; readonly log: SecretsLogger };
+	/** Prepares the images `read` returns: oriented, converted, shrunk to the model's limits (`images.ts`). */
+	readonly images?: ImageProcessor;
 }
 
 /**
@@ -72,7 +75,7 @@ export interface HarnessExtensionOptions {
 export function harnessExtensions(options: HarnessExtensionOptions = {}): readonly Extension[] {
 	const tools: ToolRegistration[] = [
 		...(options.extraTools ?? []),
-		...workspaceTools(),
+		...workspaceTools(options.images),
 		...webTools(options.web ?? {}),
 		// The browser's sessions do not listen for Stop; each call returns the moment it is stopped.
 		...(options.browser === true ? browserTools(options.late).map(abortable) : []),

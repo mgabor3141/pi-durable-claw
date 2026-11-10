@@ -1,6 +1,6 @@
 import { posix } from "node:path";
 import type { ToolRegistration } from "@earendil-works/pi-durable";
-import { createBashTool, createEditTool, createReadTool, createWriteTool } from "@earendil-works/pi-durable/tools";
+import { createBashTool, createEditTool, createReadTool, createWriteTool, type ImageProcessor } from "@earendil-works/pi-durable/tools";
 import type { ImageContent } from "@earendil-works/pi-ai";
 import { READ_TOOL_DESCRIPTION, SSH_TOOL_DESCRIPTION } from "./prompts.ts";
 import { num, opt, str, union } from "@earendil-works/pi-schema";
@@ -10,11 +10,12 @@ import { literal, object } from "./schema.ts";
  * The workspace's files and shell: pi-durable's own coding tools, unchanged except `callers: ["tools"]` — the model
  * is never offered them, only codemode scripts call them. They run against the call's `ExecutionEnv`, which the
  * harness builds as pi-env's `RemoteExecutionEnv` over SSH to the workspace container. `ssh` is `bash` running one
- * `ssh` command line, so a script passes the remote command as a plain string instead of quoting it twice.
+ * `ssh` command line, so a script passes the remote command as a plain string instead of quoting it twice. `images`
+ * prepares the images `read` returns (`images.ts`).
  */
-export function workspaceTools(): ToolRegistration[] {
+export function workspaceTools(images?: ImageProcessor): ToolRegistration[] {
 	return [
-		readTool(),
+		readTool(images),
 		{ ...createWriteTool(), callers: ["tools"] as const },
 		{ ...createEditTool(), callers: ["tools"] as const },
 		{ ...createBashTool(), callers: ["tools"] as const },
@@ -31,15 +32,15 @@ export function workspaceTools(): ToolRegistration[] {
  * A text file is read whole (or the lines `offset` and `limit` select): pi-durable's `read` stops at 2,000 lines or 50 KB,
  * which is a limit on what the model sees, and that limit belongs where something reaches the model (codemode's output,
  * or the harness's bound on a direct call's output), not on what a script reads. Images still go through pi-durable's
- * `read`, which prepares them for the model.
+ * `read`, which prepares them for the model with `images`: without a processor, it refuses one over the model's limits.
  */
 const READ_RESULT_SCHEMA = union([
 	object({ type: literal("text"), text: str() }),
 	object({ type: literal("image"), data: str(), mimeType: str() }),
 ]);
 
-export function readTool(): ToolRegistration {
-	const read = createReadTool();
+export function readTool(images?: ImageProcessor): ToolRegistration {
+	const read = createReadTool(images === undefined ? {} : { images });
 	return {
 		...read,
 		description: READ_TOOL_DESCRIPTION,
@@ -77,7 +78,8 @@ function selectLines(text: string, offset: number | undefined, limit: number | u
 	return lines.slice(start, limit === undefined ? undefined : start + Math.max(0, Math.trunc(limit))).join("\n");
 }
 
-/** Whether bytes start like an image `read` shows (JPEG, PNG, GIF, WebP); pi-durable's `read` checks it properly. */
+/** Whether bytes start like an image `read` shows (JPEG, PNG, GIF, WebP, and BMP, which the processor converts);
+ * pi-durable's `read` checks it properly. */
 function isImage(bytes: Uint8Array): boolean {
 	const ascii = (at: number, text: string) => [...text].every((char, index) => bytes[at + index] === char.charCodeAt(0));
 	return (
@@ -85,7 +87,8 @@ function isImage(bytes: Uint8Array): boolean {
 		(bytes[0] === 0x89 && ascii(1, "PNG")) ||
 		ascii(0, "GIF87a") ||
 		ascii(0, "GIF89a") ||
-		(ascii(0, "RIFF") && ascii(8, "WEBP"))
+		(ascii(0, "RIFF") && ascii(8, "WEBP")) ||
+		(ascii(0, "BM") && bytes.length >= 26 && [12, 40, 52, 56, 64, 108, 124].includes(new DataView(bytes.buffer, bytes.byteOffset).getUint32(14, true)))
 	);
 }
 

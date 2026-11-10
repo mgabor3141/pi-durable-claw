@@ -96,6 +96,11 @@ rendered again still names it). The agent owns its tools under
 limit is on what reaches the model, codemode's output. (pi-durable's `read` stops at 2,000 lines or 50 KB.) (pi-durable's `read` already returns an image as its content, but a tool without an output schema gives
 scripts only its text, so the picture would arrive as `""`; claw gives `read` that schema.) A file that cannot be read
 as an image says why, and the call rejects.
+An image is prepared for the model by pi-durable's Photon image processor (`src/images.ts`): turned upright by its
+EXIF orientation, converted when providers do not take its format (BMP becomes PNG), and shrunk to the model's image
+limits (by default 2000x2000 pixels and 4.5 MB of base64), with a note giving the scale for mapping coordinates back
+to the original. It runs in a worker thread that exits after 30 s without images. The harness checks it can load
+Photon at start, and does not start without it.
 
 `ssh` runs one command on another machine from the workspace, with the workspace's `~/.ssh` keys and config.
 `ssh({ host, command, timeout? })` passes the remote command to the remote shell exactly as written, so a script needs

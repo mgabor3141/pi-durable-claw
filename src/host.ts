@@ -18,6 +18,7 @@ import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
 import type { Registry } from "@earendil-works/pi-durable";
 import { ModelRuntime } from "@earendil-works/pi-coding-agent";
 import { openHarness, type HarnessLate } from "./harness.ts";
+import { imageProcessor } from "./images.ts";
 import { McpManager } from "./mcp/manager.ts";
 import { workspaceSource } from "./mcp/config.ts";
 import { McpOAuth } from "./mcp/oauth.ts";
@@ -190,6 +191,7 @@ async function main(): Promise<void> {
 	const late: HarnessLate = {};
 	const harness = await openHarness({
 		storagePath: join(root, "durable.db"),
+		images: await imageProcessor(),
 		browser: browserlessUrl !== "",
 		web,
 		workspace,

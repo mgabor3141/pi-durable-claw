@@ -15,6 +15,8 @@ import { NodeExecutionEnv } from "@earendil-works/pi-durable/env/node";
 import { afterEach, expect, it } from "vitest";
 import { imageCheckExtension } from "@mgabor3141/pi-durable-t3";
 import { readTool } from "../src/tools.ts";
+import { imageProcessor } from "../src/images.ts";
+import { crc32, deflateSync } from "node:zlib";
 
 const dirs: string[] = [];
 afterEach(async () => void (await Promise.all(dirs.splice(0).map((dir) => rm(dir, { recursive: true, force: true })))));
@@ -70,6 +72,48 @@ it("an image arrives as the block image() shows", async () => {
 	expect(result.output).toEqual([{ type: "image", data: PNG.toString("base64"), mimeType: "image/png" }]);
 	const shown: ImageContent = result.structuredOutput;
 	expect(shown).toEqual({ type: "image", data: PNG.toString("base64"), mimeType: "image/png" });
+});
+
+/** A grey PNG of `width` x `height`, built by hand (8-bit greyscale, unfiltered rows). */
+function greyPng(width: number, height: number): Buffer {
+	const chunk = (type: string, data: Buffer) => {
+		const body = Buffer.concat([Buffer.from(type, "ascii"), data]);
+		const length = Buffer.alloc(4);
+		length.writeUInt32BE(data.length);
+		const crc = Buffer.alloc(4);
+		crc.writeUInt32BE(crc32(body));
+		return Buffer.concat([length, body, crc]);
+	};
+	const header = Buffer.alloc(13);
+	header.writeUInt32BE(width, 0);
+	header.writeUInt32BE(height, 4);
+	header[8] = 8; // bit depth; colour type 0 (greyscale), compression, filter and interlace 0
+	const row = Buffer.concat([Buffer.from([0]), Buffer.alloc(width, 0x80)]);
+	const pixels = deflateSync(Buffer.concat(Array.from({ length: height }, () => row)));
+	return Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), chunk("IHDR", header), chunk("IDAT", pixels), chunk("IEND", Buffer.alloc(0))]);
+}
+
+it("an image over the model's limits is refused without a processor, and shrunk to fit with claw's", { timeout: 60_000 }, async () => {
+	const cwd = await dir();
+	// A full-page screenshot's shape: taller than 2,000 pixels.
+	await writeFile(join(cwd, "tall.png"), greyPng(1000, 4000));
+	await expect(readTool().execute({ path: "tall.png" } as never, api(cwd) as never, BACKGROUND_CONTEXT)).resolves.toMatchObject({
+		isError: true,
+		diagnostics: [{ code: "unsupported_image", message: expect.stringContaining("no image processor is configured") }],
+	});
+	const result = (await readTool(await imageProcessor()).execute({ path: "tall.png" } as never, api(cwd) as never, BACKGROUND_CONTEXT)) as unknown as {
+		structuredOutput: ImageContent;
+		diagnostics: { message: string }[];
+	};
+	expect(result.structuredOutput.type).toBe("image");
+	const shrunk = Buffer.from(result.structuredOutput.data, "base64");
+	// PNG's IHDR: width and height at bytes 16 and 20.
+	expect([shrunk.readUInt32BE(16), shrunk.readUInt32BE(20)]).toEqual([500, 2000]);
+	expect(result.diagnostics[0]!.message).toContain("Resized from 1000x4000 to 500x2000. Multiply coordinates by 2.00");
+	// A small image, read as a Buffer from Node's shared pool, which the worker could not be handed as it was.
+	await writeFile(join(cwd, "dot.png"), PNG);
+	const small = (await readTool(await imageProcessor()).execute({ path: "dot.png" } as never, api(cwd) as never, BACKGROUND_CONTEXT)) as unknown as { structuredOutput: ImageContent };
+	expect(small.structuredOutput).toMatchObject({ type: "image", mimeType: "image/png" });
 });
 
 it("a missing file rejects, with no structured output pretending otherwise", async () => {
