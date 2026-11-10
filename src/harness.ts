@@ -15,6 +15,7 @@ import { browserTools, type SharedBrowserProvider } from "./browser.ts";
 import { abortable, imageCheckExtension, type TextGenerationModel } from "@mgabor3141/pi-durable-t3";
 import { workspaceTools } from "./tools.ts";
 import { imageFitExtension } from "./images.ts";
+import { directCallsExtension } from "./direct-calls.ts";
 import { webTools, type WebConfig } from "./web.ts";
 import { summarizeTools } from "./summarize.ts";
 import { workspaceEnv, type WorkspaceConnection, WORKSPACE_HOME } from "./workspace.ts";
@@ -126,6 +127,8 @@ export async function openHarness(
 ): Promise<Harness> {
 	const registry = createRegistry();
 	for (const extension of harnessExtensions(options)) registry.install(extension);
+	// A direct call to a tool only scripts call is answered with the script that calls it (`direct-calls.ts`).
+	registry.install(directCallsExtension(registry));
 	options.onRegistry?.(registry);
 	const storage = await openNodeSqliteStorage(options.storagePath);
 	return Harness.open(

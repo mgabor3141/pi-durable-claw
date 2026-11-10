@@ -90,6 +90,8 @@ its `.agents/skills`, and the local time when the conversation started (recorded
 rendered again still names it). The agent owns its tools under
 `/home/agent`; the workspace image reads `PATH` from `~/.ssh/environment` and includes `jq`. The model tool list is
 `codemode` and the bridge's `request_secret`, and it never changes.
+A model that calls a script's tool directly anyway (`bash`, out of habit) gets the script to send instead of pi-durable's
+"Tool bash is not available": the same tool with the same arguments, inside `codemode` (`src/direct-calls.ts`).
 
 `read` in a script gives a text file's whole text (or the lines `offset` and `limit` select), or an image as
 `{ type: "image", data, mimeType }`; show it with `image(result)`. There is no size limit on what a script reads: the
