@@ -14,6 +14,7 @@ import { compactionExtension } from "./compaction.ts";
 import { browserTools, type SharedBrowserProvider } from "./browser.ts";
 import { abortable, imageCheckExtension, type TextGenerationModel } from "@mgabor3141/pi-durable-t3";
 import { workspaceTools } from "./tools.ts";
+import { imageFitExtension } from "./images.ts";
 import { webTools, type WebConfig } from "./web.ts";
 import { summarizeTools } from "./summarize.ts";
 import { workspaceEnv, type WorkspaceConnection, WORKSPACE_HOME } from "./workspace.ts";
@@ -59,7 +60,8 @@ export interface HarnessExtensionOptions {
 	readonly late?: HarnessLate;
 	/** The harness's secrets: every harness tool resolves and scrubs them (`secrets.ts`), and scripts get the `secrets` tool. */
 	readonly secrets?: { readonly store: SecretStore; readonly log: SecretsLogger };
-	/** Prepares the images `read` returns: oriented, converted, shrunk to the model's limits (`images.ts`). */
+	/** Prepares the images `read` returns (oriented, converted, shrunk to the model's limits), and fits an image a
+	 * script shows that is over them (`images.ts`). */
 	readonly images?: ImageProcessor;
 }
 
@@ -94,6 +96,9 @@ export function harnessExtensions(options: HarnessExtensionOptions = {}): readon
 		...(options.extraExtensions ?? []),
 		workspaceContextExtension(),
 		compactionExtension(),
+		// An image over the model's limits that a script shows (a full-page screenshot) is shrunk to fit, as `read`'s are;
+		// every other image is left as it is.
+		...(options.images === undefined ? [] : [imageFitExtension(options.images)]),
 		// Only images a provider can read reach the model: a broken one (a screenshot copied while still being written)
 		// becomes a text saying why, in the tool result and in every request, so it never stops the thread.
 		imageCheckExtension(),

@@ -102,6 +102,11 @@ limits (by default 2000x2000 pixels and 4.5 MB of base64), with a note giving th
 to the original. It runs in a worker thread that exits after 30 s without images. The harness checks it can load
 Photon at start, and does not start without it.
 
+The same goes for an image a script shows with `image()` (a full-page `browser_screenshot`, a generated image, an MCP
+tool's, a data URL), but only one the model could not take as it is: a type providers do not take inline, more than
+4.5 MB of base64, or wider or taller than 2000 pixels by its header. That one is fitted, followed by a note with the
+scale, and codemode's saved file stays the original. Every other image reaches the model exactly as the script gave it.
+
 `ssh` runs one command on another machine from the workspace, with the workspace's `~/.ssh` keys and config.
 `ssh({ host, command, timeout? })` passes the remote command to the remote shell exactly as written, so a script needs
 no second layer of quoting. It is `bash` running `ssh -n -o BatchMode=yes -- <host> <command>`, and it returns what

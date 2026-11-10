@@ -12,10 +12,11 @@ import { createCodemodeExtension } from "@earendil-works/pi-durable/codemode";
 import { openNodeSqliteStorage } from "@earendil-works/pi-durable/storage/sqlite/node";
 import type { ImageContent } from "@earendil-works/pi-ai";
 import { NodeExecutionEnv } from "@earendil-works/pi-durable/env/node";
-import { afterEach, expect, it } from "vitest";
+import { afterEach, expect, it, vi } from "vitest";
 import { imageCheckExtension } from "@mgabor3141/pi-durable-t3";
 import { readTool } from "../src/tools.ts";
-import { imageProcessor } from "../src/images.ts";
+import { fitImages, imageFitExtension, imageProcessor, imageSize } from "../src/images.ts";
+import type { ImageProcessor } from "@earendil-works/pi-durable/tools";
 import { crc32, deflateSync } from "node:zlib";
 
 const dirs: string[] = [];
@@ -150,10 +151,11 @@ it("a script that reads a PNG can show it: the codemode result carries the pictu
 });
 
 /** A script's run, with the harness's image check: the codemode result as the model gets it. */
-async function runScript(cwd: string, code: string): Promise<{ type: string; text?: string; data?: string }[]> {
+async function runScript(cwd: string, code: string, images?: ImageProcessor): Promise<{ type: string; text?: string; data?: string; mimeType?: string }[]> {
 	const registry = createRegistry();
 	registry.install(createCodemodeExtension({ sandbox: new CodemodeSandbox({ memoryLimitBytes: 64 * 1024 * 1024 }) }) as never);
-	registry.install(defineExtension({ name: "harness-tools", tools: [readTool()] }));
+	registry.install(defineExtension({ name: "harness-tools", tools: [readTool(images)] }));
+	if (images !== undefined) registry.install(imageFitExtension(images));
 	registry.install(imageCheckExtension());
 	const faux = fauxProvider({ provider: "faux" });
 	const models = createModels();
@@ -165,7 +167,7 @@ async function runScript(cwd: string, code: string): Promise<{ type: string; tex
 		await conversation.submit({ type: "input", content: "look" }, BACKGROUND_CONTEXT);
 		await conversation.waitForIdle(BACKGROUND_CONTEXT);
 		const context = await conversation.context(BACKGROUND_CONTEXT);
-		return (context.messages.find((message) => message.role === "toolResult") as { content: { type: string; text?: string; data?: string }[] }).content;
+		return (context.messages.find((message) => message.role === "toolResult") as { content: { type: string; text?: string; data?: string; mimeType?: string }[] }).content;
 	} finally {
 		await harness.close(BACKGROUND_CONTEXT);
 	}
@@ -186,4 +188,41 @@ it("a truncated PNG: read rejects with the reason, and image() of broken data sh
 	const viaImage = await runScript(cwd, `image("data:image/png;base64,${cut.toString("base64")}"); return "shown";`);
 	expect(viaImage.some((block) => block.type === "image"), "the broken image never reaches the model").toBe(false);
 	expect(viaImage.flatMap((block) => (block.type === "text" ? [block.text] : [])).join("\n")).toContain("[Image not shown to the model: the PNG ends early, at 50 bytes");
+});
+
+it("an image a script shows that is over the model's limits is fitted; every other image is left exactly as it is", { timeout: 60_000 }, async () => {
+	const cwd = await dir();
+	const tall = greyPng(1000, 4000).toString("base64");
+	const images = await imageProcessor();
+	const content = await runScript(cwd, `image("data:image/png;base64,${tall}"); image("data:image/png;base64,${PNG.toString("base64")}"); return "two";`, images);
+	const shown = content.filter((block) => block.type === "image");
+	expect(shown).toHaveLength(2);
+	const fitted = Buffer.from(shown[0]!.data!, "base64");
+	expect(imageSize(fitted)).toEqual({ width: 500, height: 2000 });
+	expect(shown[1]).toEqual({ type: "image", data: PNG.toString("base64"), mimeType: "image/png" });
+	const text = content.flatMap((block) => (block.type === "text" ? [block.text] : [])).join("\n");
+	expect(text).toContain("[Image shown to the model resized from 1000x4000 to 500x2000, to fit its limits; a saved file is the original. Multiply coordinates by 2.00 to map them to the original.]");
+	// The note follows the image it is about.
+	const index = content.indexOf(shown[0]!);
+	expect(content[index + 1]).toMatchObject({ type: "text", text: expect.stringContaining("resized from 1000x4000") });
+
+	// Nothing over the limits: the result is not touched, and nothing is decoded.
+	const prepare = vi.fn(images.prepare);
+	expect(await fitImages({ output: [{ type: "text", text: "hi" }, { type: "image", data: PNG.toString("base64"), mimeType: "image/png" }] }, { prepare })).toBeUndefined();
+	expect(prepare).not.toHaveBeenCalled();
+});
+
+it("an image's size comes from its header", () => {
+	const jpeg = Buffer.from([0xff, 0xd8, 0xff, 0xe0, 0x00, 0x04, 0x00, 0x00, 0xff, 0xc0, 0x00, 0x11, 0x08, 0x0b, 0xb8, 0x07, 0xd0, 0x03, 0, 0, 0, 0, 0, 0, 0, 0]);
+	expect(imageSize(jpeg)).toEqual({ width: 2000, height: 3000 });
+	const webp = Buffer.alloc(30);
+	webp.write("RIFF", 0, "ascii");
+	webp.write("WEBP", 8, "ascii");
+	webp.write("VP8X", 12, "ascii");
+	webp.writeUIntLE(4999, 24, 3);
+	webp.writeUIntLE(99, 27, 3);
+	expect(imageSize(webp)).toEqual({ width: 5000, height: 100 });
+	expect(imageSize(Buffer.from("R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7", "base64"))).toEqual({ width: 1, height: 1 });
+	expect(imageSize(greyPng(3, 7))).toEqual({ width: 3, height: 7 });
+	expect(imageSize(Buffer.from("not an image"))).toBeUndefined();
 });
