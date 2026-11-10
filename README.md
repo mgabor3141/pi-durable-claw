@@ -89,13 +89,16 @@ working directory: a project's root, a Scratch thread's folder, or `/home/agent`
 its `.agents/skills`, and the local time when the conversation started (recorded when it was created, so a prompt
 rendered again still names it). The agent owns its tools under
 `/home/agent`; the workspace image reads `PATH` from `~/.ssh/environment` and includes `jq`. The model tool list is
-`codemode` and the bridge's `request_secret`, and it never changes.
-A model that calls a script's tool directly anyway (`bash`, out of habit) gets the script to send instead of pi-durable's
-"Tool bash is not available": the same tool with the same arguments, inside `codemode` (`src/direct-calls.ts`).
+`read`, `write`, `edit`, `bash`, `codemode` and the bridge's `request_secret`, and it never changes. The model calls
+the four workspace tools directly for a single step (a `bash` call is T3's command row), and `codemode` for several
+steps at once or any other tool; scripts call the four too. A model that calls a script-only tool directly anyway
+(`ssh`, say) gets the script to send instead of pi-durable's "Tool ssh is not available": the same tool with the same
+arguments, inside `codemode` (`src/direct-calls.ts`).
 
-`read` in a script gives a text file's whole text (or the lines `offset` and `limit` select), or an image as
-`{ type: "image", data, mimeType }`; show it with `image(result)`. There is no size limit on what a script reads: the
-limit is on what reaches the model, codemode's output. (pi-durable's `read` stops at 2,000 lines or 50 KB.) (pi-durable's `read` already returns an image as its content, but a tool without an output schema gives
+`read` called directly gives the text, cut at 2,000 lines or 50 KB (pi-durable's bound on what a call returns to the
+model), or the image itself. In a script it gives a text file's whole text (or the lines `offset` and `limit` select), or
+an image as `{ type: "image", data, mimeType }`; show it with `image(result)`. There is no size limit on what a script
+reads: the limit is on what reaches the model, codemode's output. (pi-durable's `read` already returns an image as its content, but a tool without an output schema gives
 scripts only its text, so the picture would arrive as `""`; claw gives `read` that schema.) A file that cannot be read
 as an image says why, and the call rejects.
 An image is prepared for the model by pi-durable's Photon image processor (`src/images.ts`): turned upright by its
@@ -129,10 +132,11 @@ A running thread renders it afresh after:
 - A compaction. Its first request writes the whole prompt again anyway. The one exception: if a `/reload` happened
   within the history the compaction keeps (its last ~20k tokens), the prompt that reload rendered stays.
 
-The codemode section is a catalog (`src/codemode-catalog.ts`): `read`, `write`, `edit` and `bash` are declared in
-full, every other harness tool has one line (its description's first sentence), and a script reads a tool's
-declaration with `describeTool(name)` before first using it, as tool search works in Claude Code and Codex. The
-whole system prompt is about 2,000 tokens; declaring every tool in full made it about 7,000. MCP tools are left out
+The codemode section is a catalog (`src/codemode-catalog.ts`): `read`, `write`, `edit` and `bash`, whose definitions the
+request carries as the model's own tools, are named once with what each gives a script; every other harness tool has
+one line (its description's first sentence), and a script reads a tool's declaration with `describeTool(name)` before
+first using it, as tool search works in Claude Code and Codex. Declaring every tool in full made the prompt about
+7,000 tokens. MCP tools are left out
 of it, since a server can bring dozens; scripts find them with `searchTools()`. A tool registered after the prompt was rendered can
 be called at once and is found the same way. `src/fixed-prompt.ts` keeps the prompt, and
 `test/fixed-prompt.test.ts` checks both that every section is kept and that a change sends the same bytes.

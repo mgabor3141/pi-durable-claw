@@ -7,8 +7,8 @@ import { num, opt, str, union } from "@earendil-works/pi-schema";
 import { literal, object } from "./schema.ts";
 
 /**
- * The workspace's files and shell: pi-durable's own coding tools, unchanged except `callers: ["tools"]` — the model
- * is never offered them, only codemode scripts call them. They run against the call's `ExecutionEnv`, which the
+ * The workspace's files and shell: pi-durable's own coding tools, which the model calls directly for a single step and
+ * scripts call for several (pi-durable's default `callers`, both). `ssh` is for scripts only. They run against the call's `ExecutionEnv`, which the
  * harness builds as pi-env's `RemoteExecutionEnv` over SSH to the workspace container. `ssh` is `bash` running one
  * `ssh` command line, so a script passes the remote command as a plain string instead of quoting it twice. `images`
  * prepares the images `read` returns (`images.ts`).
@@ -16,9 +16,9 @@ import { literal, object } from "./schema.ts";
 export function workspaceTools(images?: ImageProcessor): ToolRegistration[] {
 	return [
 		readTool(images),
-		{ ...createWriteTool(), callers: ["tools"] as const },
-		{ ...createEditTool(), callers: ["tools"] as const },
-		{ ...createBashTool(), callers: ["tools"] as const },
+		createWriteTool(),
+		createEditTool(),
+		createBashTool(),
 		sshTool(),
 	];
 }

@@ -1,7 +1,7 @@
-// A call the model makes to a tool only scripts call. The model is offered `codemode` (and the bridge's
-// `request_secret`); `bash`, `read`, MCP tools and the rest are `callers: ["tools"]`. A model used to calling `bash`
-// itself still does, now and then, and pi-durable answers "Tool bash is not available", which tells it nothing about
-// what to do instead: it may give up on a tool it has. This turns that answer into the call it meant, as a script to
+// A call the model makes to a tool only scripts call. The model is offered `codemode`, `read`, `write`, `edit`, `bash`
+// (and the bridge's `request_secret`); `ssh`, the web and browser tools, MCP tools and the rest are `callers: ["tools"]`.
+// A model sometimes calls one of those directly anyway, and pi-durable answers "Tool ssh is not available", which tells
+// it nothing about what to do instead: it may give up on a tool it has. This turns that answer into the call it meant, as a script to
 // send: the same tool, the same arguments, inside `codemode`. A name no tool has gets a pointer to `searchTools()`.
 import { defineExtension, hook, ToolTask, type Extension, type RegistryReader, type ToolExecutionResult } from "@earendil-works/pi-durable";
 

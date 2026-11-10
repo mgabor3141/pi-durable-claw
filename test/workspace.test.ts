@@ -16,8 +16,8 @@ const context = BACKGROUND_CONTEXT;
 const SECRET_KEY = "sk-mgabor-SECRETKEY-7f3a9c2b1d";
 const WORKSPACE_KEY_FILE = "/home/agent/x.json";
 
-// The model's script, run by upstream's codemode tool. `secret_lookup` and the workspace tools are callable only
-// from scripts (`callers: ["tools"]`), reached as nested `pi.tool` tasks; `bash` resolves to its structured
+// The model's script, run by upstream's codemode tool. `secret_lookup` is callable only from scripts (`callers:
+// ["tools"]`); it and the workspace tools are reached as nested `pi.tool` tasks; `bash` resolves to its structured
 // `{ output, exitCode, ... }` (1.2.0 structured tool output).
 const script = `
 	const secret = await tools.secret_lookup({ name: "calendar" });
@@ -48,8 +48,8 @@ beforeAll(async () => {
 	});
 	const root = await harness.root(context, { agent: { model: { provider: "faux", modelId: "faux-1" }, cwd: "/home/agent" } });
 
-	// The model is offered exactly one tool: codemode. (`agent.tools` are the tools a request offers, in order:
-	// enabled, callable by the model, selected by `modelTools`.) The script-callable tools are enabled, not offered.
+	// The model is offered codemode and the workspace's read/write/edit/bash. (`agent.tools` are the tools a request
+	// offers, in order: enabled, callable by the model, selected by `modelTools`.) Script-only tools are enabled, not offered.
 	const agent = await root.agent(context);
 	offeredToolNames = agent.tools.map((tool) => tool.name);
 	callableToolNames = agent.callable.map((tool) => tool.name);
@@ -79,9 +79,9 @@ afterAll(async () => {
 });
 
 describe("upstream codemode in a pi-durable conversation", () => {
-	it("the model is offered exactly [codemode]; the other tools are script-callable only", () => {
-		expect(offeredToolNames).toEqual(["codemode"]);
-		for (const name of ["secret_lookup", "read", "write", "bash"]) expect(callableToolNames).toContain(name);
+	it("the model is offered codemode and read/write/edit/bash; scripts call those and the script-only tools", () => {
+		expect([...offeredToolNames].sort()).toEqual(["bash", "codemode", "edit", "read", "write"]);
+		for (const name of ["secret_lookup", "ssh", "read", "write", "bash"]) expect(callableToolNames).toContain(name);
 	});
 
 	it("runs the script: secret_lookup -> write -> python3 -> processed output", () => {

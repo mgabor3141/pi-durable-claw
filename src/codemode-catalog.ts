@@ -9,7 +9,8 @@
  * needs it, as tool search works in Claude Code, Codex and the MCP client guidance (a catalog of names and one line,
  * then the full definition on demand).
  *
- * - Pinned tools (`read`, `write`, `edit`, `bash`): declared in full, as pi-durable would; nearly every turn uses them.
+ * - Tools the model also calls directly (`read`, `write`, `edit`, `bash`): not repeated, since their definitions are
+ *   in the request already; one sentence says scripts call them too, with the same arguments, and what each returns.
  * - Every other tool: `- <name>: <first sentence of its description>`, grouped by namespace as pi-durable groups them.
  * - Deferred tools (MCP servers') stay out, as in pi-durable: `searchTools()` finds them, and the `mcp-servers`
  *   section names the servers.
@@ -19,45 +20,43 @@
  */
 import { defineExtension, wrapSection, type Extension, type ToolRegistration, type Wrap } from "@earendil-works/pi-durable";
 import { CODEMODE_TOOL_NAME, type CodemodeNamespace } from "@earendil-works/pi-durable/codemode";
-import { renderToolSample, toCodemodeIdentifier } from "@earendil-works/pi-codemode/declarations";
+import { toCodemodeIdentifier } from "@earendil-works/pi-codemode/declarations";
 
-/** Tools nearly every turn uses: declared in full. */
-export const PINNED_TOOLS = ["read", "write", "edit", "bash"] as const;
+/** What a script gets from each tool the model also calls directly, where it differs from what the model sees. */
+const SCRIPT_RESULTS: Readonly<Record<string, string>> = {
+	read: '{ type: "text", text } or an image block (show it with image())',
+	bash: "{ output, exitCode, truncated, fullOutputPath? } (a nonzero exit resolves too: check exitCode)",
+	write: "its message",
+	edit: "its message",
+};
 /** pi-durable's internal tools (`models.*`), which scripts reach only through globals. */
 const INTERNAL_PREFIX = "pi.codemode.";
 const SUMMARY_MAX = 200;
 
-const HEADER = [
-	"Tools scripts can call, as `await tools.<name>(args)`.",
-	"The first few are declared in full; the others have one line each: before you first call one, `await describeTool(name)` gives its description and TypeScript declaration.",
-	"MCP tools are not listed: `searchTools(query)` and `describeNamespace(name)` find them.",
-].join(" ");
+const HEADER = "Tools scripts can call, as `await tools.<name>(args)`, one line each: before you first call one, `await describeTool(name)` gives its description and TypeScript declaration.";
+const MCP_LINE = "MCP tools are not listed: `searchTools(query)` and `describeNamespace(name)` find them.";
+
+/** Whether the model is offered the tool too (pi-durable's default `callers` is both). */
+const direct = (tool: ToolRegistration) => tool.callers === undefined || tool.callers.includes("model");
+
+/** The sentence about the tools the model also calls directly, which the list leaves out. */
+function directLine(tools: readonly ToolRegistration[]): string | undefined {
+	if (tools.length === 0) return undefined;
+	const names = tools.map((tool) => `\`${toCodemodeIdentifier(tool.name)}\``);
+	const list = names.length === 1 ? names[0] : `${names.slice(0, -1).join(", ")} and ${names.at(-1)}`;
+	const results = tools.flatMap((tool) => (SCRIPT_RESULTS[tool.name] === undefined ? [] : [`\`${toCodemodeIdentifier(tool.name)}\` gives ${SCRIPT_RESULTS[tool.name]}`]));
+	return `Your own tools ${list} are not listed: scripts call them too, with the same arguments.${results.length === 0 ? "" : ` In a script, ${results.join("; ")}.`}`;
+}
 
 /** The codemode tool's sentence about the section, and what it says now. */
 const SECTION_SENTENCE = "The `codemode` section of the system prompt lists the tools scripts can call, by namespace, as far as space allows.";
-const CATALOG_SENTENCE = "The `codemode` section of the system prompt lists every tool scripts can call: a few declared in full, the others in one line each; `describeTool(name)` gives a tool's declaration.";
+const CATALOG_SENTENCE = "The `codemode` section of the system prompt lists the tools scripts can call, one line each, besides your own tools, which scripts call too; `describeTool(name)` gives a tool's declaration.";
 
 /** A description's first sentence, on one line: what the catalog says about a tool. */
 export function summaryOf(description: string): string {
 	const paragraph = (description.trim().split(/\n\s*\n/u)[0] ?? "").replace(/\s+/gu, " ").trim();
 	const sentence = /^.*?[.!?](?=\s|$)/u.exec(paragraph)?.[0] ?? paragraph;
 	return sentence.length > SUMMARY_MAX ? `${sentence.slice(0, SUMMARY_MAX - 1)}…` : sentence;
-}
-
-/** `### \`id\`` and the tool's description and declaration, as pi-durable renders a tool it lists. */
-function declared(tool: ToolRegistration): string {
-	const sample = renderToolSample({
-		name: tool.name,
-		description: tool.description,
-		inputSchema: tool.parameters as never,
-		outputSchema: (tool.structuredOutputSchema ?? { type: "string" }) as never,
-	});
-	return `${heading("###", tool.name)}\n${sample.trim()}`;
-}
-
-function heading(level: string, name: string): string {
-	const id = toCodemodeIdentifier(name);
-	return id === name ? `${level} \`${id}\`` : `${level} \`${id}\` (\`${name}\`)`;
 }
 
 function line(tool: ToolRegistration): string {
@@ -74,11 +73,11 @@ function namespaceOf(name: string, namespaces: readonly CodemodeNamespace[]): Co
 }
 
 /** The section's text, for the tools scripts can call. `undefined` without any, as pi-durable's section. */
-export function catalogSection(callable: readonly ToolRegistration[], namespaces: readonly CodemodeNamespace[], pinned: readonly string[] = PINNED_TOOLS): string | undefined {
+export function catalogSection(callable: readonly ToolRegistration[], namespaces: readonly CodemodeNamespace[]): string | undefined {
 	const tools = callable.filter((tool) => !tool.name.startsWith(INTERNAL_PREFIX) && tool.deferred !== true);
 	if (tools.length === 0) return undefined;
-	const full = pinned.flatMap((name) => tools.filter((tool) => tool.name === name));
-	const rest = tools.filter((tool) => !full.includes(tool));
+	const own = tools.filter(direct);
+	const rest = tools.filter((tool) => !direct(tool));
 	const loose = rest.filter((tool) => namespaceOf(tool.name, namespaces) === undefined);
 	const grouped = new Map<string, { namespace: CodemodeNamespace; tools: ToolRegistration[] }>();
 	for (const tool of rest) {
@@ -88,7 +87,7 @@ export function catalogSection(callable: readonly ToolRegistration[], namespaces
 		group.tools.push(tool);
 		grouped.set(namespace.name, group);
 	}
-	const parts = [HEADER, ...full.map(declared)];
+	const parts = [[HEADER, directLine(own), MCP_LINE].filter((part) => part !== undefined).join(" ")];
 	if (loose.length > 0) parts.push(`### Other tools\n${loose.map(line).join("\n")}`);
 	for (const { namespace, tools: members } of [...grouped.values()].sort((a, b) => a.namespace.name.localeCompare(b.namespace.name))) {
 		const description = namespace.description?.trim();
@@ -101,7 +100,7 @@ export function catalogSection(callable: readonly ToolRegistration[], namespaces
  * The catalog: wraps the `codemode` section (and the codemode tool's sentence about it). Select it before
  * `fixedPromptExtension`, so the fixed prompt keeps what this renders.
  */
-export function codemodeCatalogExtension(options: { readonly namespaces?: readonly CodemodeNamespace[]; readonly pinned?: readonly string[] } = {}): Extension {
+export function codemodeCatalogExtension(options: { readonly namespaces?: readonly CodemodeNamespace[] } = {}): Extension {
 	const namespaces = options.namespaces ?? [];
 	const tool: Wrap = {
 		tool: CODEMODE_TOOL_NAME,
@@ -113,7 +112,7 @@ export function codemodeCatalogExtension(options: { readonly namespaces?: readon
 	return defineExtension({
 		name: "codemode-catalog",
 		wraps: [
-			wrapSection("codemode", (section) => ({ ...section, render: (input) => catalogSection(input.agent.callable, namespaces, options.pinned) })),
+			wrapSection("codemode", (section) => ({ ...section, render: (input) => catalogSection(input.agent.callable, namespaces) })),
 			tool,
 		],
 	});

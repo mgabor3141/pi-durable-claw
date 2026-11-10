@@ -1,5 +1,6 @@
-// The model calls `bash` itself, as models used to it do, though only scripts call it: pi-durable refused with "Tool
-// bash is not available", and the agent did not learn how to run it. The refusal now gives the script to send.
+// The model calls a script-only tool itself: pi-durable refused with "Tool bash is not available" (bash was script-only
+// then), and the agent did not learn how to run it. The refusal now gives the script to send. Here a script-only bash
+// stands for any such tool.
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";

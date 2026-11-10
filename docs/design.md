@@ -71,10 +71,12 @@ pi-durable ships it: `@earendil-works/pi-durable/codemode`'s `createCodemodeExte
 `tools.<name>(args)` calls are nested `pi.tool` tasks of the codemode call, so a crash is a **resume, not a rerun**:
 the tool is replay-safe — after a restart the script is replayed deterministically from a journal of the results it
 already got, completed nested calls never run twice, and the script continues live. The workspace's
-`read`/`write`/`bash` and every other harness tool are registered with `callers: ["tools"]`, so only scripts call
-them, and so are MCP tools: the codemode section is a catalog of the harness's tools (four in full, the rest on one line each, with `describeTool()` for their declarations) and leaves MCP tools out, which
-scripts find with `searchTools()`. The model is offered `codemode` and the bridge's `request_secret`, and that list
-never changes, so the prompt cache holds (the README's "A fixed system prompt").
+`read`/`write`/`edit`/`bash` are offered to the model too (one command needs no script around it) and scripts call
+them as well; every other harness tool is registered with `callers: ["tools"]`, so only scripts call it, and so are MCP
+tools: the codemode section is a catalog of the harness's tools (the model's own four named once, the rest on one line
+each, with `describeTool()` for their declarations) and leaves MCP tools out, which scripts find with `searchTools()`.
+The model is offered those four, `codemode` and the bridge's `request_secret`, and that list never changes, so the
+prompt cache holds (the README's "A fixed system prompt").
 **Verified (spike):** upstream's extension runs a model script whose only capabilities are the conversation's
 script-callable tools — a key-bearing harness tool and the workspace's `read`/`write`/`bash`, pi-durable's own coding
 tools over pi-env — with the key never reaching the container and the model offered exactly `[codemode]`; after a
@@ -133,7 +135,7 @@ code. Verified in T3's web app (playwright + chromium, screenshots in `.memory/`
 
 | Profile | Tools (what the model is offered) |
 |---|---|
-| assistant | codemode and the bridge's request_secret — every other tool, MCP tools included, is `callers: ["tools"]` |
+| assistant | read/write/edit/bash, codemode and the bridge's request_secret — every other tool, MCP tools included, is `callers: ["tools"]` |
 | dev project | read/write/edit/bash on the project's devcontainer, plus codemode |
 | host conversation | read/write/edit/bash on the operator's computer |
 

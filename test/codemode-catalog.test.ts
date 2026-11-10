@@ -1,5 +1,5 @@
-// The `codemode` section as a catalog (`codemode-catalog.ts`): every tool on one line, read/write/edit/bash in full, the
-// rest's declarations from `describeTool()`. The section was about 26,000 characters, nine tenths of the prompt.
+// The `codemode` section as a catalog (`codemode-catalog.ts`): every tool on one line, the model's own tools
+// (read/write/edit/bash) named once, the rest's declarations from `describeTool()`. The section was about 26,000 characters, nine tenths of the prompt.
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -30,11 +30,12 @@ describe("summaryOf", () => {
 });
 
 describe("catalogSection", () => {
-	it("declares the pinned tools in full, lists every other on one line by namespace, and leaves out deferred and internal tools", () => {
+	it("names the model's own tools once, lists every other on one line by namespace, and leaves out deferred and internal tools", () => {
 		const section = catalogSection(
 			[
 				tool("ssh", "Run a command over SSH. Long details nobody needs up front."),
-				tool("bash", "Execute a bash command."),
+				tool("bash", "Execute a bash command.", { callers: undefined }),
+				tool("read", "Read a file.", { callers: ["model", "tools"] }),
 				tool("thread_wait", "Wait for threads. Details."),
 				tool("mcp__docs__search", "An MCP tool.", { deferred: true }),
 				tool("pi.codemode.classify", "Internal."),
@@ -42,15 +43,17 @@ describe("catalogSection", () => {
 			],
 			[{ name: "thread", prefix: "thread_", description: "Other agents' threads" }],
 		)!;
-		expect(section).toContain("### `bash`\nExecute a bash command.");
-		expect(section).toContain("```ts");
+		expect(section).toContain("Your own tools `bash` and `read` are not listed: scripts call them too, with the same arguments. In a script, `bash` gives { output, exitCode, truncated, fullOutputPath? }");
+		expect(section).not.toContain("- bash:");
+		expect(section).not.toContain("Execute a bash command.");
+		expect(section).not.toContain("```ts");
 		expect(section).toContain("- ssh: Run a command over SSH.");
 		expect(section).not.toContain("Long details");
 		expect(section).toContain("## thread\nOther agents' threads\n- thread_wait: Wait for threads.");
 		expect(section).toContain("- my_tool (my-tool): A tool whose name is not an identifier.");
 		expect(section).not.toContain("mcp__docs__search");
 		expect(section).not.toContain("pi.codemode");
-		expect(section.indexOf("### `bash`")).toBeLessThan(section.indexOf("- ssh:"));
+		expect(section.indexOf("Your own tools")).toBeLessThan(section.indexOf("- ssh:"));
 		expect(catalogSection([tool("mcp__docs__search", "x", { deferred: true })], [])).toBeUndefined();
 	});
 });
@@ -85,13 +88,13 @@ it("the harness's prompt is the catalog, fixed for the thread, and describeTool(
 		await conversation.waitForIdle(ctx);
 
 		const [first, second] = prompts;
-		expect(first).toContain("### `bash`");
+		expect(first).toContain("Your own tools `read`, `write`, `edit` and `bash` are not listed");
 		expect(first).toContain("- ssh: Run a command on another machine over SSH");
 		expect(first, "ssh's details are not in the prompt").not.toContain("No terminal, no stdin");
-		expect(first!.length, "the section stays small; a tool belongs on one line").toBeLessThan(8_000);
+		expect(first!.length, "the section stays small; a tool belongs on one line").toBeLessThan(5_000);
 		expect(second).toBe(first);
 		expect(second).not.toContain("late_tool");
-		expect(descriptions[0]).toContain("lists every tool scripts can call: a few declared in full, the others in one line each");
+		expect(descriptions[0]).toContain("lists the tools scripts can call, one line each, besides your own tools");
 
 		const context = await conversation.context(ctx);
 		const result = context.messages.find((message) => message.role === "toolResult") as { content: { type: string; text?: string }[] };
