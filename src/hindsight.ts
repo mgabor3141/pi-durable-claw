@@ -16,7 +16,7 @@
  *
  * Memory never stops a turn: a failed recall says so in the block, a failed retain is logged.
  */
-import type { Context } from "@earendil-works/chord";
+import type { Context } from "@earendil-works/chord/context";
 import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
 import type { AssistantMessage, Message, Model, Models, ToolResultMessage } from "@earendil-works/pi-ai";
 import { defineExtension, defineTool, GenerationTask, hook, type ContextView, type ConversationId, type EntryId, type EntryRecord, type Extension, type Harness, type ModelRef, type ToolRegistration } from "@earendil-works/pi-durable";

@@ -1,5 +1,5 @@
 import { join } from "node:path";
-import type { Context } from "@earendil-works/chord";
+import type { Context } from "@earendil-works/chord/context";
 import { defineDoc, defineExtension, section, type ConversationRecord, type Extension, type Tx } from "@earendil-works/pi-durable";
 import type { ExecutionEnv } from "@earendil-works/pi-durable/env";
 import { loadSkills } from "./skills.ts";

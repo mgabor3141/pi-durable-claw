@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { Context } from "@earendil-works/chord";
+import type { Context } from "@earendil-works/chord/context";
 import { summarizeTools } from "../src/summarize.ts";
 
 const context = { abortSignal: undefined } as unknown as Context;

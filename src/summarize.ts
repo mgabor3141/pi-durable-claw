@@ -1,4 +1,4 @@
-import type { JsonValue } from "@earendil-works/chord";
+import type { JsonValue } from "@earendil-works/chord/json";
 import { defineTool, type ToolRegistration } from "@earendil-works/pi-durable";
 import type { TextGenerationModel } from "@mgabor3141/pi-durable-t3";
 import type { ExecutionEnv } from "@earendil-works/pi-durable/env";

@@ -15,7 +15,7 @@ import {
 	toLlmContent,
 } from "@earendil-works/pi-mcp";
 import type { ToolExecutionApi, ToolExecutionResult, ToolRegistration } from "@earendil-works/pi-durable";
-import type { Context } from "@earendil-works/chord";
+import type { Context } from "@earendil-works/chord/context";
 import type { McpExposure } from "./config.ts";
 import { abortable } from "@mgabor3141/pi-durable-t3";
 import { type Schema } from "@earendil-works/pi-schema";

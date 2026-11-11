@@ -8,7 +8,7 @@
 // values, so a transformed value (base64, a substring) passes, as GitHub Actions' masking does: it catches accidents.
 import { chmodSync, closeSync, fsyncSync, openSync, readFileSync, renameSync, writeSync } from "node:fs";
 import { dirname, join } from "node:path";
-import type { JsonValue } from "@earendil-works/chord";
+import type { JsonValue } from "@earendil-works/chord/json";
 import { defineTool, type ToolExecutionApi, type ToolExecutionResult, type ToolRegistration } from "@earendil-works/pi-durable";
 import type { McpOAuthState } from "@earendil-works/pi-mcp/oauth";
 import { SECRETS_TOOL_DESCRIPTION } from "./prompts.ts";

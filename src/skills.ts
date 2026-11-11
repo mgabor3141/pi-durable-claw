@@ -1,5 +1,5 @@
 import { basename, dirname, join } from "node:path";
-import type { Context } from "@earendil-works/chord";
+import type { Context } from "@earendil-works/chord/context";
 import type { ExecutionEnv } from "@earendil-works/pi-durable/env";
 
 /** One skill as the system prompt sees it: metadata only, never the body. */

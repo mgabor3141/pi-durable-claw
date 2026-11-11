@@ -19,7 +19,7 @@
  * needs. A delay of 0 runs the callback after the current job (a microtask), without a host call; an interval waits at
  * least 1 ms between ticks, each on a fixed schedule from the first. An error a callback throws goes to `console.error`.
  */
-import type { Context } from "@earendil-works/chord";
+import type { Context } from "@earendil-works/chord/context";
 import type { Extension, ToolRegistration, Wrap } from "@earendil-works/pi-durable";
 import { CODEMODE_TOOL_NAME, type CodemodeGlobal } from "@earendil-works/pi-durable/codemode";
 

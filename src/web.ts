@@ -1,5 +1,5 @@
 import { isIP } from "node:net";
-import type { JsonValue } from "@earendil-works/chord";
+import type { JsonValue } from "@earendil-works/chord/json";
 import { defineTool, type ToolRegistration } from "@earendil-works/pi-durable";
 import { WEB_FETCH_TOOL_DESCRIPTION, WEB_SEARCH_TOOL_DESCRIPTION, untrusted } from "./prompts.ts";
 import { arr, int, opt, str, union } from "@earendil-works/pi-schema";
