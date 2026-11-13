@@ -420,6 +420,11 @@ version (`test/one-copy.test.ts` checks it). To try a bridge change, point the d
 `claw-tailnet` (remote access) is Go, in `tailnet/`: `go test ./...` there (Go 1.27). The harness image builds and tests it;
 for a local `pnpm test` it is not needed (a stand-in program covers the harness's side).
 
+CI ([`.github/workflows/ci.yml`](.github/workflows/ci.yml)) runs on `main`, `next` and pull requests: the typecheck
+and the tests, then `dev/image-smoke.sh`, which builds both images, starts the stack with a placeholder credential,
+pairs, and adds a project to see its folder appear in the workspace. The smoke needs a checkout with no `data/` or
+`.env`, so it does not run on a server in use.
+
 ## License
 
 MIT
