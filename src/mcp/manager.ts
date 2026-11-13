@@ -227,6 +227,12 @@ export class McpManager {
 				const connection = resolveConnection(state.entry.config, this.options.secrets);
 				if ("missing" in connection) throw new Error(`${state.entry.name}: ${mcpNeedsSecrets(connection.missing)}`);
 				const link = await oauth.login(state.entry.name, connection.url, state.entry.config);
+				if (link === undefined) {
+					// The stored sign-in was renewed (its refresh token still works): there is nothing for the user to do.
+					this.options.logger?.info("MCP sign-in renewed", { server: state.entry.name });
+					await this.reconnect(state.entry.name);
+					return answer({ server: state.entry.name, signedIn: true, ...this.status(state.entry.name) });
+				}
 				this.options.logger?.info("MCP sign-in started", { server: state.entry.name });
 				return answer({ server: state.entry.name, signInUrl: link, redirectUri: oauth.redirectUrl });
 			},

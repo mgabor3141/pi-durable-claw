@@ -1,6 +1,7 @@
 // OAuth sign-in to an MCP server, end to end against a fake that is both the MCP server and its authorization server:
 // the first connect reports a sign-in, mcp's login answers the link, the redirect's code is exchanged (discovery, dynamic
-// registration, PKCE), the server connects, an expired token is refreshed by itself, and tokens are scrubbed.
+// registration, PKCE), the server connects, an expired token is refreshed by itself, and tokens are scrubbed. A login
+// that can renew the stored sign-in needs no link, and a newer link replaces an older one.
 import { createHash } from "node:crypto";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { createServer, type IncomingMessage, type Server } from "node:http";
@@ -157,9 +158,19 @@ it("signs in through mcp, connects, refreshes by itself, and keeps tokens out of
 	expect((second.content[0] as { text: string }).text).toBe("you hold access-token-2-abcdef");
 	expect(fake.refreshed).toBe(1);
 
-	// A pasted redirect works the same way (here, after a sign-out).
+	// A login while the stored sign-in can still be renewed: it is renewed, and there is no link to give anyone.
+	fake.valid.clear();
+	expect(await run({ action: "login", server: "docs" })).toEqual({ server: "docs", signedIn: true, status: "connected" });
+	expect(fake.refreshed).toBe(2);
+	expect(fake.registered, "the registered client is kept").toBe(1);
+
+	// A pasted redirect works the same way (here, after a sign-out). A server has one sign-in at a time: the link of
+	// an earlier login is dead once a later one is made.
 	expect(await run({ action: "logout", server: "docs" })).toMatchObject({ signedOut: true, status: "failed" });
+	const stale = await run({ action: "login", server: "docs" });
 	const again = await run({ action: "login", server: "docs" });
+	const stalePasted = (await fetch(stale.signInUrl, { redirect: "manual" })).headers.get("location")!;
+	await expect(run({ action: "complete", redirectUrl: stalePasted })).rejects.toThrow("unknown or was already used");
 	const pasted = (await fetch(again.signInUrl, { redirect: "manual" })).headers.get("location")!;
 	expect(await run({ action: "complete", redirectUrl: pasted })).toEqual({ server: "docs", status: "connected" });
 });

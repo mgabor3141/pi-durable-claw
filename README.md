@@ -305,11 +305,15 @@ A server with no `Authorization` header signs in by OAuth when it answers 401, a
 it as needing a sign-in. The agent calls `mcp({ action: "login", server })` and gives the user the link.
 After the user approves, the browser returns to `<CLAW_PUBLIC_URL>/host/oauth/callback` and the server connects. If the
 user's browser cannot reach that URL, the page fails to load, but the address bar still holds the code: pasted back to
-the agent, `mcp({ action: "complete", redirectUrl })` finishes the sign-in the same way. A callback works once.
+the agent, `mcp({ action: "complete", redirectUrl })` finishes the sign-in the same way. A callback works once, and
+a server has one link at a time: a later login, or a restart of the harness, ends an earlier link. When the stored
+sign-in can still be renewed, login renews it and answers `signedIn` with no link.
 
-Discovery follows the MCP authorization spec (RFC 9728, then RFC 8414). The client registers dynamically, unless the
-server takes a Client ID Metadata Document or you configure a client. Tokens refresh on their own, including a
-step-up on `insufficient_scope`. They are kept with the secrets in `secrets.json` and appear in tool output only as
+The flow is pi-mcp's (`createMcpAuthProvider`, `startMcpSignIn`, `completeMcpSignIn`). Discovery follows the MCP
+authorization spec (RFC 9728, then RFC 8414). The client registers dynamically, unless you configure one. Tokens
+refresh on their own, shortly before they expire and after a 401. A server that asks for more scope
+(`insufficient_scope`) needs a sign-in again, and its link asks for that scope. Tokens are kept with the secrets in
+`secrets.json` and appear in tool output only as
 `[<server> OAuth credential]`. `mcp({ action: "logout", server })` forgets a sign-in.
 
 Claude Code's `oauth` block is read:
