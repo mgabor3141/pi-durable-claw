@@ -1,7 +1,7 @@
 // The model calls read, write, edit and bash itself for a single step, and codemode for several: the harness offers
 // those four directly (and scripts still call them), with the same registrations, so secrets, image fitting and the
 // output bound apply as they do in a script.
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { deflateSync, crc32 } from "node:zlib";
@@ -55,7 +55,8 @@ it("the model calls read, write and bash directly; a large image comes back fitt
 			return fauxAssistantMessage(
 				[
 					fauxToolCall("write", { path: join(dir, "note.txt"), content: "hello" }, { id: "w" }),
-					fauxToolCall("bash", { command: "cat note.txt; echo; echo exit-was-fine" }, { id: "b" }),
+					// The calls of one message run side by side, so this one must not read what `write` writes.
+					fauxToolCall("bash", { command: "echo hello; echo exit-was-fine" }, { id: "b" }),
 					fauxToolCall("read", { path: "wide.png" }, { id: "r" }),
 				],
 				{ stopReason: "toolUse" },
@@ -77,6 +78,7 @@ it("the model calls read, write and bash directly; a large image comes back fitt
 		expect(results.every((message) => message.isError !== true)).toBe(true);
 		// The shell's own text, not a script's JSON.
 		expect(text(results[1]!)).toContain("hello\nexit-was-fine");
+		expect(await readFile(join(dir, "note.txt"), "utf8")).toBe("hello");
 		const image = results[2]!.content.find((block) => block.type === "image");
 		expect(imageSize(Buffer.from(image!.data, "base64"))).toEqual({ width: 2000, height: 1163 });
 	} finally {
