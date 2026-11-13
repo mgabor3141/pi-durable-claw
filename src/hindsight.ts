@@ -387,7 +387,8 @@ export class Hindsight {
 				}),
 				callers: ["tools"],
 				async execute(args, _api, context) {
-					const response = await client.recall(bank, args.query, { types: ["world", "experience", "observation"], preferObservations: true, maxTokens: args.maxTokens ?? 2_048, budget: "mid", ...(context.abortSignal === undefined ? {} : { signal: context.abortSignal }) });
+					// Observations only, as the recall for each message: what Hindsight consolidated, not the single facts under it.
+					const response = await client.recall(bank, args.query, { types: ["observation"], maxTokens: args.maxTokens ?? 2_048, budget: "mid", ...(context.abortSignal === undefined ? {} : { signal: context.abortSignal }) });
 					const memories = (response.results ?? []) as Recalled[];
 					return { output: [{ type: "text" as const, text: memories.length === 0 ? "No memories found." : memories.map(memoryLine).join("\n") }] };
 				},

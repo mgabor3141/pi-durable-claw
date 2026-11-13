@@ -98,14 +98,16 @@ const shellWord = (value: string) => `'${value.replaceAll("'", `'"'"'`)}'`;
 /**
  * The command line `ssh` runs in the workspace. The host and the remote command are each one quoted word, so the remote
  * shell receives the command exactly as given. `-n`: no stdin (nothing to read from, and nothing to hang on);
- * `BatchMode`: never prompt, so a password or an unknown host key fails at once (exit 255) instead of waiting.
+ * `BatchMode`: never prompt, so a password fails at once (exit 255) instead of waiting. `accept-new`: a host seen for
+ * the first time is trusted and its key saved in `~/.ssh/known_hosts`, as the harness trusts the workspace's; a host
+ * whose key CHANGED still fails. The agent could add a key itself (`ssh-keyscan`), so asking it to is only a detour.
  */
 export function sshCommandLine(host: string, command: string): string {
 	if (host === "" || /\s/.test(host) || host.startsWith("-")) {
 		throw new Error(`ssh: ${JSON.stringify(host)} is not a host: give a name from ~/.ssh/config, user@host, or ssh://user@host:port`);
 	}
 	if (command.trim() === "") throw new Error("ssh: the command is empty");
-	return `ssh -n -o BatchMode=yes -- ${shellWord(host)} ${shellWord(command)}`;
+	return `ssh -n -o BatchMode=yes -o StrictHostKeyChecking=accept-new -- ${shellWord(host)} ${shellWord(command)}`;
 }
 
 /** `ssh`: run a command on another machine, from the workspace, with bash's result (output, exitCode, truncated). */

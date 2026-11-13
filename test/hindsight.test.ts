@@ -233,5 +233,7 @@ it("the tools recall, save and reflect in the configured bank", async () => {
 	expect(await run("hindsight_retain", { content: "Likes tea.", context: "from a note" })).toBe("Saved to long-term memory.");
 	expect(await run("hindsight_reflect", { query: "What would they drink?" })).toBe("Probably tea.");
 	expect(server.seen.map((request) => request.path)).toEqual(["/v1/default/banks/b/memories/recall", "/v1/default/banks/b/memories", "/v1/default/banks/b/reflect"]);
+	// The tool searches observations only, as the recall for each message does.
+	expect((server.seen[0]!.body as { types?: string[] }).types).toEqual(["observation"]);
 	expect(memory.tools().map((candidate) => candidate.callers)).toEqual([["tools"], ["tools"], ["tools"]]);
 });

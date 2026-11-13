@@ -114,8 +114,10 @@ scale, and codemode's saved file stays the original. Every other image reaches t
 
 `ssh` runs one command on another machine from the workspace, with the workspace's `~/.ssh` keys and config.
 `ssh({ host, command, timeout? })` passes the remote command to the remote shell exactly as written, so a script needs
-no second layer of quoting. It is `bash` running `ssh -n -o BatchMode=yes -- <host> <command>`, and it returns what
-`bash` returns. It never prompts: a password or an unknown host key fails with exit code 255. A secret goes into the
+no second layer of quoting. It is `bash` running `ssh -n -o BatchMode=yes -o StrictHostKeyChecking=accept-new --
+<host> <command>`, and it returns what `bash` returns. It never prompts: a password fails with exit code 255. A host
+seen for the first time is trusted and its key saved in the workspace's `~/.ssh/known_hosts`; a host whose key has
+changed since fails with exit code 255. A secret goes into the
 remote command as `${NAME}`. A bare `$NAME` of a secret is refused, since the remote shell does not have it; any other
 `$VAR` or `${VAR}` belongs to the remote shell.
 
@@ -247,7 +249,7 @@ How it works (`src/hindsight.ts`):
   none of ours. Use a model you can afford to call that much: a local one, ideally with prompt caching (llama.cpp,
   vLLM), so each call mostly reads the new turn. A conversation larger than that model's context window is cut from
   its oldest turns; a turn that alone does not fit is not stored.
-- **Tools** for scripts: `hindsight_recall` (every kind of memory, not only observations), `hindsight_retain` (for
+- **Tools** for scripts: `hindsight_recall` (observations, as the recall for each message), `hindsight_retain` (for
   what is learned outside the conversation) and `hindsight_reflect`, listed in the codemode catalog.
 
 What Hindsight does with it (the model it calls to extract facts, the embedding model, its database) is your

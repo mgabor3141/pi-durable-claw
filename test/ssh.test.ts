@@ -19,7 +19,7 @@ const argv = (line: string) =>
 describe("the ssh command line", () => {
 	it("passes the host and the remote command as one argument each, exactly as given", () => {
 		const command = `cd /srv && grep -c "it's" 'a b' | awk '{print $1}'; echo "$HOME" \`date\` 80 \\n; exit 3`;
-		expect(argv(sshCommandLine("deploy@web-1", command))).toEqual(["-n", "-o", "BatchMode=yes", "--", "deploy@web-1", command]);
+		expect(argv(sshCommandLine("deploy@web-1", command))).toEqual(["-n", "-o", "BatchMode=yes", "-o", "StrictHostKeyChecking=accept-new", "--", "deploy@web-1", command]);
 		expect(argv(sshCommandLine("ssh://me@host:2222", "uptime")).slice(-2)).toEqual(["ssh://me@host:2222", "uptime"]);
 	});
 
@@ -50,7 +50,7 @@ describe("the ssh command line", () => {
 				structuredOutput: { output: string; exitCode: number };
 				isError?: boolean;
 			};
-			expect(result.structuredOutput).toEqual({ output: "<-n>\n<-o>\n<BatchMode=yes>\n<-->\n<web-1>\n<echo \"it's $HOME\">\n", truncated: false, exitCode: 7 });
+			expect(result.structuredOutput).toEqual({ output: "<-n>\n<-o>\n<BatchMode=yes>\n<-o>\n<StrictHostKeyChecking=accept-new>\n<-->\n<web-1>\n<echo \"it's $HOME\">\n", truncated: false, exitCode: 7 });
 			expect(result.isError).toBe(true);
 		} finally {
 			process.env.PATH = path;
