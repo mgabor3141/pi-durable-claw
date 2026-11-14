@@ -169,8 +169,9 @@ are capped at 50 MiB.
 ## Inline HTML
 
 The agent can show a finished page (a chart, a diagram, a mockup) inline in its T3 thread, above its reply: T3's
-`html_render`, from codemode. T3's rules apply: the page uses T3's theme variables, has no viewport-height units, and
-local images given as absolute paths are inlined. The page is kept in `/home/agent/attachments/` and shown in T3's
+`html_render`, from codemode. It takes the page inline (`html`) or as the absolute `path` of an `.html` file in the
+workspace. T3's rules apply: the page uses T3's theme variables, has no viewport-height units, and local images given
+as absolute paths are inlined. The page is kept in `/home/agent/attachments/` and shown in T3's
 sandboxed frame. With the browser configured, `html_preview` renders a page first and returns a screenshot, its height
 and its console, and published pages are measured for phones and wide windows. The codemode catalog lists
 `html_render`; when to use it is in its description.
@@ -336,8 +337,9 @@ remote access on for the first time.
 ## Secrets
 
 The harness keeps named secrets in `data/harness/secrets.json` (owner-only, outside `durable.db`). The agent asks for
-one with `request_secret`: T3 shows a private card in the thread, the value you enter is saved under the name the agent
-chose (`GITHUB_TOKEN`), and it never enters the chat. Scripts can also `list`, `set` (a value the agent already has) and
+one with `request_secret`: T3 shows a private card in the thread (with a link to the page the value comes from, when
+the agent gives one), the value you enter is saved under the name the agent chose (`GITHUB_TOKEN`), and it never
+enters the chat. Scripts can also `list`, `set` (a value the agent already has) and
 `delete` secrets with the `secrets` tool.
 
 The agent uses a secret by writing `${NAME}` where the value goes: tool arguments, MCP config, browser form
