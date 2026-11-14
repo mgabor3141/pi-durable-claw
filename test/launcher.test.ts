@@ -9,7 +9,7 @@ import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { expect, it, onTestFinished } from "vitest";
-import { archiveCommit, describe, install, type LauncherConfig, nodeIsEnough, readState, rollback, supervise, update } from "../launcher/launcher.ts";
+import { archiveCommit, check, describe, install, type LauncherConfig, nodeIsEnough, readState, rollback, stage, supervise, update } from "../launcher/launcher.ts";
 
 /** A harness that serves, or one that changes the data and exits before it serves. Each writes what it was started with. */
 const HOST = (name: string, behaviour: "serves" | "breaks") => `
@@ -19,6 +19,7 @@ import { join } from "node:path";
 const root = process.argv[process.argv.indexOf("--root") + 1];
 // Beside the data dir, not in it: the data is put back when a version is undone.
 appendFileSync(join(root, "..", "starts.log"), ${JSON.stringify(name)} + " " + process.argv.slice(2).join(" ") + "\\n");
+writeFileSync(join(root, "..", "launcher-command.json"), process.env.CLAW_LAUNCHER ?? "none");
 if (${JSON.stringify(behaviour)} === "breaks") {
 	writeFileSync(join(root, "durable.db"), "migrated by ${name}");
 	process.exit(3);
@@ -116,13 +117,20 @@ it("the first start installs the newest version and runs it; an update restarts 
 	expect(describe(t.config())).toContain(`running: ${id} (latest, commit ${one})`);
 	expect(await update(t.config(), undefined)).toBe(`already at version ${id} (latest): nothing to do`);
 
+	// The harness is told how to run this launcher, and can ask what is newest without installing anything.
+	const command = JSON.parse(readFileSync(join(t.root, "..", "launcher-command.json"), "utf8")) as string[];
+	expect(command.slice(1)).toEqual([expect.stringMatching(/launcher\.ts$/), "--app", t.app, "--root", t.root, "--listen", "127.0.0.1", "--"]);
+	expect(await check(t.config())).toEqual({ current: id, latest: id, undone: null });
+
 	// A newer commit on main: installed beside the first, and run after the restart `claw update` asks for.
 	const two = t.publish("two", "serves");
+	expect(await check(t.config())).toEqual({ current: id, latest: two.slice(0, 12), undone: null });
+	expect(readdirSync(join(t.app, "versions")), "a check installs nothing").toEqual([id]);
 	expect(await update(t.config(), undefined)).toContain(`version ${two.slice(0, 12)} is installed`);
 	expect(readState(t.app).pending).toBe(two.slice(0, 12));
 	t.signals.emit("SIGHUP");
 	await t.until("the second version to serve", () => readState(t.app).current === two.slice(0, 12) && !readState(t.app).unproven);
-	expect(readState(t.app)).toEqual({ current: two.slice(0, 12), previous: id, pending: null, unproven: false });
+	expect(readState(t.app)).toEqual({ current: two.slice(0, 12), previous: id, pending: null, unproven: false, undone: null });
 	expect(t.starts().map((line) => line.split(" ")[0])).toEqual(["one", "two"]);
 	expect(readFileSync(join(t.app, "data-before-update", "durable.db"), "utf8")).toBe("conversations");
 	expect(readdirSync(join(t.app, "versions")).sort()).toEqual([id, two.slice(0, 12)].sort());
@@ -154,9 +162,11 @@ it("a version that exits before it serves is undone: the one before runs again, 
 	t.signals.emit("SIGHUP");
 	await t.until("the launcher to go back", () => t.starts().length === 3);
 	expect(t.starts().map((line) => line.split(" ")[0])).toEqual(["one", "bad", "one"]);
-	expect(readState(t.app)).toEqual({ current: one.slice(0, 12), previous: null, pending: null, unproven: false });
+	expect(readState(t.app)).toMatchObject({ current: one.slice(0, 12), previous: null, pending: null, unproven: false });
 	expect(readFileSync(join(t.root, "durable.db"), "utf8"), "what the bad version wrote is gone").toBe("conversations");
 	expect(t.log.join("\n")).toContain(`version ${bad.slice(0, 12)} exited (3) before it served: going back to version ${one.slice(0, 12)}`);
+	// What the harness then tells T3: the version is still the newest, and it was tried.
+	expect(await check(t.config())).toMatchObject({ current: one.slice(0, 12), latest: bad.slice(0, 12), undone: { id: bad.slice(0, 12), code: 3 } });
 	for (let tries = 0; !(await t.serving()); tries++) {
 		if (tries > 200) throw new Error("the version before never served again");
 		await new Promise((resolve) => setTimeout(resolve, 50));
@@ -175,6 +185,9 @@ it("CLAW_VERSION names the version to run: installed at a start when another run
 	await t.until("the pinned commit to start", () => t.starts().length === 1);
 	expect(readState(t.app).current).toBe(one.slice(0, 12));
 	await expect(update(t.config(one), "next")).rejects.toThrow(`CLAW_VERSION is ${one}`);
+	// A pinned commit has nothing newer; installing "the newest" is the pin itself.
+	expect(await check(t.config(one))).toMatchObject({ current: one.slice(0, 12), latest: one.slice(0, 12) });
+	expect(await stage(t.config(one), undefined)).toMatchObject({ waits: false, installed: { id: one.slice(0, 12) } });
 	expect(() => rollback(t.config(one))).toThrow(`CLAW_VERSION is ${one}`);
 	t.signals.emit("SIGTERM");
 	await running;

@@ -9,6 +9,13 @@
 //   claw version            what is installed
 //   claw <anything else>    the harness's own commands (`claw pair`, `claw remote ...`)
 //
+// And for the harness itself, which offers the update in T3 (it is given this command line in CLAW_LAUNCHER; each
+// answers one line of JSON, last):
+//
+//   claw check              the version that runs and the newest there is
+//   claw install            install the newest version; the restart is asked for separately
+//   claw restart            restart the harness, into a version that waits if one does
+//
 // A version is a git ref of the harness's repository: a branch, a tag or a commit. `CLAW_VERSION` names the one to
 // run; unset (or `latest`) is the main branch as it was when it was installed, moved only by `claw update`.
 // `file:/path` is a directory instead (a checkout mounted into the container, for development and CI), installed
@@ -60,6 +67,8 @@ interface State {
 	pending: string | null;
 	/** The current version has not served yet: if it exits first, the launcher goes back. */
 	unproven: boolean;
+	/** The last version that was undone because it exited before it served; forgotten when a later switch works. */
+	undone?: { id: string; at: string; code: number } | null;
 }
 
 export interface VersionInfo {
@@ -296,7 +305,7 @@ async function prepare(config: LauncherConfig, refused: string | undefined): Pro
 	}
 	if (state.pending !== null && versionInfo(config.app, state.pending) !== undefined) {
 		backUpData(config);
-		state = { current: state.pending, previous: state.current, pending: null, unproven: true };
+		state = { current: state.pending, previous: state.current, pending: null, unproven: true, ...(state.undone == null ? {} : { undone: state.undone }) };
 		config.log(`switching to version ${state.current} (was ${state.previous})`);
 	} else {
 		state.pending = null;
@@ -356,7 +365,8 @@ export async function supervise(config: LauncherConfig): Promise<number> {
 			const state = await prepare(config, refused);
 			const id = state.current!;
 			config.log(`starting the harness, version ${id}`);
-			const harness = spawn(process.execPath, harnessCommand(config, id, []), { stdio: "inherit" });
+			// The harness is told how to reach this launcher, for the update it offers in T3.
+			const harness = spawn(process.execPath, harnessCommand(config, id, []), { stdio: "inherit", env: { ...process.env, CLAW_LAUNCHER: JSON.stringify(launcherCommand(config)) } });
 			child = harness;
 			if (restarting || stopping) harness.kill("SIGTERM");
 			// A version is proven once it serves; until then its exit means it does not work here.
@@ -367,7 +377,7 @@ export async function supervise(config: LauncherConfig): Promise<number> {
 							if (!up || proven || readState(config.app).current !== id) return;
 							proven = true;
 							clearInterval(watch);
-							writeState(config.app, { ...readState(config.app), unproven: false });
+							writeState(config.app, { ...readState(config.app), unproven: false, undone: null });
 							config.log(`version ${id} serves`);
 						});
 					}, 1_000)
@@ -382,7 +392,7 @@ export async function supervise(config: LauncherConfig): Promise<number> {
 				config.log(`version ${id} exited (${code}) before it served: going back to version ${after.previous}`);
 				restoreData(config);
 				refused = versionInfo(config.app, id)?.spec;
-				writeState(config.app, { current: after.previous, previous: null, pending: null, unproven: false });
+				writeState(config.app, { current: after.previous, previous: null, pending: null, unproven: false, undone: { id, at: new Date().toISOString(), code } });
 				continue;
 			}
 			return code;
@@ -404,7 +414,8 @@ function signalLauncher(app: string): boolean {
 	return true;
 }
 
-export async function update(config: LauncherConfig, asked: string | undefined): Promise<string> {
+/** Install the version asked for (the pinned one, or the newest) and leave it waiting for a restart. */
+export async function stage(config: LauncherConfig, asked: string | undefined): Promise<{ readonly installed: VersionInfo; readonly spec: string; readonly waits: boolean }> {
 	const pinned = specOf(config.pin);
 	const spec = specOf(asked ?? config.pin);
 	if (pinned !== "latest" && spec !== pinned) {
@@ -412,9 +423,41 @@ export async function update(config: LauncherConfig, asked: string | undefined):
 	}
 	const state = readState(config.app);
 	const installed = await install(config, spec);
-	if (installed.id === state.current) return `already at version ${installed.id}${installed.commit === undefined ? "" : ` (${spec})`}: nothing to do`;
-	writeState(config.app, { ...readState(config.app), pending: installed.id });
+	const waits = installed.id !== state.current;
+	if (waits) writeState(config.app, { ...readState(config.app), pending: installed.id });
+	return { installed, spec, waits };
+}
+
+export async function update(config: LauncherConfig, asked: string | undefined): Promise<string> {
+	const { installed, spec, waits } = await stage(config, asked);
+	if (!waits) return `already at version ${installed.id}${installed.commit === undefined ? "" : ` (${spec})`}: nothing to do`;
 	return signalLauncher(config.app) ? `version ${installed.id} is installed: the harness is restarting into it` : `version ${installed.id} is installed: the harness runs it from its next start`;
+}
+
+/**
+ * The version that runs and the newest the harness would move to: the pinned branch's head, or the main branch's.
+ * A directory has no newest. Nothing is installed: a ref's archive says which commit it is.
+ */
+export async function check(config: LauncherConfig): Promise<{ current: string | null; latest: string | null; undone: State["undone"] }> {
+	const state = readState(config.app);
+	const spec = specOf(config.pin);
+	let latest: string | null = null;
+	if (!isLocal(spec)) {
+		mkdirSync(join(config.app, "versions"), { recursive: true });
+		const archive = join(config.app, "versions", `check-${process.pid}.tar.gz.tmp`);
+		try {
+			await (config.download ?? downloadFromGitHub)(spec === "latest" ? LATEST_REF : spec, archive);
+			latest = archiveCommit(readFileSync(archive))?.slice(0, 12) ?? null;
+		} finally {
+			rmSync(archive, { force: true });
+		}
+	}
+	return { current: state.current, latest, undone: state.undone ?? null };
+}
+
+/** This launcher's command line, for the harness: `[...command, "check"]`. */
+function launcherCommand(config: LauncherConfig): string[] {
+	return [process.execPath, import.meta.filename, "--app", config.app, "--root", config.root, "--listen", config.listen, ...(config.pubkeyDir === undefined ? [] : ["--pubkey-dir", config.pubkeyDir]), "--"];
 }
 
 export function rollback(config: LauncherConfig): string {
@@ -458,6 +501,9 @@ async function main(): Promise<number> {
 	if (command === "update") return console.log(await update(config, argument)), 0;
 	if (command === "rollback") return console.log(rollback(config)), 0;
 	if (command === "version") return console.log(describe(config)), 0;
+	if (command === "check") return console.log(JSON.stringify(await check(config))), 0;
+	if (command === "install") return console.log(JSON.stringify({ version: (await stage(config, undefined)).installed.id })), 0;
+	if (command === "restart") return console.log(JSON.stringify({ restarting: signalLauncher(config.app) })), 0;
 	// The harness's own commands, in the version that runs.
 	const state = readState(config.app);
 	if (versionInfo(config.app, state.current) === undefined) throw new LauncherError("the harness is not installed yet: its first start installs it (docker compose logs -f harness)");

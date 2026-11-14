@@ -63,6 +63,9 @@ echo "the harness is up: $(curl -fsS "$BASE/.well-known/t3/environment")"
 installed="$(compose exec -T harness claw version)"
 echo "$installed"
 grep -q '^running: local-.* (file:/src)' <<<"$installed" || { echo "FAIL: the harness that runs is not this checkout"; exit 1; }
+# What the harness asks the launcher for T3's Update button: a checkout has no newer version.
+checked="$(compose exec -T harness claw check)"
+grep -q '"current":"local-[0-9]*","latest":null' <<<"$checked" || { echo "FAIL: claw check answered $checked"; exit 1; }
 
 echo "== pair"
 CODE="$(compose exec -T harness claw pair | sed -n 's/^Pairing code (single use): //p' | head -1)"
@@ -106,6 +109,16 @@ if [ -n "${SMOKE_VERSION:-}" ]; then
   if compose exec -T harness claw rollback 2>/dev/null; then echo "FAIL: claw rollback went against CLAW_VERSION"; exit 1; fi
   paired="$(compose exec -T harness claw pair)"
   grep -q '^Pairing code' <<<"$paired" || { echo "FAIL: claw pair does not work in the downloaded version"; exit 1; }
+  checked="$(compose exec -T harness claw check)"
+  grep -q "\"current\":\"$short\",\"latest\":\"$short\"" <<<"$checked" || { echo "FAIL: claw check answered $checked"; exit 1; }
+
+  echo "== claw restart: the launcher restarts the harness in place"
+  restarted="$(compose exec -T harness claw restart)"
+  [ "$restarted" = '{"restarting":true}' ] || { echo "FAIL: claw restart answered $restarted"; exit 1; }
+  sleep 3
+  wait_up 120
+  starts="$(compose logs --no-color harness | grep -c "claw: starting the harness, version $short")"
+  [ "$starts" -ge 2 ] || { echo "FAIL: the harness was started $starts time(s), not again"; exit 1; }
 fi
 
 echo

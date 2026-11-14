@@ -74,13 +74,19 @@ workspace).
 
 ### Update
 
-`docker compose exec harness claw update` installs the newest version beside the one that runs, then restarts the
-harness into it: it is down while its data is copied and the new version starts. Runs in flight resume, as after any
-restart. Nothing updates on its own.
+In T3: Settings → Providers shows the harness's version on the `pi` provider, and "Update available" with **Update
+now** when there is a newer one (the sidebar's update button and "Update all" offer it too), in the web app and the
+desktop app. The harness looks for a newer version when it starts, every hour, and when you press Refresh there.
+From a shell, `docker compose exec harness claw update` does the same.
+
+Either way the newest version is installed beside the one that runs, then the harness restarts into it: it is down
+while its data is copied and the new version starts, and T3 reconnects. Runs in flight resume, as after any restart.
+Nothing updates on its own.
 
 - `claw version` says what runs, what ran before it, and where each came from.
 - Before a new version starts, the harness's data is copied as it was. A version that exits before it has served
-  once is undone on the spot: the data is put back and the version before runs again; the log says so.
+  once is undone on the spot: the data is put back and the version before runs again. The log says so, and so does
+  T3 where it offers that version again.
 - `claw rollback` restarts into the version before. The data stays as it is; the copy from before the update is in
   the `app` volume (`/app/data-before-update` in the container), for a version that cannot read what a newer one
   wrote.

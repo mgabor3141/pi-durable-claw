@@ -19,6 +19,7 @@ import type { Registry } from "@earendil-works/pi-durable";
 import { ModelRuntime } from "@earendil-works/pi-coding-agent";
 import { openHarness, RETRY_POLICY, type HarnessLate } from "./harness.ts";
 import { listedModels } from "./listed-models.ts";
+import { launcherUpdates } from "./updates.ts";
 import { imageProcessor } from "./images.ts";
 import { McpManager } from "./mcp/manager.ts";
 import { workspaceSource } from "./mcp/config.ts";
@@ -190,6 +191,7 @@ async function main(): Promise<void> {
 	else await memory.check();
 	// Filled in once the bridge is attached (below); the harness's own tools read it at each call.
 	const late: HarnessLate = {};
+	const updates = launcherUpdates(process.env, log);
 	const NONE_HIDDEN: ReadonlySet<string> = new Set();
 	const harness = await openHarness({
 		storagePath: join(root, "durable.db"),
@@ -245,6 +247,8 @@ async function main(): Promise<void> {
 			titleThread: titleThread(harness, models),
 			// T3 shows the requests that failed in a row as one row that counts: "Retrying provider (3/64)".
 			maxRetries: RETRY_POLICY.maxRetries,
+			// Under the image's launcher, T3 shows this harness's version on the pi provider and offers its update.
+			...(updates === undefined ? {} : { updates }),
 			// T3 learns the tailnet URL and the SSH host its editors open paths on ("Open in VS Code").
 			remoteAccess: tailnet,
 			// Each message arrives with the memories recalled for it, stored with it; T3 shows them as a hindsight_recall row.
