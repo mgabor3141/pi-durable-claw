@@ -17,7 +17,8 @@ import { Hindsight, harnessMemoryHost, hindsightConfig } from "./hindsight.ts";
 import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
 import type { Registry } from "@earendil-works/pi-durable";
 import { ModelRuntime } from "@earendil-works/pi-coding-agent";
-import { openHarness, type HarnessLate } from "./harness.ts";
+import { openHarness, RETRY_POLICY, type HarnessLate } from "./harness.ts";
+import { listedModels } from "./listed-models.ts";
 import { imageProcessor } from "./images.ts";
 import { McpManager } from "./mcp/manager.ts";
 import { workspaceSource } from "./mcp/config.ts";
@@ -189,13 +190,15 @@ async function main(): Promise<void> {
 	else await memory.check();
 	// Filled in once the bridge is attached (below); the harness's own tools read it at each call.
 	const late: HarnessLate = {};
+	const NONE_HIDDEN: ReadonlySet<string> = new Set();
 	const harness = await openHarness({
 		storagePath: join(root, "durable.db"),
 		images: await imageProcessor(),
 		browser: browserlessUrl !== "",
 		web,
 		workspace,
-		models,
+		// A script's `models.*` lists what T3's model picker lists; the bridge below keeps the whole catalog.
+		models: listedModels(models, () => late.hiddenModels?.() ?? NONE_HIDDEN),
 		mcpNamespaces: mcp.namespaces(),
 		late,
 		secrets: { store: secrets, log },
@@ -240,6 +243,8 @@ async function main(): Promise<void> {
 			label: LABEL,
 			routes: [{ method: "GET", path: OAUTH_CALLBACK_PATH, handle: (request) => oauthCallback(mcp, request) }],
 			titleThread: titleThread(harness, models),
+			// T3 shows the requests that failed in a row as one row that counts: "Retrying provider (3/64)".
+			maxRetries: RETRY_POLICY.maxRetries,
 			// T3 learns the tailnet URL and the SSH host its editors open paths on ("Open in VS Code").
 			remoteAccess: tailnet,
 			// Each message arrives with the memories recalled for it, stored with it; T3 shows them as a hindsight_recall row.
@@ -270,6 +275,7 @@ async function main(): Promise<void> {
 	// What the harness's own tools need from the bridge: `summarize` generates with T3's text-generation model when it names
 	// one of ours (titles get it per request), and `browser_open` opens T3's preview tabs.
 	late.textGenerationModel = () => t3.textGenerationModel();
+	late.hiddenModels = () => t3.hiddenModels();
 	const previewBrowser = t3.previewBrowser;
 	if (previewBrowser !== undefined) late.previewBrowser = (conversationId, url) => previewBrowser.open(conversationId, url);
 

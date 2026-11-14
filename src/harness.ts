@@ -43,6 +43,8 @@ export function codemodeSandbox(): CodemodeSandbox {
 export interface HarnessLate {
 	previewBrowser?: SharedBrowserProvider;
 	textGenerationModel?: () => TextGenerationModel | undefined;
+	/** The models hidden from T3's model picker, as `provider/model` slugs: left out of the lists a script sees. */
+	hiddenModels?: () => ReadonlySet<string>;
 }
 
 export interface HarnessExtensionOptions {
@@ -118,6 +120,13 @@ export interface HarnessConfig extends HarnessExtensionOptions {
 }
 
 /**
+ * A model request that failed for a passing reason (out of usage, overloaded, the network) is sent again: after 2
+ * seconds, then twice as long each time up to 5 minutes, 64 times, which is 4 hours 48 minutes in all, about the length
+ * of a subscription's usage window. The wait is durable: it survives a restart, and Stop ends it.
+ */
+export const RETRY_POLICY = { enabled: true, maxRetries: 64, baseDelayMs: 2_000, maxAgentDelayMs: 300_000 } as const;
+
+/**
  * A pi-durable Harness whose only model-facing tool is upstream's `codemode`, whose environment is the workspace over
  * SSH (pi-env), and whose scripts reach the workspace tools as nested calls.
  */
@@ -139,7 +148,7 @@ export async function openHarness(
 			// Every tool call's environment is the workspace container over SSH, starting where this conversation
 			// says it works: a project's root, a Scratch thread's own folder, or the home fallback.
 			env: (target) => workspaceEnv(options.workspace.connection, target.cwd ?? options.cwd ?? WORKSPACE_HOME),
-			settings: { toolExecution: "sequential" },
+			settings: { toolExecution: "sequential", retry: RETRY_POLICY },
 			conversationCreated: recordConversationStart(),
 		},
 		context,

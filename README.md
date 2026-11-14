@@ -151,6 +151,18 @@ structured summary. This harness uses pi's coding-agent summary prompt: a previo
 relevant files. Automatic thresholds and `/compact` come from pi-durable; the summary is stored
 as the durable `pi.compaction` entry and shown as a completed item in T3.
 
+## Failed requests
+
+A model request that fails for a passing reason (out of usage, a rate limit, an overloaded provider, the network) is
+sent again: after 2 seconds, then twice as long each time up to 5 minutes, 64 times. That is 4 hours 48 minutes in all,
+about the length of a subscription's usage window, and it is `RETRY_POLICY` in `src/harness.ts`. The wait is durable:
+it survives a restart, and Stop ends it.
+
+T3 shows the failures in a row as one row that counts ("Retrying provider (3/64)"), then "Provider recovered", or the
+error once the run has given up. A 429 is shown as T3's usage limit, with
+Resume in the composer after a run that gave up or was stopped. pi-durable still records each failed request in the
+conversation; the model is never sent them, so they cost no context and do not move the prompt cache.
+
 ## Prompt text
 
 All model-facing prompts and tool copy this harness authors — system prompts, user-prompt templates, XML wrappers,
@@ -378,6 +390,14 @@ T3's own thread tools are served to outside MCP clients at `<CLAW_PUBLIC_URL>/mc
 it opens T3's approval page, where you choose its access and approve with a pairing code (`claw pair`) or in one click
 from a signed-in browser. It then appears under Settings → Sharing & access, where it can be revoked. Every thread
 here runs at full access, so a client approved below that can only read.
+
+## The models an agent is listed
+
+A script can list models (`models.getAvailableOfType("chat")`) and name one for a thread it starts
+(`thread_prompt`'s `new.model`). The list is T3's model picker's: a model you hide there (Settings → Providers) is left
+out, so the agent picks among the models you work with. Only the list changes. A hidden model that is named outright
+still works, in a script and for a thread, and image and classifier models are all listed, since the picker has none.
+The list is read when a script asks, not written into the prompt, so hiding a model does not touch the prompt cache.
 
 ## Codemode limits
 
