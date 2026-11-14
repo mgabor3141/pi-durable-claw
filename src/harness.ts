@@ -121,10 +121,20 @@ export interface HarnessConfig extends HarnessExtensionOptions {
 
 /**
  * A model request that failed for a passing reason (out of usage, overloaded, the network) is sent again: after 2
- * seconds, then twice as long each time up to 5 minutes, 64 times, which is 4 hours 48 minutes in all, about the length
- * of a subscription's usage window. The wait is durable: it survives a restart, and Stop ends it.
+ * seconds, then twice as long each time up to 10 minutes, 64 times, which is 9 hours 27 minutes in all. The wait is
+ * durable: it survives a restart, and Stop ends it.
  */
-export const RETRY_POLICY = { enabled: true, maxRetries: 64, baseDelayMs: 2_000, maxAgentDelayMs: 300_000 } as const;
+export const RETRY_POLICY = { enabled: true, maxRetries: 64, baseDelayMs: 2_000, maxAgentDelayMs: 600_000 } as const;
+
+/**
+ * A provider that says when to come back (`retry-after` on a 429 or a 5xx) is taken at its word, however long: pi waits
+ * that long inside the request and sends it again, twice at most, before the request counts as failed for
+ * `RETRY_POLICY`. Both fields are needed. pi sends a request once unless `maxRetries` says otherwise, and without a
+ * second try it never reads what the provider asked for; and it refuses a wait over a minute unless `maxRetryDelayMs`
+ * is 0. This wait is pi's own, inside one request: Stop ends it, but the thread shows only that it is working, and
+ * a restart of the harness ends the wait and counts the request as failed.
+ */
+export const PROVIDER_RETRY = { maxRetries: 2, maxRetryDelayMs: 0 } as const;
 
 /**
  * A pi-durable Harness whose only model-facing tool is upstream's `codemode`, whose environment is the workspace over
@@ -148,7 +158,7 @@ export async function openHarness(
 			// Every tool call's environment is the workspace container over SSH, starting where this conversation
 			// says it works: a project's root, a Scratch thread's own folder, or the home fallback.
 			env: (target) => workspaceEnv(options.workspace.connection, target.cwd ?? options.cwd ?? WORKSPACE_HOME),
-			settings: { toolExecution: "sequential", retry: RETRY_POLICY },
+			settings: { toolExecution: "sequential", retry: RETRY_POLICY, stream: PROVIDER_RETRY },
 			conversationCreated: recordConversationStart(),
 		},
 		context,

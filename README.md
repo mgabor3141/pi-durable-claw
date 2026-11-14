@@ -154,9 +154,13 @@ as the durable `pi.compaction` entry and shown as a completed item in T3.
 ## Failed requests
 
 A model request that fails for a passing reason (out of usage, a rate limit, an overloaded provider, the network) is
-sent again: after 2 seconds, then twice as long each time up to 5 minutes, 64 times. That is 4 hours 48 minutes in all,
-about the length of a subscription's usage window, and it is `RETRY_POLICY` in `src/harness.ts`. The wait is durable:
-it survives a restart, and Stop ends it.
+sent again: after 2 seconds, then twice as long each time up to 10 minutes, 64 times. That is 9 hours 27 minutes in
+all, and it is `RETRY_POLICY` in `src/harness.ts`. The wait is durable: it survives a restart, and Stop ends it.
+
+A provider that says when to come back (`retry-after`) is taken at its word first, however long the wait: pi waits
+inside the request and sends it again, twice at most, before the request counts as failed for the retries above
+(`PROVIDER_RETRY`). During that wait the thread shows only that it is working; Stop ends it, and a restart of the
+harness ends the wait and counts the request as failed.
 
 T3 shows the failures in a row as one row that counts ("Retrying provider (3/64)"), then "Provider recovered", or the
 error once the run has given up. A 429 is shown as T3's usage limit, with
