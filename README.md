@@ -28,8 +28,10 @@ Requirements: a Linux server with Docker (Compose v2) and git, and a model provi
    example `{"anthropic":{"type":"api_key","key":"sk-..."}}`. If you use pi, you can copy yours from `~/.pi/agent/`,
    but prefer API keys: an OAuth login shared with another machine may be signed out on one of them when its token
    is refreshed. A `models.json` next to it adds custom providers.
-3. **Start:** `docker compose up -d` (the first build takes a few minutes). The app listens on `127.0.0.1:3775`. If it
-   is not up, `docker compose logs harness` says why; with no usable credentials the harness restarts in a loop.
+3. **Start:** `docker compose up -d`. The harness image holds no harness: at its first start it downloads the newest
+   version and installs it, which takes a few minutes (`docker compose logs -f harness` shows it). The app then
+   listens on `127.0.0.1:3775`. If it is not up, the log says why; with no usable credentials the harness restarts
+   in a loop.
 4. **Pair:** `docker compose exec harness claw pair` prints a link. Open it in a browser, or paste the
    code into T3's desktop app (Add computer). If you reach the server by another address, set `CLAW_PUBLIC_URL` so
    the link matches. Set `CLAW_LABEL` to name the T3 environment (default `claw`). T3 then shows a first-run wizard;
@@ -72,7 +74,27 @@ workspace).
 
 ### Update
 
-`git pull && docker compose up -d --build`. Your data is in `./data` and survives.
+`docker compose exec harness claw update` installs the newest version beside the one that runs, then restarts the
+harness into it: it is down while its data is copied and the new version starts. Runs in flight resume, as after any
+restart. Nothing updates on its own.
+
+- `claw version` says what runs, what ran before it, and where each came from.
+- Before a new version starts, the harness's data is copied as it was. A version that exits before it has served
+  once is undone on the spot: the data is put back and the version before runs again; the log says so.
+- `claw rollback` restarts into the version before. The data stays as it is; the copy from before the update is in
+  the `app` volume (`/app/data-before-update` in the container), for a version that cannot read what a newer one
+  wrote.
+- `CLAW_VERSION` in `.env` names the version to run instead: a branch, a tag or a commit of this repository. A
+  start with another version installed switches to it, and `claw update` then follows that branch. Unset, the
+  harness keeps the version it has until you run `claw update`.
+
+A version is a commit of this repository, downloaded from GitHub and installed with its own lockfile; the harness is
+not on npm yet. The installed versions live in the `app` volume, not in `./data`: removing the volume
+(`docker compose down --volumes`) only means the next start downloads the newest version again.
+
+The image itself (Node, the launcher, `claw-tailnet`, the workspace) changes rarely:
+`git pull && docker compose up -d --build` updates it, and a version that needs a newer Node says so instead of
+installing.
 
 ### Backup
 
@@ -442,6 +464,12 @@ See [docs/design.md](docs/design.md) for the decisions and why.
 
 ## Development
 
+To run the stack on a checkout instead of a downloaded version:
+`docker compose -f compose.yaml -f dev/compose.source.yaml up -d --build`. The launcher installs the checkout at
+every start of the harness, so `... restart harness` picks up a change. The launcher is `launcher/launcher.ts`: one
+file with no dependencies, since it runs before anything is installed. It asks three things of every version, which
+is all that ties an image to the versions it can run: `main` in `package.json`, `engines.node`, and a lockfile.
+
 `pnpm install`, `pnpm typecheck`, `pnpm test` (needs Docker; `CLAW_TEST_MODEL=provider/modelId` adds a real-model
 test). The T3 bridge, [pi-durable-t3](https://github.com/mgabor3141/pi-durable-t3), is not on npm yet: it installs
 from git at a pinned commit and builds on install (it fetches T3's contracts and web app), which `package.json`
@@ -453,9 +481,10 @@ version (`test/one-copy.test.ts` checks it). To try a bridge change, point the d
 for a local `pnpm test` it is not needed (a stand-in program covers the harness's side).
 
 CI ([`.github/workflows/ci.yml`](.github/workflows/ci.yml)) runs on `main`, `next` and pull requests: the typecheck
-and the tests, then `dev/image-smoke.sh`, which builds both images, starts the stack with a placeholder credential,
-pairs, and adds a project to see its folder appear in the workspace. The smoke needs a checkout with no `data/` or
-`.env`, so it does not run on a server in use.
+and the tests, then `dev/image-smoke.sh`, which builds both images, starts the stack on the checkout with a
+placeholder credential, pairs, and adds a project to see its folder appear in the workspace. On a push it then pins
+the pushed commit, so the launcher downloads it from GitHub and switches to it. The smoke needs a checkout with no
+`data/` or `.env`, so it does not run on a server in use.
 
 ## License
 

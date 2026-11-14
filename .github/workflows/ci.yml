@@ -31,10 +31,14 @@ jobs:
       - run: pnpm test
 
   # The images as compose runs them. The harness image's build also vets and tests tailnet/ (Go). Then the stack
-  # starts, pairs, and makes a folder in the workspace (dev/image-smoke.sh). No model is called.
+  # starts: the launcher installs this checkout as the harness, it pairs and makes a folder in the workspace, and on a
+  # push the stack restarts pinned to the pushed commit, which the launcher downloads from GitHub and switches to
+  # (dev/image-smoke.sh). No model is called.
   images:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v7
       - run: dev/image-smoke.sh
+        env:
+          SMOKE_VERSION: ${{ github.event_name == 'push' && github.sha || '' }}

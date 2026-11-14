@@ -1,0 +1,12 @@
+# Run the harness from this checkout instead of a downloaded version (development, and CI's image check):
+#
+#   docker compose -f compose.yaml -f dev/compose.source.yaml up -d --build
+#
+# The launcher copies the checkout (without node_modules, .git, data and .env) and installs it at every start, so a
+# restart of the harness picks up your changes: docker compose ... restart harness.
+services:
+  harness:
+    environment:
+      CLAW_VERSION: file:/src
+    volumes:
+      - .:/src:ro

@@ -1,11 +1,15 @@
 #!/bin/sh
-# The harness's command, also for pairing: `docker compose exec harness claw pair`. Started as root, it hands /data
-# (a bind mount Docker may have created as root) to the node user, then runs the host as node.
+# The image's command, and its command line: `docker compose exec harness claw pair`, `claw update`, `claw version`.
+# Started as root, it hands /data and /app (mounts Docker may have created as root) to the node user, then runs the
+# launcher as node.
 set -eu
 if [ "$(id -u)" = 0 ]; then
 	chown -R node:node /data
+	# Not its contents: node made them, and an installed version is tens of thousands of files.
+	chown node:node /app
 	exec setpriv --reuid=node --regid=node --init-groups "$0" "$@"
 fi
-# The image's wiring: its data dir, listening inside the container (compose publishes the port on 127.0.0.1 only), and
-# the volume the workspace reads the harness's public key from. Your settings come from .env.
-exec node /app/src/host.ts --root /data --listen 0.0.0.0 --pubkey-dir /pubkey "$@"
+# The image's wiring: where the harness is installed, its data dir, listening inside the container (compose publishes
+# the port on 127.0.0.1 only), and the volume the workspace reads the harness's public key from. Your settings come
+# from .env.
+exec node /opt/claw/launcher.ts --app /app --root /data --listen 0.0.0.0 --pubkey-dir /pubkey -- "$@"

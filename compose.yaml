@@ -16,6 +16,8 @@ services:
     volumes:
       - ./data/harness:/data
       - pubkey:/pubkey
+      # The installed harness (`claw version`): downloaded at the first start, moved by `claw update`.
+      - app:/app
 
   workspace:
     build: images/workspace
@@ -28,6 +30,8 @@ services:
       - pubkey:/pubkey:ro
     # sshd is not published; only the harness connects to it.
 
-# Everything worth keeping is under ./data. This volume only carries the harness's public key, rewritten at each start.
+# Everything worth keeping is under ./data. `pubkey` only carries the harness's public key, rewritten at each start,
+# and `app` the installed harness, which is downloaded again when the volume is gone.
 volumes:
   pubkey:
+  app:
