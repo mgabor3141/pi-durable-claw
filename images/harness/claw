@@ -12,4 +12,4 @@ fi
 # The image's wiring: where the harness is installed, its data dir, listening inside the container (compose publishes
 # the port on 127.0.0.1 only), and the volume the workspace reads the harness's public key from. Your settings come
 # from .env.
-exec node /opt/claw/launcher.ts --app /app --root /data --listen 0.0.0.0 --pubkey-dir /pubkey -- "$@"
+exec node /opt/claw/launcher.ts --app /app --root /data --listen "${CLAW_LISTEN:-0.0.0.0}" --pubkey-dir /pubkey -- "$@"
