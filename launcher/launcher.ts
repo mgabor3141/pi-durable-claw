@@ -142,12 +142,13 @@ async function run(command: string, args: readonly string[], options: { cwd?: st
 async function installWithPnpm(dir: string, config: LauncherConfig): Promise<void> {
 	// HOME is the user's own, whatever the process was started with (the image starts as root and drops to node): pnpm
 	// and git keep their files there.
-	const env = { ...process.env, HOME: userInfo().homedir, CI: "true", COREPACK_ENABLE_DOWNLOAD_PROMPT: "0" };
-	await run("corepack", ["pnpm", "install", "--frozen-lockfile", "--store-dir", join(config.app, "store")], { cwd: dir, env });
-	// The install recorded its store; prune takes no such option.
+	// The store is named in the environment, which every pnpm command reads: `prune` has no option for it, and with
+	// another store it would build the bridge again, without the tools.
+	const env = { ...process.env, HOME: userInfo().homedir, CI: "true", COREPACK_ENABLE_DOWNLOAD_PROMPT: "0", npm_config_store_dir: join(config.app, "store") };
+	await run("corepack", ["pnpm", "install", "--frozen-lockfile"], { cwd: dir, env });
 	await run("corepack", ["pnpm", "prune", "--prod"], { cwd: dir, env });
 	// What no installed version uses any more (the development tools, a removed version's packages) leaves the store.
-	await run("corepack", ["pnpm", "store", "prune", "--store-dir", join(config.app, "store")], { cwd: dir, env }).catch((error: unknown) =>
+	await run("corepack", ["pnpm", "store", "prune"], { cwd: dir, env }).catch((error: unknown) =>
 		config.log(`could not tidy pnpm's store (the install is fine): ${error instanceof Error ? error.message : String(error)}`),
 	);
 }
