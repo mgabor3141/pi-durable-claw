@@ -8,6 +8,9 @@ const MAX_OUTPUT = 4 * 1024 * 1024;
 
 type Check = { current: string | null; latest: string | null; undone: { id: string; at: string; code: number } | null };
 
+/** A version as T3 shows it: a commit by its first seven characters, as git abbreviates one. */
+const short = (id: string) => (/^[0-9a-f]{12,}$/.test(id) ? id.slice(0, 7) : id);
+
 /**
  * The harness's updates, for T3's Update button on the `pi` provider. The image's launcher (launcher/launcher.ts)
  * installs versions and restarts the harness; it gives the harness its own command line in `CLAW_LAUNCHER`, and
@@ -30,21 +33,23 @@ export function launcherUpdates(env: NodeJS.ProcessEnv, log: { warn(message: str
 	const answer = <T>(output: string): T => JSON.parse(output.trim().split("\n").at(-1) ?? "") as T;
 	return {
 		command: UPDATE_COMMAND,
+		// T3 shows the provider's version as "claw 680f25f, pi 1.5.2, t3 0.1.9".
+		name: "claw",
 		check: async ({ signal }) => {
 			const { current, latest, undone } = answer<Check>(await run("check", signal));
 			if (current === null) throw new Error("the launcher has no version installed");
 			return {
-				current,
-				...(latest === null ? {} : { latest }),
+				current: short(current),
+				...(latest === null ? {} : { latest: short(latest) }),
 				// A version that was tried and undone is still the newest: say so, where T3 says an update is available.
 				...(undone !== null && undone.id === latest
-					? { note: `Version ${undone.id} was installed on ${undone.at.slice(0, 10)}, exited before it served (code ${undone.code}), and was undone. Update tries it again.` }
+					? { note: `Version ${short(undone.id)} was installed on ${undone.at.slice(0, 10)}, exited before it served (code ${undone.code}), and was undone. Update tries it again.` }
 					: {}),
 			};
 		},
 		install: async () => {
 			const output = await run("install");
-			return { version: answer<{ version: string }>(output).version, output };
+			return { version: short(answer<{ version: string }>(output).version), output };
 		},
 		restart: () => void run("restart").catch((error: unknown) => log.warn("could not restart into the installed version", { error: error instanceof Error ? error.message : String(error) })),
 	};

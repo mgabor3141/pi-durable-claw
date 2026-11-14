@@ -38,9 +38,11 @@ it("outside the image there is no launcher, and nothing to offer", () => {
 it("asks the launcher what runs and what is newest, installs, and restarts", async () => {
 	const { updates, calls } = fakeLauncher({ current: "aaa111aaa111", latest: "bbb222bbb222", undone: null });
 	expect(updates.command).toBe("docker compose exec harness claw update");
-	expect(await updates.check({ signal: AbortSignal.timeout(10_000) })).toEqual({ current: "aaa111aaa111", latest: "bbb222bbb222" });
+	expect(updates.name).toBe("claw");
+	// T3 is told a commit as git abbreviates it; the launcher's own ids are longer.
+	expect(await updates.check({ signal: AbortSignal.timeout(10_000) })).toEqual({ current: "aaa111a", latest: "bbb222b" });
 	const installed = await updates.install();
-	expect(installed.version).toBe("bbb222bbb222");
+	expect(installed.version).toBe("bbb222b");
 	expect(installed.output, "what the install printed, for T3").toContain("Progress: resolved 189");
 	updates.restart();
 	for (let waited = 0; calls().length < 3 && waited < 5_000; waited += 50) await new Promise((resolve) => setTimeout(resolve, 50));
@@ -52,13 +54,13 @@ it("a directory has no newest; a version that was undone is said where T3 offers
 
 	const undone = fakeLauncher({ current: "aaa111aaa111", latest: "bbb222bbb222", undone: { id: "bbb222bbb222", at: "2026-11-14T10:00:00.000Z", code: 3 } });
 	expect(await undone.updates.check({ signal: AbortSignal.timeout(10_000) })).toEqual({
-		current: "aaa111aaa111",
-		latest: "bbb222bbb222",
-		note: "Version bbb222bbb222 was installed on 2026-11-14, exited before it served (code 3), and was undone. Update tries it again.",
+		current: "aaa111a",
+		latest: "bbb222b",
+		note: "Version bbb222b was installed on 2026-11-14, exited before it served (code 3), and was undone. Update tries it again.",
 	});
 	// An older failure says nothing about a newer version.
 	const moved = fakeLauncher({ current: "aaa111aaa111", latest: "ccc333ccc333", undone: { id: "bbb222bbb222", at: "2026-11-14T10:00:00.000Z", code: 3 } });
-	expect(await moved.updates.check({ signal: AbortSignal.timeout(10_000) })).toEqual({ current: "aaa111aaa111", latest: "ccc333ccc333" });
+	expect(await moved.updates.check({ signal: AbortSignal.timeout(10_000) })).toEqual({ current: "aaa111a", latest: "ccc333c" });
 
 	await expect(fakeLauncher({}, true).updates.install()).rejects.toThrow("version latest needs Node >=26.0.0, and this image has v24.3.0");
 });
