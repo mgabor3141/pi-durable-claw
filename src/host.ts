@@ -213,7 +213,7 @@ async function main(): Promise<void> {
 	});
 	// Memory reads conversations' model context (what a recall leaves out, what the memory step reads) and writes its
 	// notes with T3's text-generation model once the bridge is attached.
-	memory?.attach(harnessMemoryHost(harness, () => late.textGenerationModel?.()));
+	memory?.attach(harnessMemoryHost(harness, () => late.textGenerationModel?.(), models));
 	// Connect MCP servers before the T3 bridge accepts input, so the first prompt sees their tools.
 	await mcp.start();
 
@@ -253,6 +253,8 @@ async function main(): Promise<void> {
 			remoteAccess: tailnet,
 			// Each message arrives with the memories recalled for it, stored with it; T3 shows them as a hindsight_recall row.
 			...(memory === undefined ? {} : { messageContext: (request) => memory.recallFor(request) }),
+			// Memory follows an undo: the notes of the turns it takes back are removed, and a redo writes them again.
+			...(memory === undefined ? {} : { undo: { undone: (event) => memory.undone(event), redone: (event) => memory.redone(event) } }),
 			...(browserlessUrl === ""
 				? {}
 				: { preview: { cdpUrl: browserlessUrl, ...(process.env.BROWSERLESS_TOKEN?.trim() ? { token: process.env.BROWSERLESS_TOKEN.trim() } : {}), storageStatePath: join(stateDir, "browser-profile.json") } }),

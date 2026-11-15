@@ -295,6 +295,8 @@ How it works (`src/hindsight.ts`):
   none of ours. Use a model you can afford to call that much: a local one, ideally with prompt caching (llama.cpp,
   vLLM), so each call mostly reads the new turn. A conversation larger than that model's context window is cut from
   its oldest turns; a turn that alone does not fit is not stored.
+- **Undo**: the notes follow the conversation. An undo removes the documents of the turns it took back and a redo
+  writes them again; the command's answer says what was done ("Undo and redo" below).
 - **Tools** for scripts: `hindsight_recall` (observations, as the recall for each message), `hindsight_retain` (for
   what is learned outside the conversation) and `hindsight_reflect`, listed in the codemode catalog.
 
@@ -447,10 +449,25 @@ nothing is written to the conversation, and a restart of the harness forgets the
   your message; `/undo step 2` the last two. It stops at your message: going further is `/undo`.
 - `/redo` brings back what the last undo took, one undo at a time, until something new is written to the thread.
 
-Nothing is deleted: an undo moves the thread to a copy of the conversation that ends earlier, and a redo moves it back.
-What changes is what the model is sent. Files in the workspace, anything done outside the conversation, threads the
-agent started and memories already kept of those turns stay as they are. Stop a running turn first. After
-`/undo step` the thread waits for you: send a message to steer it, or `/continue`.
+Nothing of the conversation is deleted: an undo moves the thread to a copy that ends earlier, and a redo moves it
+back. What changes is what the model is sent. Files in the workspace, anything done outside the conversation and
+threads the agent started stay as they are. Stop a running turn first. After `/undo step` the thread waits for you:
+send a message to steer it, or `/continue`.
+
+Memory follows, and the answer says what happened to it. An undo (the command's or T3's Revert) removes from Hindsight
+the notes written from the turns it took back; a turn whose notes were not written yet gets none. A redo writes them
+again, with one more memory step for each turn. Details:
+
+- `/undo step` reaches into a turn, so that whole turn's notes go. They are written again when the turn goes on with
+  `/continue`; a new message instead starts a turn of its own, and the part that was kept is then in no notes.
+- Hindsight removes the facts it drew from a deleted document and builds the observations that rested on them again.
+  That happens in Hindsight, after the undo: a recall in the next moments can still bring one back.
+- Notes Hindsight is still working through when the undo comes are removed once it has finished; the answer says so.
+  A harness that stops meanwhile does not get to it.
+- What the agent saved itself with `hindsight_retain` stays, like anything else it did outside the conversation.
+- A thread forked from another has that thread's earlier turns in its context. Undoing them in the fork leaves their
+  notes: they are the other thread's turns.
+- When Hindsight cannot be reached the undo still happens, and the answer says the notes are left.
 
 ## Continue without a message
 
@@ -458,8 +475,10 @@ agent started and memories already kept of those turns stay as they are. Stop a 
 usage, say, once the retries are spent) or after `/undo step`. Nothing is written for the model to read, where "go on"
 sent as a message would stay in the context for good. The model chosen in the picker applies, so a run that failed on
 one model can be continued on another. Messages queued behind a stopped run stay queued and follow it. Refused while a
-turn runs and when the conversation ends with the agent's answer: there is nothing left to answer then. T3's own
-Resume button is unchanged: it sends "Continue where you left off." as a message.
+turn runs and when the conversation ends with the agent's answer: there is nothing left to answer then.
+
+T3's Resume button (in the composer after a run was stopped or ran out of usage) does the same. T3 sends "Continue
+where you left off." with it; here that text is not written, not sent to the model and not shown.
 
 ## Codemode limits
 
