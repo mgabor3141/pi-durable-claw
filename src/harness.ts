@@ -124,7 +124,9 @@ export interface HarnessConfig extends HarnessExtensionOptions {
  * seconds, then twice as long each time up to 10 minutes, 64 times, which is 9 hours 27 minutes in all. The wait is
  * durable: it survives a restart, and Stop ends it.
  */
-export const RETRY_POLICY = { enabled: true, maxRetries: 64, baseDelayMs: 2_000, maxAgentDelayMs: 600_000 } as const;
+// 64 attempts with the delay capped at five minutes: about five hours of coverage, so a five-hour rate-limit window
+// clears on its own while every attempt stays a task-level wait (visible in T3, and Stop ends it).
+export const RETRY_POLICY = { enabled: true, maxRetries: 64, baseDelayMs: 2_000, maxAgentDelayMs: 300_000 } as const;
 
 /**
  * A provider that says when to come back (`retry-after` on a 429 or a 5xx) is taken at its word for up to a minute:
@@ -135,7 +137,7 @@ export const RETRY_POLICY = { enabled: true, maxRetries: 64, baseDelayMs: 2_000,
  * showed only "Thinking" with no error or retry row. Failing it here lets `RETRY_POLICY` own the retries, which T3
  * shows as a retry row with the error and the next attempt.
  */
-export const PROVIDER_RETRY = { maxRetries: 2, maxRetryDelayMs: 60_000 } as const;
+export const PROVIDER_RETRY = { maxRetries: 3, maxRetryDelayMs: 60_000 } as const;
 
 /**
  * A pi-durable Harness whose only model-facing tool is upstream's `codemode`, whose environment is the workspace over
