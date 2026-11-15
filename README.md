@@ -183,13 +183,13 @@ as the durable `pi.compaction` entry and shown as a completed item in T3.
 ## Failed requests
 
 A model request that fails for a passing reason (out of usage, a rate limit, an overloaded provider, the network) is
-sent again: after 2 seconds, then twice as long each time up to 10 minutes, 64 times. That is 9 hours 27 minutes in
+sent again: after 2 seconds, then twice as long each time up to 5 minutes, 64 times. That is 4 hours 48 minutes in
 all, and it is `RETRY_POLICY` in `src/harness.ts`. The wait is durable: it survives a restart, and Stop ends it.
 
-A provider that says when to come back (`retry-after`) is taken at its word first, however long the wait: pi waits
-inside the request and sends it again, twice at most, before the request counts as failed for the retries above
-(`PROVIDER_RETRY`). During that wait the thread shows only that it is working; Stop ends it, and a restart of the
-harness ends the wait and counts the request as failed.
+A provider that says when to come back (`retry-after`) is taken at its word first, for up to a minute: pi waits
+inside the request and sends it again, three times at most, before the request counts as failed for the retries
+above (`PROVIDER_RETRY`). A longer wait is refused at once and left to those retries: an exhausted plan asks for
+days, and a wait inside a request shows only that the thread is working and is not ended by Stop.
 
 T3 shows the failures in a row as one row that counts ("Retrying provider (3/64)"), then "Provider recovered", or the
 error once the run has given up. A 429 is shown as T3's usage limit, with
@@ -431,6 +431,14 @@ A script can list models (`models.getAvailableOfType("chat")`) and name one for 
 out, so the agent picks among the models you work with. Only the list changes. A hidden model that is named outright
 still works, in a script and for a thread, and image and classifier models are all listed, since the picker has none.
 The list is read when a script asks, not written into the prompt, so hiding a model does not touch the prompt cache.
+
+## What fills the context
+
+`/context` in a thread answers with a short table: how full the model's context is, and what fills it (the system
+prompt by section, tool definitions, a compaction's summary, your messages, recalled memories, images, and the
+agent's replies, thinking, tool calls and tool results by tool). The total is the last request's real usage; the
+parts are estimated from their length and scaled to it. The harness answers it itself: nothing is sent to the model,
+nothing is written to the conversation, and a restart of the harness forgets the answer.
 
 ## Codemode limits
 

@@ -121,16 +121,15 @@ export interface HarnessConfig extends HarnessExtensionOptions {
 
 /**
  * A model request that failed for a passing reason (out of usage, overloaded, the network) is sent again: after 2
- * seconds, then twice as long each time up to 10 minutes, 64 times, which is 9 hours 27 minutes in all. The wait is
- * durable: it survives a restart, and Stop ends it.
+ * seconds, then twice as long each time up to 5 minutes, 64 times, which is 4 hours 48 minutes in all: about a
+ * five-hour rate-limit window, so one clears on its own. Every wait is the harness's own: durable (it survives a
+ * restart), shown in T3, and ended by Stop.
  */
-// 64 attempts with the delay capped at five minutes: about five hours of coverage, so a five-hour rate-limit window
-// clears on its own while every attempt stays a task-level wait (visible in T3, and Stop ends it).
 export const RETRY_POLICY = { enabled: true, maxRetries: 64, baseDelayMs: 2_000, maxAgentDelayMs: 300_000 } as const;
 
 /**
  * A provider that says when to come back (`retry-after` on a 429 or a 5xx) is taken at its word for up to a minute:
- * pi waits that long inside the request and sends it again, twice at most, before the request counts as failed for
+ * pi waits that long inside the request and sends it again, three times at most, before the request counts as failed for
  * `RETRY_POLICY`. Both fields are needed. pi sends a request once unless `maxRetries` says otherwise, and without a
  * second try it never reads what the provider asked for. A longer delay is refused at once, which is what an exhausted
  * plan sends: a 7-day overage window answers 429 with `retry-after` near 5 days, and waiting it out inside the request
