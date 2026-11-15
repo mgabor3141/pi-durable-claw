@@ -198,6 +198,14 @@ own compaction does not. What follows from it:
   written to the conversation.
 - The harness logs each summary with its `cacheRead` and `cacheWrite`: nearly all of the input should be `cacheRead`.
 
+**Idle compaction.** With T3's setting "Compact idle threads" (Settings → Providers) on "Before the cache expires", a
+thread left alone with more than 200,000 tokens of context is compacted 2 minutes before its prompt cache expires:
+58 minutes after its last request for a thread you started, 3 minutes for an agent's. The summary is then still read
+from the cache, and the message you send when you come back starts from a small context instead of paying for the
+whole one again. T3's default, "When you return", does nothing here (its web app does that for Claude threads only).
+A thread that is snoozed, settled, archived, waiting for an answer or for child threads is left alone, and a restart
+of the harness skips the compactions that were waiting.
+
 A summary from a transcript is what is left when that cannot work: the context is already over the model's window (an
 overflow), the request fails, or the model writes no summary. It is pi's coding-agent summary prompt over the
 conversation as text: a previous summary is updated through `<previous-summary>`, a cut inside a user turn gets a
