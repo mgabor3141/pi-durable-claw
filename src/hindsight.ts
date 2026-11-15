@@ -320,15 +320,19 @@ export class Hindsight {
 		if (host === undefined) throw new Error("memory is not attached to the harness");
 		const view = await host.context(job.conversationId, job.last);
 		if (view === undefined) return;
-		const turn = view.entries.filter((entry) => entry.id >= job.first && entry.id <= job.last);
-		const start = turnStart(turn);
+		// A run continued without a message (`/continue` after an undone step) starts at the agent's answer: its turn
+		// starts at the message that answer is to, the last one before it.
+		const within = (from: number) => view.entries.filter((entry) => entry.id >= from && entry.id <= job.last);
+		const first = turnStart(within(job.first)) !== undefined ? job.first : view.entries.findLast((entry) => entry.id < job.first && turnStart([entry]) !== undefined)?.id;
+		if (first === undefined) return;
+		const start = turnStart(within(first));
 		if (start === undefined) return;
 		const ref = await host.notesModel(job.conversationId);
 		if (ref === undefined) throw new Error("no model to write memory notes with");
 		const model = job.models.getModel(ref.provider, ref.modelId);
 		if (model === undefined) throw new Error(`cannot resolve ${ref.provider}/${ref.modelId}`);
 		// Where the turn starts in the model context: the first message of its first entry.
-		const firstOfTurn = view.entries.findIndex((entry) => entry.id >= job.first);
+		const firstOfTurn = view.entries.findIndex((entry) => entry.id >= first);
 		const turnStartIndex = view.contributions.slice(0, firstOfTurn).reduce((sum, messages) => sum + messages.length, 0);
 		const copy = notesConversation(view.messages, model as Model<never>, Math.min(turnStartIndex, view.messages.length));
 		if (copy === undefined) throw new Error(`the turn does not fit ${ref.provider}/${ref.modelId}'s context window`);
@@ -345,13 +349,13 @@ export class Hindsight {
 		}
 		const notes = reply!.content.flatMap((block) => (block.type === "text" ? [block.text] : [])).join("").trim();
 		if (notes === "" || /^NOTHING\.?$/iu.test(notes)) {
-			this.#log.info("memory: nothing to remember from a turn", { conversationId: job.conversationId, first: job.first });
+			this.#log.info("memory: nothing to remember from a turn", { conversationId: job.conversationId, first });
 			return;
 		}
 		await this.#client.retain(this.config.bank, notes, {
-			documentId: `conversation-${job.conversationId}-entry-${job.first}`,
+			documentId: `conversation-${job.conversationId}-entry-${first}`,
 			context: MEMORY_NOTES_CONTEXT,
-			metadata: { conversationId: String(job.conversationId), firstEntry: String(job.first), lastEntry: String(job.last) },
+			metadata: { conversationId: String(job.conversationId), firstEntry: String(first), lastEntry: String(job.last) },
 			...(start.at === undefined ? {} : { timestamp: new Date(start.at) }),
 			async: true,
 			signal: signalWithin(RETAIN_TIMEOUT_MS, this.#closed.signal),

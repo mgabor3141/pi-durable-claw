@@ -210,13 +210,26 @@ it("after each turn, a copy of the conversation is asked what to remember; the n
 	await memory.settled();
 	expect(retains()).toHaveLength(1);
 
+	// A run continued without a message (`/continue` after an undone step) starts at the agent's answer: the turn that
+	// is remembered starts at the message it answers.
+	await conversation.submit({ type: "write", entry: { kind: "app.user", model: [{ role: "user", content: "Which tea?", timestamp: Date.now() }] } }, ctx);
+	const question = (await conversation.context(ctx)).entries.at(-1)!.id;
+	asked.length = 0;
+	faux.setResponses([fauxAssistantMessage("Green."), notes("The user asked which tea.")]);
+	await conversation.submit({ type: "continue" }, ctx);
+	await conversation.waitForIdle(ctx);
+	await memory.settled();
+	expect((asked[0]!.at(-1) as { content: { text: string }[] }).content[0]!.text).toContain('from the message that begins "Which tea?"');
+	expect(retains()).toHaveLength(2);
+	expect((retains()[1]!.body.items as { content: string; document_id: string }[])[0]).toMatchObject({ content: "The user asked which tea.", document_id: `conversation-${conversation.id}-entry-${question}` });
+
 	// A failure to store is logged, never fatal.
 	status = 500;
 	faux.setResponses([fauxAssistantMessage("Noted."), notes("The user moved to Vienna.")]);
 	await conversation.submit({ type: "input", content: "I moved." }, ctx);
 	await conversation.waitForIdle(ctx);
 	await memory.settled();
-	expect(retains()).toHaveLength(2);
+	expect(retains()).toHaveLength(3);
 	expect(warnings).toEqual(["memory: a turn was not stored"]);
 });
 

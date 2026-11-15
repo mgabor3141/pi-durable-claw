@@ -450,7 +450,16 @@ nothing is written to the conversation, and a restart of the harness forgets the
 Nothing is deleted: an undo moves the thread to a copy of the conversation that ends earlier, and a redo moves it back.
 What changes is what the model is sent. Files in the workspace, anything done outside the conversation, threads the
 agent started and memories already kept of those turns stay as they are. Stop a running turn first. After
-`/undo step` the thread waits for you: send a message to steer it or to tell it to go on.
+`/undo step` the thread waits for you: send a message to steer it, or `/continue`.
+
+## Continue without a message
+
+`/continue` lets the agent go on from where the conversation stands: after a Stop, after a run that failed (out of
+usage, say, once the retries are spent) or after `/undo step`. Nothing is written for the model to read, where "go on"
+sent as a message would stay in the context for good. The model chosen in the picker applies, so a run that failed on
+one model can be continued on another. Messages queued behind a stopped run stay queued and follow it. Refused while a
+turn runs and when the conversation ends with the agent's answer: there is nothing left to answer then. T3's own
+Resume button is unchanged: it sends "Continue where you left off." as a message.
 
 ## Codemode limits
 
