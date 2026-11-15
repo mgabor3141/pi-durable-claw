@@ -127,14 +127,15 @@ export interface HarnessConfig extends HarnessExtensionOptions {
 export const RETRY_POLICY = { enabled: true, maxRetries: 64, baseDelayMs: 2_000, maxAgentDelayMs: 600_000 } as const;
 
 /**
- * A provider that says when to come back (`retry-after` on a 429 or a 5xx) is taken at its word, however long: pi waits
- * that long inside the request and sends it again, twice at most, before the request counts as failed for
+ * A provider that says when to come back (`retry-after` on a 429 or a 5xx) is taken at its word for up to a minute:
+ * pi waits that long inside the request and sends it again, twice at most, before the request counts as failed for
  * `RETRY_POLICY`. Both fields are needed. pi sends a request once unless `maxRetries` says otherwise, and without a
- * second try it never reads what the provider asked for; and it refuses a wait over a minute unless `maxRetryDelayMs`
- * is 0. This wait is pi's own, inside one request: Stop ends it, but the thread shows only that it is working, and
- * a restart of the harness ends the wait and counts the request as failed.
+ * second try it never reads what the provider asked for. A longer delay is refused at once, which is what an exhausted
+ * plan sends: a 7-day overage window answers 429 with `retry-after` near 5 days, and waiting it out inside the request
+ * showed only "Thinking" with no error or retry row. Failing it here lets `RETRY_POLICY` own the retries, which T3
+ * shows as a retry row with the error and the next attempt.
  */
-export const PROVIDER_RETRY = { maxRetries: 2, maxRetryDelayMs: 0 } as const;
+export const PROVIDER_RETRY = { maxRetries: 2, maxRetryDelayMs: 60_000 } as const;
 
 /**
  * A pi-durable Harness whose only model-facing tool is upstream's `codemode`, whose environment is the workspace over
