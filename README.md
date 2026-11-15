@@ -174,11 +174,33 @@ be called at once and is found the same way. `src/fixed-prompt.ts` keeps the pro
 
 ## Compaction
 
-When a conversation reaches the model window, compaction keeps the recent tail and replaces the older prefix with a
-structured summary. This harness uses pi's coding-agent summary prompt: a previous summary is updated through
-`<previous-summary>`, a cut inside a user turn gets a separate turn-prefix summary, and Critical Context asks for the
-relevant files. Automatic thresholds and `/compact` come from pi-durable; the summary is stored
-as the durable `pi.compaction` entry and shown as a completed item in T3.
+When a conversation reaches the model window, compaction keeps the recent tail (about 20k tokens) and replaces the
+older prefix with a structured summary. Automatic thresholds, the cut and `/compact` come from pi-durable; the summary
+is stored as the durable `pi.compaction` entry and shown as a completed item in T3.
+
+The summary is asked for on the conversation itself. The request is the one the agent would send next (its system
+prompt, tools and history, through the same request hooks, with the same options) with one more message that says to
+stop and write the summary. A provider's prompt cache matches the start of a request byte for byte, so this request
+reads the whole conversation from the cache the agent's own requests wrote: a tenth of the input price on Anthropic,
+where a summarizer with its own prompt pays for every token again. Claude Code, opencode and Codex do the same; pi's
+own compaction does not. What follows from it:
+
+- The summary is written by the thread's model, at its thinking level, and covers the recent tail too, which is also
+  kept as it is.
+- The cache is only there while it lives (5 minutes after the last request by default), so a `/compact` on a thread
+  left alone for longer pays the full price once, as any next message would.
+- While the thread works (`/compact` during a run, or the automatic one that starts 48k tokens before the window is
+  full), the summary covers the conversation up to the answer whose tools are still running, which is where the
+  request in flight ended. The thread goes on meanwhile, and what it writes stays after the summary.
+- The tools stay in the request, since leaving them out would be another prefix. A model that calls one instead of
+  writing the summary gets "not run" for an answer and is asked again, three requests at most. None of that is
+  written to the conversation.
+- The harness logs each summary with its `cacheRead` and `cacheWrite`: nearly all of the input should be `cacheRead`.
+
+A summary from a transcript is what is left when that cannot work: the context is already over the model's window (an
+overflow), the request fails, or the model writes no summary. It is pi's coding-agent summary prompt over the
+conversation as text: a previous summary is updated through `<previous-summary>`, a cut inside a user turn gets a
+separate turn-prefix summary, and Critical Context asks for the relevant files. The log says why it was used.
 
 ## Failed requests
 

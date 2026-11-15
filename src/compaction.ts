@@ -1,11 +1,13 @@
 import type { Context } from "@earendil-works/chord/context";
-import type { AssistantMessage, Message, ModelThinkingLevel, SimpleStreamOptions, Usage } from "@earendil-works/pi-ai";
+import type { AssistantMessage, Message, ModelThinkingLevel, SimpleStreamOptions, ToolResultMessage, Usage } from "@earendil-works/pi-ai";
 import { serializeConversation } from "@earendil-works/pi-coding-agent";
 import {
+	COMPACTION_INLINE_PROMPT,
 	COMPACTION_NO_HISTORY,
 	COMPACTION_SUMMARY_PREFIX,
 	COMPACTION_SUMMARY_PROMPT,
 	COMPACTION_SYSTEM_PROMPT,
+	COMPACTION_TOOL_REFUSED,
 	COMPACTION_TURN_PREFIX_PROMPT,
 	COMPACTION_UPDATE_PROMPT,
 	compactionPrompt,
@@ -15,10 +17,14 @@ import {
 } from "./prompts.ts";
 import {
 	CompactionTask,
+	GenerationTask,
+	ProviderDoc,
 	UsageDoc,
 	defineExtension,
 	hook,
 	type CompactionHooks,
+	type ContextView,
+	type ConversationId,
 	type EntryId,
 	type EntryRecord,
 	type Extension,
@@ -26,16 +32,48 @@ import {
 } from "@earendil-works/pi-durable";
 
 /**
- * pi's compaction prompt, copied from the coding agent. The durable runtime already truncates tool results and omits
- * thinking before serializing; this hook adds the parts the coding agent has and durable does not: an update prompt
- * when a previous summary exists and a split-turn prefix summary. All prompt text lives in `prompts.ts`.
+ * The summary of a compaction, written two ways.
+ *
+ * On the conversation (`summarizeOnConversation`): the request the agent itself would send next (its system prompt,
+ * tools and history, through the same request hooks and with the same options) with one more user message that asks
+ * for the summary. A provider's prompt cache matches a request's start byte for byte, so this request reads the whole
+ * conversation from the cache the agent's own requests wrote, at a tenth of the input price on Anthropic, where a
+ * request of its own (another system prompt, the conversation as text) pays for every token again. Claude Code,
+ * opencode and Codex summarize this way. pi 1.5 carries the prompt and the tools in the transcript's system messages,
+ * so the conversation's context is the whole request; nothing of it is rebuilt here.
+ *
+ * From a transcript (`summarize`): pi's compaction prompt, copied from the coding agent, over the conversation
+ * serialized as text, with an update prompt when a previous summary exists and a split-turn prefix summary. It is what
+ * is left when the first way cannot work: the context is already too long for the model (an `overflow` compaction, or a
+ * request the provider refuses), or the model would not write a summary. All prompt text lives in `prompts.ts`.
  */
 
+/** A compaction hook's `api` is its task's runtime; these are the parts of it used here. */
 type CompactionRuntime = HookApi & {
-	agent(context: Context): Promise<{ model?: { provider: string; modelId: string }; thinkingLevel: ModelThinkingLevel }>;
+	readonly signal?: AbortSignal;
+	readonly settings: { readonly stream: SimpleStreamOptions & { readonly deferred?: unknown } };
+	agent(context: Context): Promise<{
+		model?: { provider: string; modelId: string };
+		thinkingLevel: ModelThinkingLevel;
+		extensions?: readonly Extension[];
+	}>;
 	entry(id: EntryId, context: Context): Promise<EntryRecord | undefined>;
+	context(conversationId: ConversationId, context: Context, options?: { readonly at?: EntryId }): Promise<ContextView>;
 	commit(change: (tx: any) => unknown, context: Context): Promise<void>;
 };
+
+/** What a summary on the conversation cost, for whoever wants to see that the cache was read. */
+export type SummaryUsage = { readonly conversationId: ConversationId; readonly model: string; readonly requests: number; readonly usage: Usage };
+
+export type CompactionOptions = {
+	/** Told of each summary written on the conversation: `usage.cacheRead` is what the provider's cache answered. */
+	readonly summarized?: (summary: SummaryUsage) => void;
+	/** Told why a summary on the conversation was given up for one from a transcript. */
+	readonly gaveUp?: (conversationId: ConversationId, why: string) => void;
+};
+
+/** A summary may take this many requests: the model is asked again after a tool call it made instead. */
+const SUMMARY_REQUESTS = 3;
 
 type SummaryRequest = {
 	readonly api: HookApi;
@@ -217,12 +255,136 @@ async function summarize(
 	return { summary };
 }
 
-export function compactionExtension(): Extension {
+/**
+ * Where the conversation can be asked for a summary: its newest entry, or, while tools still run, the entry before the
+ * answer that called them, since a request with a call and no result is refused. That is where the request in flight
+ * ended too, so its cache entry is read whole. `null`: nothing before the open call.
+ */
+export function askableEnd(view: ContextView): EntryId | undefined | null {
+	const open = new Map<string, number>();
+	view.contributions.forEach((messages, index) => {
+		for (const message of messages) {
+			if (message.role === "assistant") {
+				for (const block of message.content) if (block.type === "toolCall") open.set(block.id, index);
+			} else if (message.role === "toolResult") open.delete(message.toolCallId);
+		}
+	});
+	if (open.size === 0) return undefined;
+	const first = Math.min(...open.values());
+	return first === 0 ? null : view.entries[first - 1]!.id;
+}
+
+/** The messages as the agent's own request would send them: through every `beforeRequest` hook of its extensions. */
+async function requestMessages(runtime: CompactionRuntime, extensions: readonly Extension[], messages: readonly Message[], context: Context): Promise<readonly Message[]> {
+	let current = messages;
+	for (const extension of extensions) {
+		for (const installed of extension.hooks ?? []) {
+			if (installed.task !== GenerationTask.definition.name) continue;
+			const handlers = installed.handlers as { beforeRequest?: (request: { messages: readonly Message[] }, api: HookApi, context: Context) => unknown };
+			if (typeof handlers.beforeRequest !== "function") continue;
+			const replaced = (await handlers.beforeRequest({ messages: current }, runtime, context)) as { messages: readonly Message[] } | undefined;
+			if (replaced !== undefined) current = replaced.messages;
+		}
+	}
+	return current;
+}
+
+/** The provider request body through every `beforeProviderRequest` hook, as the agent's own request's is. */
+async function requestPayload(runtime: CompactionRuntime, extensions: readonly Extension[], model: SummaryRequest["model"], payload: unknown, context: Context): Promise<unknown> {
+	let current = payload;
+	for (const extension of extensions) {
+		for (const installed of extension.hooks ?? []) {
+			if (installed.task !== GenerationTask.definition.name) continue;
+			const handlers = installed.handlers as { beforeProviderRequest?: (request: { model: unknown; payload: unknown }, api: HookApi, context: Context) => unknown };
+			if (typeof handlers.beforeProviderRequest !== "function") continue;
+			const replaced = (await handlers.beforeProviderRequest({ model, payload: current }, runtime, context)) as { payload: unknown } | undefined;
+			if (replaced !== undefined) current = replaced.payload;
+		}
+	}
+	return current;
+}
+
+function refusal(call: { id: string; name: string }): ToolResultMessage {
+	return { role: "toolResult", toolCallId: call.id, toolName: call.name, content: [{ type: "text", text: COMPACTION_TOOL_REFUSED }], isError: true, timestamp: Date.now() };
+}
+
+/**
+ * The summary, asked for at the end of the conversation itself (see the top of this file). `undefined` when it cannot
+ * be had this way, with the reason told to `options.gaveUp`.
+ */
+async function summarizeOnConversation(
+	compaction: Parameters<CompactionHooks["beforeCompact"]>[0],
+	runtime: CompactionRuntime,
+	context: Context,
+	options: CompactionOptions,
+): Promise<string | undefined> {
+	const gaveUp = (why: string) => {
+		options.gaveUp?.(runtime.conversationId, why);
+		return undefined;
+	};
+	// The provider has refused this context as too long already; one more message on it is refused the same.
+	if (compaction.reason === "overflow") return gaveUp("the context is over the model's window");
+	if (typeof runtime.context !== "function" || runtime.settings === undefined) return gaveUp("the compaction task gives no access to the conversation's context");
+	const agent = await runtime.agent(context);
+	const model = agent.model === undefined ? undefined : runtime.models.getModel(agent.model.provider, agent.model.modelId);
+	if (model === undefined) return gaveUp("the conversation has no model");
+	const session = await runtime.snapshot(ProviderDoc, runtime.conversationId, context);
+	// Without a provider session nothing was requested yet, so there is no cache to read either.
+	if (session === undefined) return gaveUp("the conversation has sent no request yet");
+
+	let view = await runtime.context(runtime.conversationId, context);
+	const end = askableEnd(view);
+	if (end === null) return gaveUp("tools are running and nothing precedes them");
+	if (end !== undefined) view = await runtime.context(runtime.conversationId, context, { at: end });
+	if (!view.messages.some((message) => message.role !== "system")) return gaveUp("there is nothing to summarize");
+
+	const extensions = agent.extensions ?? [];
+	const prompt = withCompactionFocus(COMPACTION_INLINE_PROMPT, compaction.instructions);
+	const messages: Message[] = [...(await requestMessages(runtime, extensions, view.messages, context)), { role: "user", content: [{ type: "text", text: prompt }], timestamp: Date.now() }];
+	// The agent's own request options (pi-durable's generation task): another retention, thinking level or session
+	// would be another cache entry. Not `deferred`: a summary is waited for.
+	const { deferred: _deferred, ...stream } = runtime.settings.stream;
+	const request: SimpleStreamOptions = {
+		...stream,
+		signal: runtime.signal ?? context.abortSignal,
+		sessionId: session.sessionId,
+		...(agent.thinkingLevel === "off" ? {} : { reasoning: agent.thinkingLevel }),
+		onPayload: (payload: unknown) => requestPayload(runtime, extensions, model, payload, context),
+	} as SimpleStreamOptions;
+
+	const total: { usage?: Usage } = {};
+	for (let attempt = 1; attempt <= SUMMARY_REQUESTS; attempt++) {
+		const response = await runtime.models.completeSimple(model, { messages: [...messages] }, request);
+		if (response.stopReason === "error" || response.stopReason === "aborted") return gaveUp(`the request failed: ${response.errorMessage ?? response.stopReason}`);
+		await recordUsage({ api: runtime, context, model }, response);
+		if (total.usage === undefined) total.usage = JSON.parse(JSON.stringify(response.usage)) as Usage;
+		else addUsage(total.usage, response.usage);
+		const text = textOf(response);
+		if (text !== undefined) {
+			options.summarized?.({ conversationId: runtime.conversationId, model: `${model.provider}/${model.id}`, requests: attempt, usage: total.usage });
+			return text;
+		}
+		const calls = response.content.flatMap((block) => (block.type === "toolCall" ? [block] : []));
+		if (calls.length === 0) return gaveUp(response.stopReason === "length" ? "the summary did not fit the model's answer" : "the model wrote no summary");
+		// The model went on working. Its calls are answered, not run, and it is asked again.
+		messages.push(response, ...calls.map(refusal));
+	}
+	return gaveUp("the model called tools instead of writing a summary");
+}
+
+export function compactionExtension(options: CompactionOptions = {}): Extension {
 	return defineExtension({
 		name: "compaction",
 		hooks: [
 			hook(CompactionTask, {
 				beforeCompact: async (compaction, api, context) => {
+					try {
+						const summary = await summarizeOnConversation(compaction, api as CompactionRuntime, context, options);
+						if (summary !== undefined) return { summary };
+					} catch (error) {
+						if (context.abortSignal?.aborted === true) throw error;
+						options.gaveUp?.(api.conversationId, error instanceof Error ? error.message : String(error));
+					}
 					try {
 						return await summarize(compaction, api, context);
 					} catch {

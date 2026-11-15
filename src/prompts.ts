@@ -105,6 +105,24 @@ Create a concise checkpoint of the user's request and the progress shown above. 
 
 Only summarize information explicitly present above. Do not infer or recreate later messages.`;
 
+const COMPACTION_FORMAT = COMPACTION_SUMMARY_PROMPT.slice(COMPACTION_SUMMARY_PROMPT.indexOf("Use this EXACT format:"));
+
+/**
+ * The summary asked for at the end of the conversation itself (`compaction.ts`): the request is the agent's own, with
+ * its system prompt, tools and history, so the provider reads all of it from its prompt cache, and this is the one new
+ * message. It therefore has to say what the summarizer's own system prompt said before: stop working, write the summary.
+ */
+export const COMPACTION_INLINE_PROMPT = `Stop here. Do not continue the task, do not answer the messages above, and do not call any tool.
+
+This conversation is about to be compacted: what is above this message is replaced by the summary you write now, and the work goes on from that summary alone (only the most recent messages stay beside it). Write a structured context checkpoint summary of everything above, for the model that continues. If the conversation starts with an earlier summary, keep everything from it that still matters and bring it up to date: move finished items to "Done", update "Next Steps".
+
+Your whole answer is the summary and nothing else.
+
+${COMPACTION_FORMAT}`;
+
+/** A tool call the model made instead of writing the summary is answered with this, and it is asked once more. */
+export const COMPACTION_TOOL_REFUSED = "Not run: tools are not available while the conversation is being compacted. Write the summary now, as asked.";
+
 export const COMPACTION_SUMMARY_PREFIX =
 	"The conversation history before this point was compacted into the following summary:\n\n<summary>\n";
 

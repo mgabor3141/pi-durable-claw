@@ -204,6 +204,12 @@ async function main(): Promise<void> {
 		mcpNamespaces: mcp.namespaces(),
 		late,
 		secrets: { store: secrets, log },
+		// A summary's request starts with the conversation's own, so nearly all of its input should be `cacheRead`.
+		compaction: {
+			summarized: ({ conversationId, model, requests, usage }) =>
+				log.info("a compaction's summary was written on the conversation", { conversationId, model, requests, cacheRead: usage.cacheRead, cacheWrite: usage.cacheWrite, input: usage.input, output: usage.output }),
+			gaveUp: (conversationId, why) => log.warn("a compaction's summary was written from a transcript instead, uncached", { conversationId, why }),
+		},
 		...(memory === undefined ? {} : { extraTools: memory.tools() }),
 		extraExtensions: [mcp.extension(), ...(memory === undefined ? [] : [memory.extension()])],
 		onRegistry: (registry) => {

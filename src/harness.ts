@@ -10,7 +10,7 @@ import { codemodeTimersExtension, timerGlobal } from "./codemode-timers.ts";
 import { codemodeCatalogExtension } from "./codemode-catalog.ts";
 import { preambleExtension } from "./preamble.ts";
 import { fixedPromptExtension } from "./fixed-prompt.ts";
-import { compactionExtension } from "./compaction.ts";
+import { compactionExtension, type CompactionOptions } from "./compaction.ts";
 import { browserTools, type SharedBrowserProvider } from "./browser.ts";
 import { abortable, imageCheckExtension, type TextGenerationModel } from "@mgabor3141/pi-durable-t3";
 import { workspaceTools } from "./tools.ts";
@@ -66,6 +66,8 @@ export interface HarnessExtensionOptions {
 	/** Prepares the images `read` returns (oriented, converted, shrunk to the model's limits), and fits an image a
 	 * script shows that is over them (`images.ts`). */
 	readonly images?: ImageProcessor;
+	/** Told what each compaction's summary cost, and when one could not be asked for on the conversation (`compaction.ts`). */
+	readonly compaction?: CompactionOptions;
 }
 
 /**
@@ -98,7 +100,7 @@ export function harnessExtensions(options: HarnessExtensionOptions = {}): readon
 		defineExtension({ name: "harness-tools", tools: harnessTools }),
 		...(options.extraExtensions ?? []),
 		workspaceContextExtension(),
-		compactionExtension(),
+		compactionExtension(options.compaction),
 		// An image over the model's limits that a script shows (a full-page screenshot) is shrunk to fit, as `read`'s are;
 		// every other image is left as it is.
 		...(options.images === undefined ? [] : [imageFitExtension(options.images)]),
