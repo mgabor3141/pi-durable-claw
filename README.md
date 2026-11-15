@@ -440,6 +440,18 @@ agent's replies, thinking, tool calls and tool results by tool). The total is th
 parts are estimated from their length and scaled to it. The harness answers it itself: nothing is sent to the model,
 nothing is written to the conversation, and a restart of the harness forgets the answer.
 
+## Undo and redo
+
+- `/undo` takes back your last message and everything the agent did for it; `/undo 3` the last three.
+- `/undo step` takes back only the agent's last step (one response with its tool calls and their results) and keeps
+  your message; `/undo step 2` the last two. It stops at your message: going further is `/undo`.
+- `/redo` brings back what the last undo took, one undo at a time, until something new is written to the thread.
+
+Nothing is deleted: an undo moves the thread to a copy of the conversation that ends earlier, and a redo moves it back.
+What changes is what the model is sent. Files in the workspace, anything done outside the conversation, threads the
+agent started and memories already kept of those turns stay as they are. Stop a running turn first. After
+`/undo step` the thread waits for you: send a message to steer it or to tell it to go on.
+
 ## Codemode limits
 
 Each codemode script runs in its own QuickJS VM, in a worker thread of the harness process. A script may allocate at
