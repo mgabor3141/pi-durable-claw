@@ -197,7 +197,8 @@ and the bridge acts on that time:
 - A reset within 5 hours is waited for. T3 shows "Usage limit reached · Resumes 9:40 PM" above the composer, and 30
   seconds after the reset the run goes on by itself, as after `/continue`: nothing is written for the model to read.
   "Cancel auto-resume" calls it off; Resume or `/continue` goes on at once.
-- A later reset ends the run: "Resets …", with "Resume at reset" to wait for it after all.
+- A later reset ends the run: "Resets …", with "Resume at reset" to wait for it after all. With T3's setting
+  "Auto-resume limited threads" on, any reset is waited for, however far.
 - A message sent while a thread waits starts nothing. It is queued as behind a working run and delivered when the
   run goes on; "Send now" on it starts it at once and ends the wait.
 - A thread that waits still counts as working for whoever waits for it: a parent is not told its child failed.
