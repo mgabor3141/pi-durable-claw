@@ -133,8 +133,9 @@ export const RETRY_POLICY = { enabled: true, maxRetries: 64, baseDelayMs: 2_000,
  * `RETRY_POLICY`. Both fields are needed. pi sends a request once unless `maxRetries` says otherwise, and without a
  * second try it never reads what the provider asked for. A longer delay is refused at once, which is what an exhausted
  * plan sends: a 7-day overage window answers 429 with `retry-after` near 5 days, and waiting it out inside the request
- * showed only "Thinking" with no error or retry row. Failing it here lets `RETRY_POLICY` own the retries, which T3
- * shows as a retry row with the error and the next attempt.
+ * showed only "Thinking" with no error or retry row. Failing it here puts the wait the provider asked for in the
+ * error, and the bridge acts on it: it ends the run and continues it when the limit has reset (within 5 hours), which
+ * T3 shows as its usage limit with the time. `RETRY_POLICY` is for the failures that say no time.
  */
 export const PROVIDER_RETRY = { maxRetries: 3, maxRetryDelayMs: 60_000 } as const;
 

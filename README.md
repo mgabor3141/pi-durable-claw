@@ -188,12 +188,24 @@ all, and it is `RETRY_POLICY` in `src/harness.ts`. The wait is durable: it survi
 
 A provider that says when to come back (`retry-after`) is taken at its word first, for up to a minute: pi waits
 inside the request and sends it again, three times at most, before the request counts as failed for the retries
-above (`PROVIDER_RETRY`). A longer wait is refused at once and left to those retries: an exhausted plan asks for
-days, and a wait inside a request shows only that the thread is working and is not ended by Stop.
+above (`PROVIDER_RETRY`). A longer wait is refused at once: an exhausted plan asks for hours or days, and a wait
+inside a request shows only that the thread is working and is not ended by Stop.
 
-T3 shows the failures in a row as one row that counts ("Retrying provider (3/64)"), then "Provider recovered", or the
-error once the run has given up. A 429 is shown as T3's usage limit, with
-Resume in the composer after a run that gave up or was stopped. pi-durable still records each failed request in the
+That longer wait is not retried through either. The provider has said when the limit resets, so the run ends at once
+and the bridge acts on that time:
+
+- A reset within 5 hours is waited for. T3 shows "Usage limit reached · Resumes 9:40 PM" above the composer, and 30
+  seconds after the reset the run goes on by itself, as after `/continue`: nothing is written for the model to read.
+  "Cancel auto-resume" calls it off; Resume or `/continue` goes on at once.
+- A later reset ends the run: "Resets …", with "Resume at reset" to wait for it after all.
+- A message sent while a thread waits starts nothing. It is queued as behind a working run and delivered when the
+  run goes on; "Send now" on it starts it at once and ends the wait.
+- A thread that waits still counts as working for whoever waits for it: a parent is not told its child failed.
+- The wait survives a restart; a reset that passed while the harness was down is acted on when it starts.
+
+Only a failure that says how long to wait is handled so (Anthropic's does). Any other is retried as above, and T3
+shows those failures as one row that counts ("Retrying provider (3/64)"), then "Provider recovered", or the error
+once the run has given up, with Resume in the composer. pi-durable still records each failed request in the
 conversation; the model is never sent them, so they cost no context and do not move the prompt cache.
 
 ## Prompt text
