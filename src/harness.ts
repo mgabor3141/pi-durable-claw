@@ -1,6 +1,6 @@
 import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
 import type { Context } from "@earendil-works/chord/context";
-import { createRegistry, defineExtension, Harness, type Extension, type HarnessOptions, type Registry, type ToolRegistration } from "@earendil-works/pi-durable";
+import { createRegistry, defineExtension, Harness, type ConversationId, type Extension, type HarnessOptions, type Registry, type ToolRegistration } from "@earendil-works/pi-durable";
 import { createCodemodeExtension, type CodemodeNamespace } from "@earendil-works/pi-durable/codemode";
 import { openNodeSqliteStorage } from "@earendil-works/pi-durable/storage/sqlite/node";
 import type { ImageProcessor } from "@earendil-works/pi-durable/tools";
@@ -45,6 +45,8 @@ export interface HarnessLate {
 	textGenerationModel?: () => TextGenerationModel | undefined;
 	/** The models hidden from T3's model picker, as `provider/model` slugs: left out of the lists a script sees. */
 	hiddenModels?: () => ReadonlySet<string>;
+	/** Whose a conversation is (the bridge's `threadOf`): a person's thread keeps its prompt cache for an hour. */
+	threadOf?: (conversationId: ConversationId) => { readonly createdBy: "user" | "agent" | "system" } | undefined;
 }
 
 export interface HarnessExtensionOptions {

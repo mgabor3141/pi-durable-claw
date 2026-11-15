@@ -187,8 +187,9 @@ own compaction does not. What follows from it:
 
 - The summary is written by the thread's model, at its thinking level, and covers the recent tail too, which is also
   kept as it is.
-- The cache is only there while it lives (5 minutes after the last request by default), so a `/compact` on a thread
-  left alone for longer pays the full price once, as any next message would.
+- The cache is only there while it lives (an hour after the last request in a thread you started, 5 minutes in an
+  agent's; see "Prompt cache" below), so a `/compact` on a thread left alone for longer pays the full price once, as
+  any next message would.
 - While the thread works (`/compact` during a run, or the automatic one that starts 48k tokens before the window is
   full), the summary covers the conversation up to the answer whose tools are still running, which is where the
   request in flight ended. The thread goes on meanwhile, and what it writes stays after the summary.
@@ -201,6 +202,23 @@ A summary from a transcript is what is left when that cannot work: the context i
 overflow), the request fails, or the model writes no summary. It is pi's coding-agent summary prompt over the
 conversation as text: a previous summary is updated through `<previous-summary>`, a cut inside a user turn gets a
 separate turn-prefix summary, and Critical Context asks for the relevant files. The log says why it was used.
+
+## Prompt cache
+
+A provider keeps what a request started with for a while, and a next request that starts the same reads it at a
+tenth of the input price (Anthropic's numbers). How long is the client's choice per request: 5 minutes, written at
+1.25× the input price, or an hour, written at 2×.
+
+- A thread a person started (in T3, a fork or a side chat of one) is cached for an hour: a pause of ten minutes
+  should not cost the whole context again.
+- A thread an agent started (`thread_prompt`) or a scheduled task's own thread keeps pi's default of 5 minutes: they
+  rarely pause and resume, so the dearer write would buy nothing. Claude Code makes the same split.
+
+pi-durable has one retention setting for the whole Harness, so `src/cache-retention.ts` chooses per conversation: a
+request hook remembers each conversation's provider session with the retention its thread gets (the bridge's
+`threadOf` says who started it), and a wrapper around the model calls sends a request of that session with it. This
+is a stand-in for a per-conversation option upstream. Where the provider reports it, the hour shows as
+`cacheWrite1h` in a response's usage; providers without the choice ignore it.
 
 ## Failed requests
 

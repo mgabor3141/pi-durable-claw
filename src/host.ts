@@ -19,6 +19,7 @@ import type { Registry } from "@earendil-works/pi-durable";
 import { ModelRuntime } from "@earendil-works/pi-coding-agent";
 import { openHarness, RETRY_POLICY, type HarnessLate } from "./harness.ts";
 import { listedModels } from "./listed-models.ts";
+import { ConversationCacheRetention } from "./cache-retention.ts";
 import { launcherUpdates } from "./updates.ts";
 import { imageProcessor } from "./images.ts";
 import { McpManager } from "./mcp/manager.ts";
@@ -193,6 +194,9 @@ async function main(): Promise<void> {
 	const late: HarnessLate = {};
 	const updates = launcherUpdates(process.env, log);
 	const NONE_HIDDEN: ReadonlySet<string> = new Set();
+	// The threads a person started keep their prompt cache for an hour, so a pause does not cost the whole context
+	// again; an agent's and a scheduled task's threads keep pi's five minutes (`cache-retention.ts`).
+	const cacheRetention = new ConversationCacheRetention((conversationId) => (late.threadOf?.(conversationId)?.createdBy === "user" ? "long" : undefined));
 	const harness = await openHarness({
 		storagePath: join(root, "durable.db"),
 		images: await imageProcessor(),
@@ -200,18 +204,18 @@ async function main(): Promise<void> {
 		web,
 		workspace,
 		// A script's `models.*` lists what T3's model picker lists; the bridge below keeps the whole catalog.
-		models: listedModels(models, () => late.hiddenModels?.() ?? NONE_HIDDEN),
+		models: cacheRetention.models(listedModels(models, () => late.hiddenModels?.() ?? NONE_HIDDEN)),
 		mcpNamespaces: mcp.namespaces(),
 		late,
 		secrets: { store: secrets, log },
 		// A summary's request starts with the conversation's own, so nearly all of its input should be `cacheRead`.
 		compaction: {
 			summarized: ({ conversationId, model, requests, usage }) =>
-				log.info("a compaction's summary was written on the conversation", { conversationId, model, requests, cacheRead: usage.cacheRead, cacheWrite: usage.cacheWrite, input: usage.input, output: usage.output }),
+				log.info("a compaction's summary was written on the conversation", { conversationId, model, requests, cacheRead: usage.cacheRead, cacheWrite: usage.cacheWrite, cacheWrite1h: usage.cacheWrite1h ?? 0, input: usage.input, output: usage.output }),
 			gaveUp: (conversationId, why) => log.warn("a compaction's summary was written from a transcript instead, uncached", { conversationId, why }),
 		},
 		...(memory === undefined ? {} : { extraTools: memory.tools() }),
-		extraExtensions: [mcp.extension(), ...(memory === undefined ? [] : [memory.extension()])],
+		extraExtensions: [mcp.extension(), ...(memory === undefined ? [] : [memory.extension()]), cacheRetention.extension()],
 		onRegistry: (registry) => {
 			mcp.attach(registry);
 			toolRegistry = registry;
@@ -288,6 +292,7 @@ async function main(): Promise<void> {
 	// one of ours (titles get it per request), and `browser_open` opens T3's preview tabs.
 	late.textGenerationModel = () => t3.textGenerationModel();
 	late.hiddenModels = () => t3.hiddenModels();
+	late.threadOf = (conversationId) => t3.threadOf(conversationId);
 	const previewBrowser = t3.previewBrowser;
 	if (previewBrowser !== undefined) late.previewBrowser = (conversationId, url) => previewBrowser.open(conversationId, url);
 
