@@ -194,6 +194,10 @@ When a conversation reaches the model window, compaction keeps the recent tail (
 older prefix with a structured summary. Automatic thresholds, the cut and `/compact` come from pi-durable; the summary
 is stored as the durable `pi.compaction` entry and shown as a completed item in T3.
 
+`/compact` typed while the agent works compacts at once, beside the run. Sent as a queued message (T3's queue), it
+waits its turn instead: the run before it ends, the context is compacted, and then the messages queued behind it go
+on. In the queue it is a message like any other: it can be edited or removed, and "send now" compacts at once.
+
 The summary is asked for on the conversation itself. The request is the one the agent would send next (its system
 prompt, tools and history, through the same request hooks, with the same options) with one more message that says to
 stop and write the summary. A provider's prompt cache matches the start of a request byte for byte, so this request

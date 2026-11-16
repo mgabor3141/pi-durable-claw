@@ -306,6 +306,8 @@ async function main(): Promise<void> {
 	toolRegistry?.install(t3.secretRequests({ save: (name, value) => secrets.save(name, value) }));
 	// T3's question card: `ask_user` asks the user in the thread and waits for the answer.
 	toolRegistry?.install(t3.askUser());
+	// A `/compact` sent as a queued message waits its turn: the run that ends compacts before the queue goes on.
+	toolRegistry?.install(t3.queuedCompaction());
 	// Each message gets the memories recalled for it, as part of it; T3 shows them as a hindsight_recall row. The run
 	// that answers the message asks, not its sender: how long it took is logged, since the model's answer waits for it.
 	if (memory !== undefined) {
