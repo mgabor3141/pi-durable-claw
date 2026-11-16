@@ -33,7 +33,10 @@ export async function loadSkills(env: ExecutionEnv, dir: string, context: Contex
 
 async function skillPaths(env: ExecutionEnv, dir: string, context: Context): Promise<string[]> {
 	const exists = await env.exists(dir, context);
-	if (!exists.ok || !exists.value) return [];
+	// A workspace that does not answer is not a workspace without skills: the section a thread shows is kept
+	// (`fixed-prompt.ts`), where an empty list would take its skills out of the prompt.
+	if (!exists.ok) throw new Error(`${dir} could not be read: ${exists.error.message}`);
+	if (!exists.value) return [];
 
 	if (env.listFiles !== undefined) {
 		const listing = await env.listFiles(dir, { hidden: true, gitignore: false, exclude: ["node_modules"], maxEntries: 10_000 }, context);

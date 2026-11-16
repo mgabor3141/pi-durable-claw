@@ -163,6 +163,22 @@ A running thread renders it afresh after:
 - A compaction. Its first request writes the whole prompt again anyway. The one exception: if a `/reload` happened
   within the history the compaction keeps (its last ~20k tokens), the prompt that reload rendered stays.
 
+And it follows its files by itself where that costs nothing, with the user's next message (never in the middle of a
+run's tool calls):
+
+- A model that takes a system message in the middle of a conversation is told of a changed `AGENTS.md`, skill list or
+  MCP server list: the changed section is appended where the conversation is ("Updated system prompt section …"),
+  behind everything the provider has cached, so the cache holds. pi's catalog says which models take one
+  (`compat.supportsMidConvoSystemMessages`: the current Anthropic and OpenAI models); for a model of your own in
+  `models.json`, set the flag only if the model follows such a message. Only those sections follow: the tool catalog
+  and the rest change with a deploy, and wait for a `/reload` or a compaction.
+- Any other model's prompt is rendered again, whole, when its prompt cache has expired: the context is paid for again
+  anyway. While the cache holds, or where nothing says whether the provider caches, the prompt is kept and `/reload`
+  is the way.
+
+The thread shows a "System prompt updated: global-agents" row where a section changed. A file that cannot be read
+(the workspace does not answer) leaves its section as the thread shows it.
+
 The codemode section is a catalog (`src/codemode-catalog.ts`): `read`, `write`, `edit` and `bash`, whose definitions the
 request carries as the model's own tools, are named once with what each gives a script; every other harness tool has
 one line (its description's first sentence), and a script reads a tool's declaration with `describeTool(name)` before

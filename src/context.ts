@@ -112,9 +112,17 @@ export function workspaceContextExtension(options: WorkspaceContextOptions = {})
 	});
 }
 
+/**
+ * A file's text, or `undefined` for one that is not there or is empty. One that cannot be read (the workspace does
+ * not answer) throws: pi-durable then keeps the section a thread shows, where "not there" would take it out of the
+ * prompt of a thread that follows its files (`fixed-prompt.ts`).
+ */
 async function readBody(env: ExecutionEnv, path: string, context: Context): Promise<string | undefined> {
 	const result = await env.readTextFile(path, context);
-	if (!result.ok) return undefined;
+	if (!result.ok) {
+		if (result.error.code === "not_found") return undefined;
+		throw new Error(`${path} could not be read: ${result.error.message}`);
+	}
 	const body = result.value.trim();
 	return body.length === 0 ? undefined : body;
 }

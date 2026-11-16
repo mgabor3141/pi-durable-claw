@@ -71,6 +71,8 @@ export interface HarnessExtensionOptions {
 	/** Prepares the images `read` returns (oriented, converted, shrunk to the model's limits), and fits an image a
 	 * script shows that is over them (`images.ts`). */
 	readonly images?: ImageProcessor;
+	/** The model catalog: what a model takes decides how a thread's prompt follows its files (`fixed-prompt.ts`). */
+	readonly models?: HarnessOptions["models"];
 	/** Told what each compaction's summary cost, and when one could not be asked for on the conversation (`compaction.ts`). */
 	readonly compaction?: CompactionOptions;
 }
@@ -98,7 +100,7 @@ export function harnessExtensions(options: HarnessExtensionOptions = {}): readon
 	return [
 		// Before the fixed prompt: wraps apply in this order, so the fixed prompt keeps the catalog it renders.
 		codemodeCatalogExtension({ namespaces: options.mcpNamespaces ?? [] }),
-		fixedPromptExtension(),
+		fixedPromptExtension(options.models === undefined ? {} : { models: options.models }),
 		preambleExtension(),
 		createCodemodeExtension({ sandbox: codemodeSandbox(), namespaces: options.mcpNamespaces ?? [], inlineBudget: Number.POSITIVE_INFINITY, globals: [timerGlobal()] }) as Extension,
 		codemodeTimersExtension(),
