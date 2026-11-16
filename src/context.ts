@@ -5,6 +5,7 @@ import type { ExecutionEnv } from "@earendil-works/pi-durable/env";
 import { loadSkills } from "./skills.ts";
 import { WORKSPACE_HOME as DEFAULT_HOME } from "./workspace.ts";
 import { LOCAL_PRECEDENCE, agentsSection, conversationTimeSection, cwdSection, skillsSection } from "./prompts.ts";
+import { setting } from "./env.ts";
 
 
 /** When a conversation started (epoch ms). A fork keeps its parent's: T3's undo and edit fork a thread's conversation. */
@@ -119,7 +120,7 @@ async function readBody(env: ExecutionEnv, path: string, context: Context): Prom
 }
 
 function formatLocalTime(date: Date): string {
-	const zone = process.env.TZ?.trim() || Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC";
+	const zone = setting(process.env, "TZ") || Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC";
 	try {
 		const local = new Intl.DateTimeFormat("sv-SE", {
 			timeZone: zone,

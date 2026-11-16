@@ -18,7 +18,6 @@
  *
  * Memory never stops a turn: a failed recall says so in the block, a failed retain is logged.
  */
-import type { Context } from "@earendil-works/chord/context";
 import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
 import type { AssistantMessage, Message, Model, Models, ToolResultMessage } from "@earendil-works/pi-ai";
 import { defineExtension, defineTool, GenerationTask, hook, type ContextView, type ConversationId, type EntryId, type EntryRecord, type Extension, type Harness, type ModelRef, type ToolRegistration } from "@earendil-works/pi-durable";
@@ -27,6 +26,7 @@ import { messageContextData, type MessageContextAnswer, type MessageContextReque
 import { int, opt, str } from "@earendil-works/pi-schema";
 import { MEMORY_NOTES_CONTEXT, MEMORY_NOTES_NO_TOOLS, MEMORY_RECALL_DESCRIPTION, MEMORY_REFLECT_DESCRIPTION, MEMORY_RETAIN_DESCRIPTION, memoriesBlock, memoriesUnavailable, memoryNotesPrompt } from "./prompts.ts";
 import { object } from "./schema.ts";
+import { setting, type Env } from "./env.ts";
 
 export interface HindsightConfig {
 	readonly url: string;
@@ -66,9 +66,9 @@ const LIST_PAGE = 100;
 const NOTES_WINDOW_SHARE = 0.85;
 
 /** The configuration from the environment; `undefined` without `HINDSIGHT_URL`. A malformed value fails loudly. */
-export function hindsightConfig(env: Readonly<Record<string, string | undefined>>): HindsightConfig | undefined {
-	const url = env.HINDSIGHT_URL?.trim() ?? "";
-	if (url === "") return undefined;
+export function hindsightConfig(env: Env): HindsightConfig | undefined {
+	const url = setting(env, "HINDSIGHT_URL");
+	if (url === undefined) return undefined;
 	let parsed: URL;
 	try {
 		parsed = new URL(url);
@@ -76,10 +76,10 @@ export function hindsightConfig(env: Readonly<Record<string, string | undefined>
 		throw new Error(`HINDSIGHT_URL is not a URL: ${url}`);
 	}
 	if (parsed.protocol !== "http:" && parsed.protocol !== "https:") throw new Error(`HINDSIGHT_URL must be http(s): ${url}`);
-	const bank = env.HINDSIGHT_BANK?.trim() || "claw";
+	const bank = setting(env, "HINDSIGHT_BANK") ?? "claw";
 	if (!/^[A-Za-z0-9_.-]+$/u.test(bank)) throw new Error(`HINDSIGHT_BANK may hold only letters, digits, ".", "_" and "-": ${bank}`);
-	const apiKey = env.HINDSIGHT_API_KEY?.trim();
-	return { url: url.replace(/\/+$/u, ""), bank, ...(apiKey ? { apiKey } : {}) };
+	const apiKey = setting(env, "HINDSIGHT_API_KEY");
+	return { url: url.replace(/\/+$/u, ""), bank, ...(apiKey === undefined ? {} : { apiKey }) };
 }
 
 /** What memory needs from the harness once it is open. */

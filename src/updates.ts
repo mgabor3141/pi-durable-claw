@@ -1,5 +1,6 @@
 import { execFile } from "node:child_process";
 import type { HostUpdates } from "@mgabor3141/pi-durable-t3";
+import { setting, type Env } from "./env.ts";
 
 /** What a person runs instead of T3's button; T3 shows it beside the button. */
 const UPDATE_COMMAND = "docker compose exec harness claw update";
@@ -17,9 +18,9 @@ const short = (id: string) => (/^[0-9a-f]{12,}$/.test(id) ? id.slice(0, 7) : id)
  * answers `check`, `install` and `restart` with a line of JSON. Run outside the image (a checkout, the tests) there is
  * no launcher and nothing to offer: `undefined`.
  */
-export function launcherUpdates(env: NodeJS.ProcessEnv, log: { warn(message: string, fields?: Record<string, unknown>): void }): HostUpdates | undefined {
-	const raw = env.CLAW_LAUNCHER?.trim();
-	if (raw === undefined || raw === "") return undefined;
+export function launcherUpdates(env: Env, log: { warn(message: string, fields?: Record<string, unknown>): void }): HostUpdates | undefined {
+	const raw = setting(env, "CLAW_LAUNCHER");
+	if (raw === undefined) return undefined;
 	const launcher = JSON.parse(raw) as string[];
 	const run = (command: string, signal?: AbortSignal) =>
 		new Promise<string>((resolve, reject) => {

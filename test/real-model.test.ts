@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
 import type { ToolResultMessage } from "@earendil-works/pi-ai";
-import { AssistantEntry, ToolResultEntry, UserEntry } from "@earendil-works/pi-durable";
+import { ToolResultEntry, UserEntry } from "@earendil-works/pi-durable";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { openHarness } from "../src/harness.ts";
 import { secretLookupTool } from "./fixtures/secret.ts";

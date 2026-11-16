@@ -4,6 +4,7 @@ import { defineTool, type ToolRegistration } from "@earendil-works/pi-durable";
 import { WEB_FETCH_TOOL_DESCRIPTION, WEB_SEARCH_TOOL_DESCRIPTION, untrusted } from "./prompts.ts";
 import { arr, int, opt, str, union } from "@earendil-works/pi-schema";
 import { literal, object } from "./schema.ts";
+import { setting, type Env } from "./env.ts";
 
 /**
  * Web tools for the workspace agent: search through a private SearXNG and view
@@ -22,10 +23,10 @@ export interface WebConfig {
 }
 
 /** The configuration from the environment; a malformed URL fails loudly. */
-export function webConfig(env: Readonly<Record<string, string | undefined>>): WebConfig {
+export function webConfig(env: Env): WebConfig {
 	const url = (name: string): string | undefined => {
-		const value = env[name]?.trim() ?? "";
-		if (value === "") return undefined;
+		const value = setting(env, name);
+		if (value === undefined) return undefined;
 		if (!URL.canParse(value) || !/^https?:$/u.test(new URL(value).protocol)) throw new Error(`${name} must be an http(s) URL: ${value}`);
 		return value.replace(/\/+$/u, "");
 	};

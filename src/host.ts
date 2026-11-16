@@ -27,6 +27,7 @@ import { workspaceSource } from "./mcp/config.ts";
 import { McpOAuth } from "./mcp/oauth.ts";
 import { SecretStore, withSecrets } from "./secrets.ts";
 import { connectWorkspace, ensureKeypair, WORKSPACE_HOME, workspaceEnv, workspaceTarget } from "./workspace.ts";
+import { setting, settingList } from "./env.ts";
 import { webConfig } from "./web.ts";
 import { deviceName, readRemoteEnabled, readStatusFile, Tailnet, tailnetUrl, writeRemoteEnabled, type TailnetStatus } from "./tailnet.ts";
 import { attachT3, mintPairingCode } from "@mgabor3141/pi-durable-t3";
@@ -34,13 +35,13 @@ import { installShutdown } from "./shutdown.ts";
 import { titleThread } from "./title.ts";
 
 // An empty setting is an unset one (an `.env` line left blank).
-const PORT = Number(process.env.CLAW_PORT?.trim() || 3775);
-const PUBLIC_URL_SET = (process.env.CLAW_PUBLIC_URL?.trim() ?? "") !== "";
-const PUBLIC_URL = (PUBLIC_URL_SET ? process.env.CLAW_PUBLIC_URL!.trim() : `http://127.0.0.1:${PORT}`).replace(/\/+$/, "");
+const PORT = Number(setting(process.env, "CLAW_PORT") ?? 3775);
+const PUBLIC_URL_SET = setting(process.env, "CLAW_PUBLIC_URL") !== undefined;
+const PUBLIC_URL = (setting(process.env, "CLAW_PUBLIC_URL") ?? `http://127.0.0.1:${PORT}`).replace(/\/+$/, "");
 /** Where your browser reaches this host (pairing links, OAuth callbacks): CLAW_PUBLIC_URL when set, else the tailnet
  * address while remote access is on and serves HTTPS, else loopback. */
 const publicUrl = (root: string): string => (PUBLIC_URL_SET ? PUBLIC_URL : (tailnetUrl(root) ?? PUBLIC_URL));
-const LABEL = process.env.CLAW_LABEL?.trim() || "claw";
+const LABEL = setting(process.env, "CLAW_LABEL") ?? "claw";
 /** The agent's MCP configuration, in the workspace (Claude Code's user-scope file). */
 const MCP_CONFIG_PATH = join(WORKSPACE_HOME, ".mcp.json");
 
@@ -178,8 +179,9 @@ async function main(): Promise<void> {
 	let toolRegistry: Registry | undefined;
 	// The agent's browser is T3's preview browser (Browserless over CDP). Without one there is no browser at all: the
 	// tools are not offered, and the log says why.
-	const browserlessUrl = process.env.BROWSERLESS_URL?.trim() ?? "";
-	if (browserlessUrl === "") log.info("browser tools off: BROWSERLESS_URL is not set");
+	const browserlessUrl = setting(process.env, "BROWSERLESS_URL");
+	const browserlessToken = setting(process.env, "BROWSERLESS_TOKEN");
+	if (browserlessUrl === undefined) log.info("browser tools off: BROWSERLESS_URL is not set");
 	// Web search and page fetch are services you run, as with Browserless: each tool only with its URL.
 	const web = webConfig(process.env);
 	if (web.searxngUrl === undefined) log.info("web_search off: SEARXNG_URL is not set");
@@ -196,15 +198,15 @@ async function main(): Promise<void> {
 	const NONE_HIDDEN: ReadonlySet<string> = new Set();
 	// The threads a person started keep their prompt cache for an hour, so a pause does not cost the whole context
 	// again; an agent's and a scheduled task's threads keep pi's five minutes (`cache-retention.ts`).
-	const cacheRetention = new ConversationCacheRetention((conversationId) => (late.threadOf?.(conversationId)?.createdBy === "user" ? "long" : undefined));
+	const cacheRetention = new ConversationCacheRetention((conversationId) => (late.bridge?.threadOf(conversationId)?.createdBy === "user" ? "long" : undefined));
 	const harness = await openHarness({
 		storagePath: join(root, "durable.db"),
 		images: await imageProcessor(),
-		browser: browserlessUrl !== "",
+		browser: browserlessUrl !== undefined,
 		web,
 		workspace,
 		// A script's `models.*` lists what T3's model picker lists; the bridge below keeps the whole catalog.
-		models: cacheRetention.models(listedModels(models, () => late.hiddenModels?.() ?? NONE_HIDDEN)),
+		models: cacheRetention.models(listedModels(models, () => late.bridge?.hiddenModels() ?? NONE_HIDDEN)),
 		mcpNamespaces: mcp.namespaces(),
 		late,
 		secrets: { store: secrets, log },
@@ -223,7 +225,7 @@ async function main(): Promise<void> {
 	});
 	// Memory reads conversations' model context (what a recall leaves out, what the memory step reads) and writes its
 	// notes with T3's text-generation model once the bridge is attached.
-	memory?.attach(harnessMemoryHost(harness, () => late.textGenerationModel?.(), models));
+	memory?.attach(harnessMemoryHost(harness, () => late.bridge?.textGenerationModel(), models));
 	// Connect MCP servers before the T3 bridge accepts input, so the first prompt sees their tools.
 	await mcp.start();
 
@@ -231,8 +233,8 @@ async function main(): Promise<void> {
 	const target = workspaceTarget(workspaceConfig);
 	const tailnet = new Tailnet({
 		root,
-		hostname: process.env.CLAW_TAILNET_HOSTNAME?.trim() || deviceName(LABEL),
-		allow: (process.env.CLAW_TAILNET_ALLOW ?? "").split(",").map((item) => item.trim()).filter((item) => item !== ""),
+		hostname: setting(process.env, "CLAW_TAILNET_HOSTNAME") ?? deviceName(LABEL),
+		allow: settingList(process.env, "CLAW_TAILNET_ALLOW"),
 		port: PORT,
 		// The harness may listen on one interface (`--listen`, as this image does) rather than loopback.
 		upstream: `http://${listen.host === "0.0.0.0" || listen.host === "::" ? "127.0.0.1" : listen.host}:${PORT}`,
@@ -265,9 +267,9 @@ async function main(): Promise<void> {
 			...(memory === undefined ? {} : { messageContext: (request) => memory.recallFor(request) }),
 			// Memory follows an undo: the notes of the turns it takes back are removed, and a redo writes them again.
 			...(memory === undefined ? {} : { undo: { undone: (event) => memory.undone(event), redone: (event) => memory.redone(event) } }),
-			...(browserlessUrl === ""
+			...(browserlessUrl === undefined
 				? {}
-				: { preview: { cdpUrl: browserlessUrl, ...(process.env.BROWSERLESS_TOKEN?.trim() ? { token: process.env.BROWSERLESS_TOKEN.trim() } : {}), storageStatePath: join(stateDir, "browser-profile.json") } }),
+				: { preview: { cdpUrl: browserlessUrl, ...(browserlessToken === undefined ? {} : { token: browserlessToken }), storageStatePath: join(stateDir, "browser-profile.json") } }),
 			log,
 		});
 	} catch (error) {
@@ -290,9 +292,7 @@ async function main(): Promise<void> {
 	// Agent `browser_open` pages are T3's preview tabs, the ones the user sees; there is no other browser.
 	// What the harness's own tools need from the bridge: `summarize` generates with T3's text-generation model when it names
 	// one of ours (titles get it per request), and `browser_open` opens T3's preview tabs.
-	late.textGenerationModel = () => t3.textGenerationModel();
-	late.hiddenModels = () => t3.hiddenModels();
-	late.threadOf = (conversationId) => t3.threadOf(conversationId);
+	late.bridge = t3;
 	const previewBrowser = t3.previewBrowser;
 	if (previewBrowser !== undefined) late.previewBrowser = (conversationId, url) => previewBrowser.open(conversationId, url);
 

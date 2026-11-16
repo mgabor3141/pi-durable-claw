@@ -1,4 +1,3 @@
-import { randomUUID } from "node:crypto";
 import type { JsonValue } from "@earendil-works/chord/json";
 import { defineTool, type ConversationId, type ToolRegistration } from "@earendil-works/pi-durable";
 import type { Page } from "playwright-core";
@@ -16,6 +15,7 @@ import {
 } from "./prompts.ts";
 import { arr, bool, int, opt, str, union } from "@earendil-works/pi-schema";
 import { literal, object } from "./schema.ts";
+import { settingList } from "./env.ts";
 
 /**
  * An interactive browser for the workspace agent: the agent's page is a tab of T3's preview browser (Browserless
@@ -26,10 +26,7 @@ import { literal, object } from "./schema.ts";
  */
 // Browser-only allowlist for local dev servers (normally "workspace"). The page
 // reader never sees this; web_fetch keeps rejecting all internal hosts.
-const LOCAL_HOSTS = (process.env.BROWSER_LOCAL_HOSTS ?? "")
-	.split(",")
-	.map((host) => host.trim())
-	.filter((host) => host !== "");
+const LOCAL_HOSTS = settingList(process.env, "BROWSER_LOCAL_HOSTS");
 
 const NAVIGATION_TIMEOUT_MS = 45_000;
 const ACTION_TIMEOUT_MS = 15_000;

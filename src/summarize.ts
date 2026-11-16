@@ -20,9 +20,9 @@ function resultValue(value: { ok: true; value: string } | { ok: false; error: { 
 	return value.value;
 }
 
-/** `late.textGenerationModel`: T3's text-generation model (Settings), when it names one of ours; it exists once the bridge
+/** `late.bridge`: T3's text-generation model (Settings), when it names one of ours; it exists once the bridge
  * is attached. */
-export function summarizeTools(late: { readonly textGenerationModel?: () => TextGenerationModel | undefined } = {}): ToolRegistration[] {
+export function summarizeTools(late: { readonly bridge?: { textGenerationModel(): TextGenerationModel | undefined } } = {}): ToolRegistration[] {
 	return [
 		defineTool({
 			name: "summarize",
@@ -44,7 +44,7 @@ export function summarizeTools(late: { readonly textGenerationModel?: () => Text
 				}
 				if (input.length > MAX_INPUT_CHARS) throw new Error(`input is too large (${input.length} chars; max ${MAX_INPUT_CHARS})`);
 				// T3's text-generation model when Settings names one; else the conversation's own.
-				const configured = late.textGenerationModel?.();
+				const configured = late.bridge?.textGenerationModel();
 				const ref = configured ?? (await api.agent(context)).model;
 				if (ref === undefined) throw new Error("summarize has no model selected");
 				const model = api.models.getModel(ref.provider, ref.modelId);

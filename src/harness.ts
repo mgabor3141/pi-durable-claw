@@ -1,6 +1,6 @@
 import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
 import type { Context } from "@earendil-works/chord/context";
-import { createRegistry, defineExtension, Harness, type ConversationId, type Extension, type HarnessOptions, type Registry, type ToolRegistration } from "@earendil-works/pi-durable";
+import { createRegistry, defineExtension, Harness, type Extension, type HarnessOptions, type Registry, type ToolRegistration } from "@earendil-works/pi-durable";
 import { createCodemodeExtension, type CodemodeNamespace } from "@earendil-works/pi-durable/codemode";
 import { openNodeSqliteStorage } from "@earendil-works/pi-durable/storage/sqlite/node";
 import type { ImageProcessor } from "@earendil-works/pi-durable/tools";
@@ -12,7 +12,7 @@ import { preambleExtension } from "./preamble.ts";
 import { fixedPromptExtension } from "./fixed-prompt.ts";
 import { compactionExtension, type CompactionOptions } from "./compaction.ts";
 import { browserTools, type SharedBrowserProvider } from "./browser.ts";
-import { abortable, imageCheckExtension, type TextGenerationModel } from "@mgabor3141/pi-durable-t3";
+import { abortable, imageCheckExtension, type T3Attachment } from "@mgabor3141/pi-durable-t3";
 import { workspaceTools } from "./tools.ts";
 import { imageFitExtension } from "./images.ts";
 import { directCallsExtension } from "./direct-calls.ts";
@@ -20,6 +20,7 @@ import { webTools, type WebConfig } from "./web.ts";
 import { summarizeTools } from "./summarize.ts";
 import { workspaceEnv, type WorkspaceConnection, WORKSPACE_HOME } from "./workspace.ts";
 import { type SecretStore, secretsTool, withSecrets } from "./secrets.ts";
+import { setting, type Env } from "./env.ts";
 
 type SecretsLogger = Parameters<typeof withSecrets>[2];
 
@@ -28,8 +29,8 @@ type SecretsLogger = Parameters<typeof withSecrets>[2];
  * of the host process, so without a limit a runaway script takes the host down with it; with one, the script fails with
  * QuickJS's `out of memory` and the turn goes on. Large data belongs in tools and files, not in script memory.
  */
-export function codemodeMemoryLimitBytes(env: Readonly<Record<string, string | undefined>> = process.env): number {
-	const megabytes = Number(env.CLAW_CODEMODE_MEMORY_MB ?? "");
+export function codemodeMemoryLimitBytes(env: Env = process.env): number {
+	const megabytes = Number(setting(env, "CLAW_CODEMODE_MEMORY_MB"));
 	return (Number.isFinite(megabytes) && megabytes > 0 ? megabytes : 256) * 1024 * 1024;
 }
 
@@ -39,14 +40,16 @@ export function codemodeSandbox(): CodemodeSandbox {
 	return (sharedSandbox ??= new CodemodeSandbox({ memoryLimitBytes: codemodeMemoryLimitBytes() }));
 }
 
-/** The parts of the bridge the harness's own tools use, set once it is attached. */
+/**
+ * What exists only once the bridge is attached. The harness is opened first (the bridge attaches to it), so what the
+ * harness's own tools and extensions need of the bridge is read from here, at each use.
+ */
 export interface HarnessLate {
+	/** The bridge: T3's text-generation model (`summarize`), the models hidden from its picker (left out of the lists a
+	 * script sees), and whose a conversation is (a person's thread keeps its prompt cache for an hour). */
+	bridge?: Pick<T3Attachment, "textGenerationModel" | "hiddenModels" | "threadOf">;
+	/** T3's preview browser, when one is configured: the `browser_*` tools' pages. */
 	previewBrowser?: SharedBrowserProvider;
-	textGenerationModel?: () => TextGenerationModel | undefined;
-	/** The models hidden from T3's model picker, as `provider/model` slugs: left out of the lists a script sees. */
-	hiddenModels?: () => ReadonlySet<string>;
-	/** Whose a conversation is (the bridge's `threadOf`): a person's thread keeps its prompt cache for an hour. */
-	threadOf?: (conversationId: ConversationId) => { readonly createdBy: "user" | "agent" | "system" } | undefined;
 }
 
 export interface HarnessExtensionOptions {

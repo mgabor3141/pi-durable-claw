@@ -9,7 +9,6 @@ import { createHash } from "node:crypto";
 import type { ImageContent, TextContent } from "@earendil-works/pi-ai";
 import {
 	type CallToolResult,
-	type ContentBlock,
 	type McpRequestOptions,
 	type Tool as McpTool,
 	toLlmContent,

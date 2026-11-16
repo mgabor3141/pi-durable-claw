@@ -203,8 +203,9 @@ thread left alone with more than 200,000 tokens of context is compacted 2 minute
 58 minutes after its last request for a thread you started, 3 minutes for an agent's. The summary is then still read
 from the cache, and the message you send when you come back starts from a small context instead of paying for the
 whole one again. T3's default, "When you return", does nothing here (its web app does that for Claude threads only).
-A thread that is snoozed, settled, archived, waiting for an answer or for child threads is left alone, and a restart
-of the harness skips the compactions that were waiting.
+A thread that is snoozed, settled, archived, waiting for an answer or for child threads is left alone. A restart
+of the harness keeps the compactions that were waiting: threads whose last run ended within the cache's lifetime are
+looked at again when it starts, and when the setting is turned on.
 
 A summary from a transcript is what is left when that cannot work: the context is already over the model's window (an
 overflow), the request fails, or the model writes no summary. It is pi's coding-agent summary prompt over the
