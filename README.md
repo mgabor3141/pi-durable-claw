@@ -542,6 +542,15 @@ turn runs and when the conversation ends with the agent's answer: there is nothi
 T3's Resume button (in the composer after a run was stopped or ran out of usage) does the same. T3 sends "Continue
 where you left off." with it; here that text is not written, not sent to the model and not shown.
 
+## When it feels slow
+
+The harness logs two things for it. `a slow call` names a call from T3 that took over half a second (`method`, `ms`).
+`memory: recall for a message` says how long Hindsight took to recall for a message (`ms`): a message is answered to
+T3 once the recall has, so that time is how long a sent message waits before the thread and the sidebar show it as
+received. `docker compose logs harness | grep -e "a slow call" -e "recall for a message"` shows both.
+
+What T3 is sent is compressed (HTTP gzip, and the socket's frames), as T3's own server does.
+
 ## Codemode limits
 
 Each codemode script runs in its own QuickJS VM, in a worker thread of the harness process. A script may allocate at

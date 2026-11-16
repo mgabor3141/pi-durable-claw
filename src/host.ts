@@ -42,6 +42,8 @@ const PUBLIC_URL = (setting(process.env, "CLAW_PUBLIC_URL") ?? `http://127.0.0.1
  * address while remote access is on and serves HTTPS, else loopback. */
 const publicUrl = (root: string): string => (PUBLIC_URL_SET ? PUBLIC_URL : (tailnetUrl(root) ?? PUBLIC_URL));
 const LABEL = setting(process.env, "CLAW_LABEL") ?? "claw";
+/** A client's call that takes this long is logged by name (`a slow call`). */
+const SLOW_CALL_MS = 500;
 /** The agent's MCP configuration, in the workspace (Claude Code's user-scope file). */
 const MCP_CONFIG_PATH = join(WORKSPACE_HOME, ".mcp.json");
 
@@ -264,7 +266,25 @@ async function main(): Promise<void> {
 			// T3 learns the tailnet URL and the SSH host its editors open paths on ("Open in VS Code").
 			remoteAccess: tailnet,
 			// Each message arrives with the memories recalled for it, stored with it; T3 shows them as a hindsight_recall row.
-			...(memory === undefined ? {} : { messageContext: (request) => memory.recallFor(request) }),
+			// A message is answered to the client once this has: how long it took is logged, since that is time the
+			// sender waits.
+			...(memory === undefined
+				? {}
+				: {
+						messageContext: async (request) => {
+							const started = performance.now();
+							try {
+								return await memory.recallFor(request);
+							} finally {
+								log.info("memory: recall for a message", { threadId: request.threadId, ms: Math.round(performance.now() - started) });
+							}
+						},
+					}),
+			// What a client waited long for: a call that took over half a second, by name.
+			rpcLog: {
+				onSuccess: (call) => void (call.kind === "request" && call.durationMs >= SLOW_CALL_MS && log.warn("a slow call", { method: call.method, ms: Math.round(call.durationMs) })),
+				onFailure: (call) => void (call.kind === "request" && call.durationMs >= SLOW_CALL_MS && log.warn("a slow call", { method: call.method, ms: Math.round(call.durationMs), error: call.error })),
+			},
 			// Memory follows an undo: the notes of the turns it takes back are removed, and a redo writes them again.
 			...(memory === undefined ? {} : { undo: { undone: (event) => memory.undone(event), redone: (event) => memory.redone(event) } }),
 			...(browserlessUrl === undefined
