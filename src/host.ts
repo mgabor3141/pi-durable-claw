@@ -19,6 +19,7 @@ import type { Registry } from "@earendil-works/pi-durable";
 import { ModelRuntime } from "@earendil-works/pi-coding-agent";
 import { openHarness, RETRY_POLICY, type HarnessLate } from "./harness.ts";
 import { listedModels } from "./listed-models.ts";
+import { cacheMissExtension } from "./cache-misses.ts";
 import { ConversationCacheRetention } from "./cache-retention.ts";
 import { launcherUpdates } from "./updates.ts";
 import { imageProcessor } from "./images.ts";
@@ -219,7 +220,13 @@ async function main(): Promise<void> {
 			gaveUp: (conversationId, why) => log.warn("a compaction's summary was written from a transcript instead, uncached", { conversationId, why }),
 		},
 		...(memory === undefined ? {} : { extraTools: memory.tools() }),
-		extraExtensions: [mcp.extension(), ...(memory === undefined ? [] : [memory.extension()]), cacheRetention.extension()],
+		extraExtensions: [
+			mcp.extension(),
+			...(memory === undefined ? [] : [memory.extension()]),
+			cacheRetention.extension(),
+			// A request that should have read the prompt cache and did not: it paid for the whole context again.
+			cacheMissExtension((miss) => log.warn("a prompt cache miss", { ...miss })),
+		],
 		onRegistry: (registry) => {
 			mcp.attach(registry);
 			toolRegistry = registry;

@@ -225,6 +225,13 @@ tenth of the input price (Anthropic's numbers). How long is the client's choice 
 - A thread an agent started (`thread_prompt`) or a scheduled task's own thread keeps pi's default of 5 minutes: they
   rarely pause and resume, so the dearer write would buy nothing. Claude Code makes the same split.
 
+The harness logs `a prompt cache miss` (a warning) for a request that should have read the cache and did not: the
+request before it wrote the cache, to the same model, within its lifetime, and nothing rewrote the start of the
+request since (a compaction and `/reload` do, on purpose). The line has what the request before sent (`expected`), what
+this one read (`cacheRead`) and wrote, and the seconds between them. A miss means the whole context was paid for
+again: something changed the request's start (a tool's description, text inserted before the end, the thinking
+level), or the provider dropped the entry. `docker compose logs harness | grep "a prompt cache miss"`.
+
 pi-durable has one retention setting for the whole Harness, so `src/cache-retention.ts` chooses per conversation: a
 request hook remembers each conversation's provider session with the retention its thread gets (the bridge's
 `threadOf` says who started it), and a wrapper around the model calls sends a request of that session with it. This
