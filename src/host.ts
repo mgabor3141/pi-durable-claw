@@ -274,21 +274,6 @@ async function main(): Promise<void> {
 			...(updates === undefined ? {} : { updates }),
 			// T3 learns the tailnet URL and the SSH host its editors open paths on ("Open in VS Code").
 			remoteAccess: tailnet,
-			// Each message arrives with the memories recalled for it, stored with it; T3 shows them as a hindsight_recall row.
-			// A message is answered to the client once this has: how long it took is logged, since that is time the
-			// sender waits.
-			...(memory === undefined
-				? {}
-				: {
-						messageContext: async (request) => {
-							const started = performance.now();
-							try {
-								return await memory.recallFor(request);
-							} finally {
-								log.info("memory: recall for a message", { threadId: request.threadId, ms: Math.round(performance.now() - started) });
-							}
-						},
-					}),
 			// What a client waited long for: a call that took over half a second, by name.
 			rpcLog: {
 				onSuccess: (call) => void (call.kind === "request" && call.durationMs >= SLOW_CALL_MS && log.warn("a slow call", { method: call.method, ms: Math.round(call.durationMs) })),
@@ -321,6 +306,20 @@ async function main(): Promise<void> {
 	toolRegistry?.install(t3.secretRequests({ save: (name, value) => secrets.save(name, value) }));
 	// T3's question card: `ask_user` asks the user in the thread and waits for the answer.
 	toolRegistry?.install(t3.askUser());
+	// Each message gets the memories recalled for it, as part of it; T3 shows them as a hindsight_recall row. The run
+	// that answers the message asks, not its sender: how long it took is logged, since the model's answer waits for it.
+	if (memory !== undefined) {
+		toolRegistry?.install(
+			t3.messageContext(async (request) => {
+				const started = performance.now();
+				try {
+					return await memory.recallFor(request);
+				} finally {
+					log.info("memory: recall for a message", { threadId: request.threadId, ms: Math.round(performance.now() - started) });
+				}
+			}),
+		);
+	}
 
 	// Agent `browser_open` pages are T3's preview tabs, the ones the user sees; there is no other browser.
 	// What the harness's own tools need from the bridge: `summarize` generates with T3's text-generation model when it names

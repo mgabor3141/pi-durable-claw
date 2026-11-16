@@ -577,9 +577,9 @@ same way, so an agent is told to ask only what it cannot find out.
 ## When it feels slow
 
 The harness logs two things for it. `a slow call` names a call from T3 that took over half a second (`method`, `ms`).
-`memory: recall for a message` says how long Hindsight took to recall for a message (`ms`): a message is answered to
-T3 once the recall has, so that time is how long a sent message waits before the thread and the sidebar show it as
-received. `docker compose logs harness | grep -e "a slow call" -e "recall for a message"` shows both.
+`memory: recall for a message` says how long Hindsight took to recall for a message (`ms`): the message is taken at
+once and the thread shows as working, and the model's first request waits for the recall (5 seconds at most), so
+that time is added to how long the answer takes to start. `docker compose logs harness | grep -e "a slow call" -e "recall for a message"` shows both.
 
 What T3 is sent is compressed (HTTP gzip, and the socket's frames), as T3's own server does.
 
