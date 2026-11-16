@@ -118,7 +118,7 @@ working directory: a project's root, a Scratch thread's folder, or `/home/agent`
 its `.agents/skills`, and the local time when the conversation started (recorded when it was created, so a prompt
 rendered again still names it). The agent owns its tools under
 `/home/agent`; the workspace image reads `PATH` from `~/.ssh/environment` and includes `jq`. The model tool list is
-`read`, `write`, `edit`, `bash`, `codemode` and the bridge's `request_secret`, and it never changes. The model calls
+`read`, `write`, `edit`, `bash`, `codemode` and the bridge's `request_secret` and `ask_user`, and it never changes. The model calls
 the four workspace tools directly for a single step (a `bash` call is T3's command row), and `codemode` for several
 steps at once or any other tool; scripts call the four too. A model that calls a script-only tool directly anyway
 (`ssh`, say) gets the script to send instead of pi-durable's "Tool ssh is not available": the same tool with the same
@@ -541,6 +541,15 @@ turn runs and when the conversation ends with the agent's answer: there is nothi
 
 T3's Resume button (in the composer after a run was stopped or ran out of usage) does the same. T3 sends "Continue
 where you left off." with it; here that text is not written, not sent to the model and not shown.
+
+## Questions
+
+When the work is blocked on a decision only you can make, the agent asks with `ask_user`: T3 shows a card above the
+composer with one to four questions, each with options (you can also type your own answer) or open, and the sidebar
+says "Needs your input". The agent waits for the answer, 30 minutes unless it asks for longer, and goes on with it.
+Dismiss the card, or leave it, and the agent is told there was no answer: it goes on with its best judgement or ends
+its turn with the questions in its reply. A thread nobody watches (a scheduled task's, another agent's) waits the
+same way, so an agent is told to ask only what it cannot find out.
 
 ## When it feels slow
 

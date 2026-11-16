@@ -308,6 +308,8 @@ async function main(): Promise<void> {
 	toolRegistry?.install(t3.htmlTools({ callers: ["tools"] }));
 	// T3's secret card: `request_secret` asks the user in the thread and saves the answer to the harness's secrets.
 	toolRegistry?.install(t3.secretRequests({ save: (name, value) => secrets.save(name, value) }));
+	// T3's question card: `ask_user` asks the user in the thread and waits for the answer.
+	toolRegistry?.install(t3.askUser());
 
 	// Agent `browser_open` pages are T3's preview tabs, the ones the user sees; there is no other browser.
 	// What the harness's own tools need from the bridge: `summarize` generates with T3's text-generation model when it names
