@@ -51,7 +51,8 @@ it("a person's thread is cached for an hour, another for pi's default, and a sum
 		await child.configure(agent.agent, ctx);
 		persons.add(person.id);
 		for (const conversation of [person, child]) {
-			for (const text of ["one", "two"]) {
+			// A first message long enough that summarizing it is worth reading the context from the cache (`compaction.ts`).
+			for (const text of ["one" + long, "two"]) {
 				await conversation.submit({ type: "input", content: text }, ctx);
 				await conversation.waitForIdle(ctx);
 			}
