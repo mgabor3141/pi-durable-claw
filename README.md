@@ -196,7 +196,8 @@ is stored as the durable `pi.compaction` entry and shown as a completed item in 
 
 `/compact` typed while the agent works compacts at once, beside the run. Sent as a queued message (T3's queue), it
 waits its turn instead: the run before it ends, the context is compacted, and then the messages queued behind it go
-on. In the queue it is a message like any other: it can be edited or removed, and "send now" compacts at once.
+on. In the queue it is a message like any other: it can be edited or removed, and "send now" compacts at once. A
+queued `/reload` waits the same way, and the message behind it gets the prompt rendered again.
 
 The summary is asked for on the conversation itself. The request is the one the agent would send next (its system
 prompt, tools and history, through the same request hooks, with the same options) with one more message that says to
@@ -247,7 +248,8 @@ tenth of the input price (Anthropic's numbers). How long is the client's choice 
 
 The harness logs `a prompt cache miss` (a warning) for a request that should have read the cache and did not: the
 request before it wrote the cache, to the same model, within its lifetime, and nothing rewrote the start of the
-request since (a compaction and `/reload` do, on purpose). The line has what the request before sent (`expected`), what
+request since (a compaction does, on purpose, and so does a prompt change for a model that cannot be sent one in
+place; an update sent in place is checked like any request). The line has what the request before sent (`expected`), what
 this one read (`cacheRead`) and wrote, and the seconds between them. A miss means the whole context was paid for
 again: something changed the request's start (a tool's description, text inserted before the end, the thinking
 level), or the provider dropped the entry. `docker compose logs harness | grep "a prompt cache miss"`.

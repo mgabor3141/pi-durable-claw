@@ -12,6 +12,7 @@ import { createRegistry, defineExtension, defineTool, Harness } from "@earendil-
 import { NodeExecutionEnv } from "@earendil-works/pi-durable/env/node";
 import { openNodeSqliteStorage } from "@earendil-works/pi-durable/storage/sqlite/node";
 import { afterEach, expect, it } from "vitest";
+import { cacheMissExtension, type CacheMiss } from "../src/cache-misses.ts";
 import { workspaceContextExtension } from "../src/context.ts";
 import { fixedPromptExtension, promptRefresh } from "../src/fixed-prompt.ts";
 import { preambleExtension } from "../src/preamble.ts";
@@ -66,7 +67,8 @@ async function setup(compat: object | undefined) {
 	const clock = { now: Date.now() };
 	const slow = defineTool({ name: "noop", description: "Nothing.", parameters: object({}), execute: async () => ({ output: [{ type: "text" as const, text: "done" }] }) });
 	const registry = createRegistry();
-	for (const extension of [fixedPromptExtension({ models, now: () => clock.now }), preambleExtension(), defineExtension({ name: "noop", tools: [slow] }), workspaceContextExtension({ home })]) registry.install(extension);
+	const missed: CacheMiss[] = [];
+	for (const extension of [fixedPromptExtension({ models, now: () => clock.now }), preambleExtension(), defineExtension({ name: "noop", tools: [slow] }), workspaceContextExtension({ home }), cacheMissExtension((miss) => missed.push(miss))]) registry.install(extension);
 	const sent: Message[][] = [];
 	const replies: AssistantMessage[] = [];
 	faux.setResponses(Array.from({ length: 20 }, () => (context: TranscriptContext) => (sent.push(JSON.parse(JSON.stringify(context.messages)) as Message[]), replies.shift() ?? fauxAssistantMessage("ok"))));
@@ -78,7 +80,7 @@ async function setup(compat: object | undefined) {
 		await conversation.waitForIdle(ctx);
 	};
 	const prompt = (request: number) => JSON.stringify(getCurrentSystemMessage(sent.at(request)!));
-	return { harness, home, sent, turn, prompt, clock };
+	return { harness, home, sent, turn, prompt, clock, missed };
 }
 
 it("a model that takes system messages mid-conversation is told of a changed AGENTS.md, after what is cached", { timeout: 60_000 }, async () => {
@@ -110,6 +112,8 @@ it("a model that takes system messages mid-conversation is told of a changed AGE
 		await rm(join(t.home, "AGENTS.md"));
 		await t.turn("four");
 		expect((t.sent.at(-1)!.filter((message) => message.role === "system").at(-1) as { sections?: object }).sections).toEqual({ "global-agents": null });
+		// The provider's cache held over every update (`cache-misses.ts` checks the request after one).
+		expect(t.missed).toEqual([]);
 	} finally {
 		await t.harness.close(ctx);
 	}

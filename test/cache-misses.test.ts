@@ -27,7 +27,7 @@ let nextId = 1;
 const entry = (kind: string, message?: Message): EntryRecord => ({ id: nextId++, conversationId: 1, kind, ...(message === undefined ? {} : { model: [message] }) }) as unknown as EntryRecord;
 /** The entries before a response, newest first, as the hook reads them. */
 const before = (...entries: EntryRecord[]) => entries.reverse();
-const of = (response: AssistantMessage, entries: EntryRecord[], m = model) => cacheMissOf(response, entries, m, 7 as never);
+const of = (response: AssistantMessage, entries: EntryRecord[], m: Parameters<typeof cacheMissOf>[2] = model) => cacheMissOf(response, entries, m, 7 as never);
 
 it("a miss is a request that read little of what the one before it sent, while the cache held it", () => {
 	const first = entry("pi.assistant", answer(T0, { cacheWrite: 100_000, cacheWrite1h: 100_000 }));
@@ -58,6 +58,15 @@ it("a miss is a request that read little of what the one before it sent, while t
 	// Not a miss: the first request after a compaction or a rewritten system prompt, whose start is new on purpose.
 	expect(of(answer(T0 + min, { cacheRead: 12_000, cacheWrite: 30_000 }), before(first, entry("pi.compaction", { role: "user", content: "summary", timestamp: T0 + 2 })))).toBeUndefined();
 	expect(of(answer(T0 + min, { cacheWrite: 100_000 }), before(first, entry("pi.system", { role: "system", content: "", timestamp: T0 + 2 } as Message)))).toBeUndefined();
+	// A model that takes a system message in the middle of a conversation is sent the change in place, so the cache
+	// must hold over it: a miss there is a miss. A tool change needs the same of the model for tools.
+	const takes = { ...model, compat: { supportsMidConvoSystemMessages: true } };
+	const update = entry("pi.system", { role: "system", content: "", sections: { "global-agents": "Rule two." }, timestamp: T0 + 2 } as Message);
+	expect(of(answer(T0 + min, { cacheWrite: 100_000 }), before(first, update), takes)?.expected).toBe(100_010);
+	expect(of(answer(T0 + min, { cacheRead: 100_010, cacheWrite: 900 }), before(first, update), takes)).toBeUndefined();
+	const tools = entry("pi.system", { role: "system", content: "", toolsAdded: [{ name: "t" }], timestamp: T0 + 2 } as unknown as Message);
+	expect(of(answer(T0 + min, { cacheWrite: 100_000 }), before(first, tools), takes), "the tools the request starts with changed").toBeUndefined();
+	expect(of(answer(T0 + min, { cacheWrite: 100_000 }), before(first, tools), { ...model, compat: { supportsMidConvoSystemMessages: true, supportsMidConvoToolChanges: true } })?.expected).toBe(100_010);
 	// Not a miss: the first request of a conversation, and a request that failed (nothing was counted).
 	expect(of(answer(T0, { cacheWrite: 100_000 }), [])).toBeUndefined();
 	expect(of(answer(T0 + min, { input: 0, output: 0 }, { stopReason: "error" }), before(first))).toBeUndefined();

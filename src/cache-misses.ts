@@ -10,7 +10,23 @@ const MISSED_BELOW = 0.9;
 /** How far back a response looks for the request before it: a run's tool results lie between. */
 const LOOK_BACK = 200;
 
-type CachedModel = { readonly provider: string; readonly id: string; readonly promptCache?: { readonly short?: number; readonly long?: number } };
+type CachedModel = { readonly provider: string; readonly id: string; readonly promptCache?: { readonly short?: number; readonly long?: number }; readonly compat?: unknown };
+
+/**
+ * Whether a `pi.system` entry leaves the start of the request as it was. It does for a model that takes system
+ * messages in the middle of a conversation (`compat.supportsMidConvoSystemMessages`): pi sends the entry in place,
+ * behind everything the provider has cached. Tool changes need the same of the model for tools; without it they
+ * change the tools the request starts with. For any other model the entry is folded into the leading prompt.
+ */
+function appended(entry: EntryRecord, model: CachedModel): boolean {
+	const compat = model.compat as { supportsMidConvoSystemMessages?: boolean; supportsMidConvoToolChanges?: boolean; supportsMidConvoToolAdditions?: boolean } | undefined;
+	if (compat?.supportsMidConvoSystemMessages !== true) return false;
+	const message = entry.model?.[0] as { toolsAdded?: readonly unknown[]; toolsRemoved?: readonly unknown[] } | undefined;
+	const added = (message?.toolsAdded?.length ?? 0) > 0;
+	const removed = (message?.toolsRemoved?.length ?? 0) > 0;
+	if (!added && !removed) return true;
+	return compat.supportsMidConvoToolChanges === true || (!removed && compat.supportsMidConvoToolAdditions === true);
+}
 
 /** What a request sent, as its provider counted it: 0 for one that failed before it was counted. */
 export const sentOf = (usage: Usage | undefined): number => (usage?.input ?? 0) + (usage?.cacheRead ?? 0) + (usage?.cacheWrite ?? 0);
@@ -55,15 +71,16 @@ export type CacheMiss = {
 /**
  * The miss a response shows, or `undefined`. `before` are the conversation's entries before the response, newest
  * first. A response missed when the cache still held the request before it (`cacheHolds`) and it read less than
- * `MISSED_BELOW` of what that request sent. Not a miss: the first request after a compaction or a rewritten system
- * prompt (`/reload`), which change the start of the request on purpose.
+ * `MISSED_BELOW` of what that request sent. Not a miss: the first request after a compaction, or after a system
+ * prompt change that rewrote the start of the request (`appended` says which do not: an update sent in place to a
+ * model that takes one is checked like any request, and is where a miss would cost the most).
  */
 export function cacheMissOf(response: AssistantMessage, before: readonly EntryRecord[], model: CachedModel, conversationId: ConversationId): CacheMiss | undefined {
 	if (sentOf(response.usage) <= 0) return undefined;
 	const answered: AssistantMessage[] = [];
 	for (const entry of before) {
 		// Nothing older counts: the request's start was written anew here.
-		if (entry.kind === "pi.compaction" || entry.kind === "pi.system") break;
+		if (entry.kind === "pi.compaction" || (entry.kind === "pi.system" && !appended(entry, model))) break;
 		// The response itself, should it be committed already.
 		answered.unshift(...answeredOf(entry.model ?? []).filter((answer) => answer.timestamp !== response.timestamp));
 	}
