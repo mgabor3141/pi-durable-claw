@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { ToolRegistration } from "@earendil-works/pi-durable";
 import { afterEach, expect, it } from "vitest";
-import { SecretStore, secretsTool, withSecrets } from "../src/secrets.ts";
+import { SecretStore, secretsTool, withSecrets, withSigningSecret } from "../src/secrets.ts";
 import { object } from "../src/schema.ts";
 
 const dirs: string[] = [];
@@ -89,4 +89,16 @@ it("scripts list, set and delete secrets by name", async () => {
 	expect(await run({ action: "set", name: "OPENAI_API_KEY", value: "sk-test-abcdefgh" })).toEqual({ saved: "OPENAI_API_KEY" });
 	expect(secrets.get("OPENAI_API_KEY")).toBe("sk-test-abcdefgh");
 	expect(await run({ action: "delete", name: "PIN" })).toEqual({ deleted: true });
+});
+
+it("schedule_task gets a webhook's signing secret by name, and a prompt that names a secret keeps the name", async () => {
+	const { secrets } = await store();
+	const tool = echo("schedule_task");
+	const wrapped = withSigningSecret(tool, secrets, log);
+	const args = { prompt: "Deploy with ${GITHUB_TOKEN}.", schedule: { type: "webhook", signature: { header: "x-hub-signature-256", encoding: "hex", prefix: "sha256=", secret: "${GITHUB_TOKEN}" } } };
+	await wrapped.execute(args as never, api([]), {} as never);
+	expect(tool.seen[0]).toEqual({ prompt: "Deploy with ${GITHUB_TOKEN}.", schedule: { type: "webhook", signature: { header: "x-hub-signature-256", encoding: "hex", prefix: "sha256=", secret: "ghp_0123456789abcdef" } } });
+	// No signature, or no secret named: the call goes through as it is.
+	await wrapped.execute({ prompt: "p", schedule: { type: "interval", everyMs: 60_000 } } as never, api([]), {} as never);
+	expect(tool.seen[1]).toEqual({ prompt: "p", schedule: { type: "interval", everyMs: 60_000 } });
 });

@@ -25,7 +25,7 @@ import { imageProcessor } from "./images.ts";
 import { McpManager } from "./mcp/manager.ts";
 import { workspaceSource } from "./mcp/config.ts";
 import { McpOAuth } from "./mcp/oauth.ts";
-import { SecretStore, withSecrets } from "./secrets.ts";
+import { SecretStore, withSecrets, withSigningSecret } from "./secrets.ts";
 import { connectWorkspace, ensureKeypair, WORKSPACE_HOME, workspaceEnv, workspaceTarget } from "./workspace.ts";
 import { setting, settingList } from "./env.ts";
 import { webConfig } from "./web.ts";
@@ -259,6 +259,8 @@ async function main(): Promise<void> {
 			label: LABEL,
 			routes: [{ method: "GET", path: OAUTH_CALLBACK_PATH, handle: (request) => oauthCallback(mcp, request) }],
 			titleThread: titleThread(harness, models),
+			// A webhook task's URL: where a sender reaches this harness (CLAW_PUBLIC_URL, else the tailnet address).
+			webhookOrigin: () => publicUrl(root),
 			// T3 shows the requests that failed in a row as one row that counts: "Retrying provider (3/64)".
 			maxRetries: RETRY_POLICY.maxRetries,
 			// Under the image's launcher, T3 shows this harness's version on the pi provider and offers its update.
@@ -302,7 +304,9 @@ async function main(): Promise<void> {
 	// The thread tools for scripts (`thread_prompt`, `thread_wait`, `thread_read`, `thread_search`, `thread_list`,
 	// `thread_cancel`): a conversation that is a thread's head acts as that thread. Installed once the bridge exists,
 	// before anything resumes.
-	toolRegistry?.install(t3.threadTools({ callers: ["tools"] }));
+	// `schedule_task` takes a webhook's signing secret as `${NAME}`, so the value is not written into the conversation.
+	const threadTools = t3.threadTools({ callers: ["tools"] });
+	toolRegistry?.install({ ...threadTools, tools: (threadTools.tools ?? []).map((tool) => (tool.name === "schedule_task" ? withSigningSecret(tool, secrets, log) : tool)) });
 	// T3's inline HTML for scripts: `html_render` shows a page in the caller's thread, kept in /home/agent/attachments;
 	// `html_preview` (with the preview browser) renders one first.
 	toolRegistry?.install(t3.htmlTools({ callers: ["tools"] }));

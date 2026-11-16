@@ -167,6 +167,26 @@ function mapStrings<T>(value: T, map: (text: string) => string): T {
 	return value;
 }
 
+/**
+ * The bridge's `schedule_task` with a webhook's signing secret taken from the harness's secrets: `${NAME}` in
+ * `schedule.signature.secret`, and nowhere else. A task's prompt is text for a model, so a secret's name in it stays
+ * a name: resolved there, the value would be written into every thread the task starts.
+ */
+export function withSigningSecret(tool: ToolRegistration, store: SecretStore, log: Logger): ToolRegistration {
+	return {
+		...tool,
+		async execute(args, api, context) {
+			const signature = (args as { schedule?: { signature?: { secret?: unknown } | null } } | undefined)?.schedule?.signature;
+			if (typeof signature?.secret !== "string") return tool.execute(args, api, context);
+			const used = new Set<string>();
+			const secret = store.substituteKnown(signature.secret, used);
+			if (used.size > 0) log.info("secrets used", { tool: tool.name, names: [...used], conversationId: api.conversationId });
+			const schedule = (args as { schedule: object }).schedule;
+			return tool.execute({ ...(args as object), schedule: { ...schedule, signature: { ...signature, secret } } } as never, api, context);
+		},
+	};
+}
+
 /** A single-quoted shell word. */
 const shellQuote = (value: string) => `'${value.replaceAll("'", `'"'"'`)}'`;
 

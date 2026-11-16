@@ -483,6 +483,20 @@ into the calling thread by default, or into a new thread per run with `bindToCur
 `scheduledTaskId` it changes or pauses a task), `list_scheduled_tasks` and `delete_scheduled_task`. The tasks are the
 ones T3's Settings → Scheduled tasks shows.
 
+**Webhooks.** A task can run on a request instead of a clock (`schedule: { type: "webhook" }`, or "Webhook" in T3's
+task form). It gets a URL, `<CLAW_PUBLIC_URL>/api/hooks/<task>/<token>`, and each request to it runs the task once,
+with the request in the prompt: `{{body.path}}`, `{{headers.name}}`, `{{query.name}}`, `{{body}}`, `{{request}}`.
+What comes from the request is marked as untrusted in the prompt, since anyone who has the URL can send it. A task
+can check a signature (HMAC-SHA256 over the body, as GitHub and Stripe sign; an agent passes the signing secret as
+`${NAME}` from the harness's secrets), filter requests (`headers.x-github-event` equals `push`), drop a sender's
+retries, and fold a burst of requests into one run. T3's task page lists the last deliveries with what each did, and
+rotates the URL.
+
+The sender has to reach the harness. `CLAW_PUBLIC_URL` on the internet works as it is. A tailnet address is reachable
+only from your tailnet, so GitHub cannot call it unless you put Tailscale Funnel or another public route in front
+and set `CLAW_PUBLIC_URL` to it. T3 Connect's relay, which holds requests while a machine is offline, is not here: a
+request sent while the harness is down is lost unless its sender retries.
+
 T3's own thread tools are served to outside MCP clients at `<CLAW_PUBLIC_URL>/mcp`. A client signs in over OAuth as it would to T3:
 it opens T3's approval page, where you choose its access and approve with a pairing code (`claw pair`) or in one click
 from a signed-in browser. It then appears under Settings → Sharing & access, where it can be revoked. Every thread
@@ -571,7 +585,6 @@ ends it after that long (pi-durable's codemode; it does not use the sandbox's 5-
 
 - No account integrations are configured by default. HTTP MCP servers can be added as above (with OAuth); stdio
   servers and MCP resources are not supported. Web search, page view and the browser are the built-in connectors.
-- Scheduled tasks run on intervals or fixed times; there are no webhook triggers.
 - T3 projects do not map to containers: use "No project" threads. The project picker, file panel and search go
   through the workspace execution environment, so a project must live under the workspace's `/home/agent` (the
   harness's data directory is not visible there).
