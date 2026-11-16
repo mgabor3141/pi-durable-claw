@@ -207,8 +207,10 @@ A thread that is snoozed, settled, archived, waiting for an answer or for child 
 of the harness keeps the compactions that were waiting: threads whose last run ended within the cache's lifetime are
 looked at again when it starts, and when the setting is turned on.
 
-A summary from a transcript is what is left when that cannot work: the context is already over the model's window (an
-overflow), the request fails, or the model writes no summary. It is pi's coding-agent summary prompt over the
+A summary from a transcript is what is left when that cannot work or would cost more: the context is already over the
+model's window (an overflow), the request fails, the model writes no summary, or the prompt cache has expired (a
+`/compact` after a long pause: asked on the conversation, the whole context would be written to the cache again, at
+more than the input price, for one request). It is pi's coding-agent summary prompt over the
 conversation as text: a previous summary is updated through `<previous-summary>`, a cut inside a user turn gets a
 separate turn-prefix summary, and Critical Context asks for the relevant files. The log says why it was used.
 

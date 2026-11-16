@@ -1,5 +1,6 @@
 import type { Context } from "@earendil-works/chord/context";
 import type { AssistantMessage, Message, ModelThinkingLevel, SimpleStreamOptions, ToolResultMessage, Usage } from "@earendil-works/pi-ai";
+import { estimateMessageTokens } from "@earendil-works/pi-ai/utils/estimate";
 import { serializeConversation } from "@earendil-works/pi-coding-agent";
 import {
 	COMPACTION_INLINE_PROMPT,
@@ -45,7 +46,9 @@ import {
  * From a transcript (`summarize`): pi's compaction prompt, copied from the coding agent, over the conversation
  * serialized as text, with an update prompt when a previous summary exists and a split-turn prefix summary. It is what
  * is left when the first way cannot work: the context is already too long for the model (an `overflow` compaction, or a
- * request the provider refuses), or the model would not write a summary. All prompt text lives in `prompts.ts`.
+ * request the provider refuses), the model would not write a summary, or the first way would cost more
+ * (`cheaperFromTranscript`: the cache has expired, so the whole conversation would be written to it again for one
+ * request). All prompt text lives in `prompts.ts`.
  */
 
 /** A compaction hook's `api` is its task's runtime; these are the parts of it used here. */
@@ -304,6 +307,47 @@ async function requestPayload(runtime: CompactionRuntime, extensions: readonly E
 	return current;
 }
 
+/** A request is sent this long before the cache would expire, or it is taken as expired. */
+const CACHE_MARGIN_MS = 10_000;
+/** Lifetimes of a provider's cache when the model's catalog entry has none: Anthropic's. */
+const CACHE_SECONDS = { short: 300, long: 3600 } as const;
+/** A cached token's price against an uncached one's when the model has no prices: Anthropic's. */
+const CACHE_READ_RATE = 0.1;
+
+const sentOf = (usage: Usage | undefined) => (usage?.input ?? 0) + (usage?.cacheRead ?? 0) + (usage?.cacheWrite ?? 0);
+
+/**
+ * Why a summary from a transcript costs less than one asked for on the conversation, or `undefined` when it does not.
+ * On the conversation the request reads everything from the provider's cache, at a fraction of the input price, when
+ * the cache still holds it: written by the conversation's last request, to the same model, within the lifetime it was
+ * written with (a read renews it). When it does not, the whole context is written to the cache again, at more than
+ * the input price, for an entry the compaction then makes useless, where a transcript of the summarized part is
+ * shorter and paid once. pi's in-context compaction (earendil-works/pi#10577) decides the same way.
+ */
+export function cheaperFromTranscript(
+	messages: readonly Message[],
+	summarized: readonly Message[],
+	model: { readonly provider: string; readonly id: string; readonly promptCache?: { readonly short?: number; readonly long?: number }; readonly cost?: unknown },
+	now: number,
+): string | undefined {
+	const answers = messages.filter((message): message is AssistantMessage => message.role === "assistant" && sentOf(message.usage) > 0);
+	const last = answers.at(-1);
+	if (last === undefined) return "no request of this context was answered yet, so no cache holds it";
+	if (last.provider !== model.provider || last.model !== model.id) return "the last request went to another model, whose cache this model does not read";
+	if (last.usage.cacheRead + last.usage.cacheWrite <= 0) return "the last request used no prompt cache";
+	// The lifetime is the one the newest write asked for: Anthropic counts its one-hour tokens apart.
+	const wrote = answers.findLast((answer) => answer.usage.cacheWrite > 0);
+	const tier = ((wrote?.usage as { cacheWrite1h?: number } | undefined)?.cacheWrite1h ?? 0) > 0 ? "long" : "short";
+	const lifetimeMs = (model.promptCache?.[tier] ?? CACHE_SECONDS[tier]) * 1000;
+	const age = now - last.timestamp;
+	if (age > lifetimeMs - CACHE_MARGIN_MS) return `the prompt cache has expired: ${Math.round(age / 60_000)} min since the last request, kept for ${Math.round(lifetimeMs / 60_000)}`;
+	const cost = model.cost as { input?: number; cacheRead?: number } | undefined;
+	const rate = cost?.input !== undefined && cost.input > 0 && cost.cacheRead !== undefined ? cost.cacheRead / cost.input : CACHE_READ_RATE;
+	const cached = (sentOf(last.usage) + last.usage.output) * rate;
+	const transcript = summarized.reduce((sum, message) => sum + estimateMessageTokens(message), 0);
+	return transcript < cached ? "the part to summarize is small: a transcript of it costs less than reading the whole context from the cache" : undefined;
+}
+
 function refusal(call: { id: string; name: string }): ToolResultMessage {
 	return { role: "toolResult", toolCallId: call.id, toolName: call.name, content: [{ type: "text", text: COMPACTION_TOOL_REFUSED }], isError: true, timestamp: Date.now() };
 }
@@ -337,6 +381,9 @@ async function summarizeOnConversation(
 	if (end === null) return gaveUp("tools are running and nothing precedes them");
 	if (end !== undefined) view = await runtime.context(runtime.conversationId, context, { at: end });
 	if (!view.messages.some((message) => message.role !== "system")) return gaveUp("there is nothing to summarize");
+
+	const cheaper = cheaperFromTranscript(view.messages, compaction.messages, model, Date.now());
+	if (cheaper !== undefined) return gaveUp(cheaper);
 
 	const extensions = agent.extensions ?? [];
 	const prompt = withCompactionFocus(COMPACTION_INLINE_PROMPT, compaction.instructions);

@@ -11,7 +11,7 @@ import { createRegistry, defineExtension, defineTool, Harness, type Extension } 
 import { NodeExecutionEnv } from "@earendil-works/pi-durable/env/node";
 import { openNodeSqliteStorage } from "@earendil-works/pi-durable/storage/sqlite/node";
 import { afterEach, expect, it } from "vitest";
-import { compactionExtension, type SummaryUsage } from "../src/compaction.ts";
+import { cheaperFromTranscript, compactionExtension, type SummaryUsage } from "../src/compaction.ts";
 import { COMPACTION_INLINE_PROMPT, COMPACTION_TOOL_REFUSED } from "../src/prompts.ts";
 import { object } from "../src/schema.ts";
 
@@ -65,13 +65,14 @@ async function setup(extra: readonly Extension[] = []) {
 	return { harness, conversation, sent, answers, replies, summaries, gaveUp, turn, entries, summaryRequested: () => new Promise<void>((resolve) => (onSummaryRequest = resolve)) };
 }
 
-// Answers long enough that a compaction has something to cut (it keeps the last 20k tokens).
+// Messages long enough that a compaction has something to cut (it keeps the last 20k tokens), and that what it cuts
+// is worth reading the context from the cache for (`cheaperFromTranscript`).
 const long = "x".repeat(60_000);
 
 it("asks for the summary with the agent's own request and one more message", { timeout: 60_000 }, async () => {
 	const t = await setup();
 	try {
-		await t.turn("one", fauxAssistantMessage("first" + long));
+		await t.turn("one" + long, fauxAssistantMessage("first" + long));
 		await t.turn("two", fauxAssistantMessage("second" + long));
 		const last = t.sent.at(-1)!;
 		await t.conversation.compact("the tests", ctx);
@@ -109,7 +110,7 @@ it("answers a tool call the model makes instead, and asks again", { timeout: 60_
 	const tool = defineTool({ name: "probe", description: "Probe.", parameters: object({}), execute: async () => (ran.push("probe"), { output: [{ type: "text" as const, text: "ran" }] }) });
 	const t = await setup([defineExtension({ name: "probe", tools: [tool] })]);
 	try {
-		await t.turn("one", fauxAssistantMessage("first" + long));
+		await t.turn("one" + long, fauxAssistantMessage("first" + long));
 		await t.turn("two", fauxAssistantMessage("second" + long));
 		t.answers.push(() => fauxAssistantMessage([fauxToolCall("probe", {})], { stopReason: "toolUse" }));
 		await t.conversation.compact(undefined, ctx);
@@ -135,7 +136,7 @@ it("answers a tool call the model makes instead, and asks again", { timeout: 60_
 it("falls back to the transcript summary when the model will not write one", { timeout: 60_000 }, async () => {
 	const t = await setup();
 	try {
-		await t.turn("one", fauxAssistantMessage("first" + long));
+		await t.turn("one" + long, fauxAssistantMessage("first" + long));
 		await t.turn("two", fauxAssistantMessage("second" + long));
 		for (let i = 0; i < 3; i++) t.answers.push(() => fauxAssistantMessage([fauxToolCall("nothing", {})], { stopReason: "toolUse" }));
 		await t.conversation.compact(undefined, ctx);
@@ -170,7 +171,7 @@ it("summarizes while the thread works: up to the answer whose tools still run", 
 	});
 	const t = await setup([defineExtension({ name: "slow", tools: [tool] })]);
 	try {
-		await t.turn("one", fauxAssistantMessage("first" + long));
+		await t.turn("one" + long, fauxAssistantMessage("first" + long));
 		await t.turn("two", fauxAssistantMessage("second" + long));
 		t.replies.push(fauxAssistantMessage([fauxToolCall("slow", {})], { stopReason: "toolUse" }), fauxAssistantMessage("after the tool"));
 		await t.conversation.submit({ type: "input", content: "three" }, ctx);
@@ -201,4 +202,30 @@ it("summarizes while the thread works: up to the answer whose tools still run", 
 		release();
 		await t.harness.close(ctx);
 	}
+});
+
+it("asks on the conversation only while its cache holds, and only when that is the cheaper way", () => {
+	const model = { provider: "anthropic", id: "opus", promptCache: { short: 300, long: 3600 }, cost: { input: 5, cacheRead: 0.5 } };
+	const T0 = 1_000_000_000_000;
+	const user = (text: string): Message => ({ role: "user", content: [{ type: "text", text }], timestamp: T0 });
+	const answer = (usage: object, more: object = {}): Message => ({ ...fauxAssistantMessage("ok"), provider: "anthropic", model: "opus", timestamp: T0, usage: { input: 10, output: 500, cacheRead: 0, cacheWrite: 0, totalTokens: 0, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 }, ...usage }, ...more }) as Message;
+	const summarized = [user("word ".repeat(60_000))];
+	const hour = [user("a"), answer({ cacheWrite: 150_000, cacheWrite1h: 150_000 }), user("b"), answer({ cacheRead: 150_000 })];
+	const five = [user("a"), answer({ cacheWrite: 150_000 }), user("b"), answer({ cacheRead: 150_000, cacheWrite: 900 })];
+	const min = 60_000;
+
+	// Within the lifetime the cache was written with; a read renews it, and the lifetime is the newest write's.
+	expect(cheaperFromTranscript(hour, summarized, model, T0 + 58 * min)).toBeUndefined();
+	expect(cheaperFromTranscript(hour, summarized, model, T0 + 61 * min)).toBe("the prompt cache has expired: 61 min since the last request, kept for 60");
+	expect(cheaperFromTranscript(five, summarized, model, T0 + 3 * min)).toBeUndefined();
+	expect(cheaperFromTranscript(five, summarized, model, T0 + 6 * min)).toBe("the prompt cache has expired: 6 min since the last request, kept for 5");
+	// A model without lifetimes in its catalog entry: Anthropic's.
+	expect(cheaperFromTranscript(five, summarized, { provider: "anthropic", id: "opus" }, T0 + 6 * min)).toMatch(/kept for 5$/);
+	// No cache to read: nothing answered, a request that failed, another model's cache, a provider without one.
+	expect(cheaperFromTranscript([user("a")], summarized, model, T0)).toMatch(/^no request of this context was answered yet/);
+	expect(cheaperFromTranscript([...hour, user("c"), answer({ input: 0, output: 0 }, { stopReason: "error" })], summarized, model, T0 + min), "a failed request is not the last request").toBeUndefined();
+	expect(cheaperFromTranscript(hour, summarized, { ...model, id: "sonnet" }, T0 + min)).toMatch(/^the last request went to another model/);
+	expect(cheaperFromTranscript([user("a"), answer({ input: 150_000 })], summarized, model, T0 + min)).toBe("the last request used no prompt cache");
+	// Almost nothing to summarize: its transcript costs less than a tenth of the whole context.
+	expect(cheaperFromTranscript(hour, [user("a few words")], model, T0 + min)).toMatch(/^the part to summarize is small/);
 });
