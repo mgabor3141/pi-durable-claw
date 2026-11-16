@@ -549,6 +549,8 @@ nothing is written to the conversation, and a restart of the harness forgets the
 - `/undo step` takes back only the agent's last step (one response with its tool calls and their results) and keeps
   your message; `/undo step 2` the last two. It stops at your message: going further is `/undo`.
 - `/redo` brings back what the last undo took, one undo at a time, until something new is written to the thread.
+  After that, `/redo fork` opens what the undo took as a new thread and leaves this one as it is; the notes memory
+  wrote from the undone turns are written again, as after a redo.
 
 Nothing of the conversation is deleted: an undo moves the thread to a copy that ends earlier, and a redo moves it
 back. What changes is what the model is sent. Files in the workspace, anything done outside the conversation and
