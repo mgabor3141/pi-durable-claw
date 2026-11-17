@@ -10,6 +10,7 @@
 // keys), the listen address (default 127.0.0.1), the workspace's SSH address (default workspace:22), and where the
 // harness's public key is published for the workspace (default: not published). Your settings are environment
 // variables, listed in .env.example; compose passes .env whole. Models: <root>/pi/auth.json (and models.json).
+import { promptUpdateTitle } from "./prompt-update-title.ts";
 import { statSync } from "node:fs";
 import { parseArgs } from "node:util";
 import { join } from "node:path";
@@ -270,6 +271,8 @@ async function main(): Promise<void> {
 			webhookOrigin: () => publicUrl(root),
 			// T3 shows the requests that failed in a row as one row that counts: "Retrying provider (3/64)".
 			maxRetries: RETRY_POLICY.maxRetries,
+			// What a change of the prompt is called in the thread: "Agent instructions updated: ~/AGENTS.md changed".
+			promptUpdateTitle,
 			// Under the image's launcher, T3 shows this harness's version on the pi provider and offers its update.
 			...(updates === undefined ? {} : { updates }),
 			// T3 learns the tailnet URL and the SSH host its editors open paths on ("Open in VS Code").

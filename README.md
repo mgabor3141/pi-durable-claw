@@ -176,7 +176,9 @@ run's tool calls):
   anyway. While the cache holds, or where nothing says whether the provider caches, the prompt is kept and `/reload`
   is the way.
 
-The thread shows a "System prompt updated: global-agents" row where a section changed. A file that cannot be read
+The thread says so where it happened, as a quiet row among the agent's work: "Agent instructions updated: ~/AGENTS.md
+changed", "… skill added (release-notes)", "… MCP server removed (github)". Opened, the row lists the lines that
+differ. A prompt rendered again the same shows nothing. A file that cannot be read
 (the workspace does not answer) leaves its section as the thread shows it.
 
 The codemode section is a catalog (`src/codemode-catalog.ts`): `read`, `write`, `edit` and `bash`, whose definitions the
