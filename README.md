@@ -582,8 +582,8 @@ parted, and the turn each of them is at carries its title. Going to a turn of an
 and leaves that one alone.
 
 The tree does not depend on the threads' records being right: every copy ever forked from this thread's conversation
-is in it, so a line stays findable however it was left. Only what a deleted thread was on stays gone. `/thread` is the
-same command.
+is in it, so a message stays findable however its line was left, a deleted thread's included (its turns are there,
+with no thread named on them).
 
 A long thread shows the turns around where you are, with buttons for more. The page is shown here only: not sent to
 the model, gone when the harness restarts, and its buttons work for 30 minutes after their last use (run `/tree`
