@@ -11,6 +11,7 @@ import { NodeExecutionEnv } from "@earendil-works/pi-durable/env/node";
 import { openNodeSqliteStorage } from "@earendil-works/pi-durable/storage/sqlite/node";
 import { afterEach, expect, it } from "vitest";
 import { cacheMissExtension, cacheMissOf, type CacheMiss } from "../src/cache-misses.ts";
+import { answerOf, MINUTE as min, T0 } from "./answers.ts";
 
 const ctx = BACKGROUND_CONTEXT;
 const dirs: string[] = [];
@@ -19,10 +20,7 @@ afterEach(async () => {
 });
 
 const model = { provider: "anthropic", id: "opus", promptCache: { short: 300, long: 3600 } };
-const T0 = 1_000_000_000_000;
-const min = 60_000;
-const answer = (at: number, usage: object, more: object = {}): AssistantMessage =>
-	({ ...fauxAssistantMessage("ok"), provider: "anthropic", model: "opus", timestamp: at, usage: { input: 10, output: 500, cacheRead: 0, cacheWrite: 0, totalTokens: 0, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 }, ...usage }, ...more }) as AssistantMessage;
+const answer = (at: number, usage: object, more: object = {}) => answerOf(model, at, usage, more);
 let nextId = 1;
 const entry = (kind: string, message?: Message): EntryRecord => ({ id: nextId++, conversationId: 1, kind, ...(message === undefined ? {} : { model: [message] }) }) as unknown as EntryRecord;
 /** The entries before a response, newest first, as the hook reads them. */

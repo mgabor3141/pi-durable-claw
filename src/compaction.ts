@@ -2,7 +2,7 @@ import type { Context } from "@earendil-works/chord/context";
 import type { AssistantMessage, Message, ModelThinkingLevel, SimpleStreamOptions, ToolResultMessage, Usage } from "@earendil-works/pi-ai";
 import { estimateMessageTokens } from "@earendil-works/pi-ai/utils/estimate";
 import { serializeConversation } from "@earendil-works/pi-coding-agent";
-import { answeredOf, cacheHolds, sentOf } from "./cache-misses.ts";
+import { answeredOf, cacheHolds, sentOf } from "./prompt-cache.ts";
 import {
 	COMPACTION_INLINE_PROMPT,
 	COMPACTION_NO_HISTORY,
@@ -264,7 +264,7 @@ async function summarize(
  * answer that called them, since a request with a call and no result is refused. That is where the request in flight
  * ended too, so its cache entry is read whole. `null`: nothing before the open call.
  */
-export function askableEnd(view: ContextView): EntryId | undefined | null {
+function askableEnd(view: ContextView): EntryId | undefined | null {
 	const open = new Map<string, number>();
 	view.contributions.forEach((messages, index) => {
 		for (const message of messages) {

@@ -1,7 +1,7 @@
 import type { Context } from "@earendil-works/chord/context";
 import type { Message } from "@earendil-works/pi-ai";
 import { defineExtension, wrapSection, type ContextView, type ConversationId, type Extension } from "@earendil-works/pi-durable";
-import { answeredOf, cacheHolds } from "./cache-misses.ts";
+import { answeredOf, cacheHolds, type CachedModel } from "./prompt-cache.ts";
 
 /**
  * Every section of the harness's system prompt, in no particular order. test/fixed-prompt.test.ts checks the list
@@ -27,15 +27,7 @@ const IN_EFFECT = "preamble";
  * agent edits to change how the agent works. The rest (the preamble, the tool catalog, the working directory, the
  * start time) changes with a deploy or not at all.
  */
-export const FOLLOWED_SECTIONS: ReadonlySet<string> = new Set(["global-agents", "local-agents", "global-skills", "local-skills", "mcp-servers"]);
-
-/** What `promptRefresh` reads of a model. */
-export type RefreshModel = {
-	readonly provider: string;
-	readonly id: string;
-	readonly promptCache?: { readonly short?: number; readonly long?: number };
-	readonly compat?: unknown;
-};
+const FOLLOWED_SECTIONS: ReadonlySet<string> = new Set(["global-agents", "local-agents", "global-skills", "local-skills", "mcp-servers"]);
 
 /**
  * What a request's preparation does with a prompt that is in effect:
@@ -52,7 +44,7 @@ export type RefreshModel = {
  * it for a tool's output. Where nothing says whether the provider's cache holds, the prompt is kept: `/reload` is
  * the way then.
  */
-export function promptRefresh(messages: readonly Message[], model: RefreshModel | undefined, now: number): "keep" | "update" | "reload" {
+export function promptRefresh(messages: readonly Message[], model: CachedModel | undefined, now: number): "keep" | "update" | "reload" {
 	if (model === undefined || messages.findLast((message) => message.role !== "system")?.role !== "user") return "keep";
 	if ((model.compat as { supportsMidConvoSystemMessages?: boolean } | undefined)?.supportsMidConvoSystemMessages === true) return "update";
 	const cache = cacheHolds(answeredOf(messages), model, now);
@@ -66,7 +58,7 @@ export type FixedPromptOptions = {
 	readonly now?: () => number;
 };
 
-type ModelCatalog = { getModel(provider: string, modelId: string): RefreshModel | undefined };
+type ModelCatalog = { getModel(provider: string, modelId: string): CachedModel | undefined };
 
 /** A preparation's `read` is its task's runtime; this is the part of it used here. */
 type PreparationRuntime = { context?(conversationId: ConversationId, context: Context): Promise<ContextView> };

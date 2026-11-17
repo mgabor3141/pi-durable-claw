@@ -14,6 +14,7 @@ import { afterEach, expect, it } from "vitest";
 import { cheaperFromTranscript, compactionExtension, type SummaryUsage } from "../src/compaction.ts";
 import { COMPACTION_INLINE_PROMPT, COMPACTION_TOOL_REFUSED } from "../src/prompts.ts";
 import { object } from "../src/schema.ts";
+import { answerOf, T0 } from "./answers.ts";
 
 const ctx = BACKGROUND_CONTEXT;
 const dirs: string[] = [];
@@ -206,9 +207,8 @@ it("summarizes while the thread works: up to the answer whose tools still run", 
 
 it("asks on the conversation only while its cache holds, and only when that is the cheaper way", () => {
 	const model = { provider: "anthropic", id: "opus", promptCache: { short: 300, long: 3600 }, cost: { input: 5, cacheRead: 0.5 } };
-	const T0 = 1_000_000_000_000;
 	const user = (text: string): Message => ({ role: "user", content: [{ type: "text", text }], timestamp: T0 });
-	const answer = (usage: object, more: object = {}): Message => ({ ...fauxAssistantMessage("ok"), provider: "anthropic", model: "opus", timestamp: T0, usage: { input: 10, output: 500, cacheRead: 0, cacheWrite: 0, totalTokens: 0, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 }, ...usage }, ...more }) as Message;
+	const answer = (usage: object, more: object = {}): Message => answerOf(model, T0, usage, more);
 	const summarized = [user("word ".repeat(60_000))];
 	const hour = [user("a"), answer({ cacheWrite: 150_000, cacheWrite1h: 150_000 }), user("b"), answer({ cacheRead: 150_000 })];
 	const five = [user("a"), answer({ cacheWrite: 150_000 }), user("b"), answer({ cacheRead: 150_000, cacheWrite: 900 })];

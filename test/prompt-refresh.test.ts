@@ -13,6 +13,7 @@ import { NodeExecutionEnv } from "@earendil-works/pi-durable/env/node";
 import { openNodeSqliteStorage } from "@earendil-works/pi-durable/storage/sqlite/node";
 import { afterEach, expect, it } from "vitest";
 import { cacheMissExtension, type CacheMiss } from "../src/cache-misses.ts";
+import { answerOf, MINUTE as min, T0 } from "./answers.ts";
 import { workspaceContextExtension } from "../src/context.ts";
 import { fixedPromptExtension, promptRefresh } from "../src/fixed-prompt.ts";
 import { preambleExtension } from "../src/preamble.ts";
@@ -24,11 +25,8 @@ afterEach(async () => {
 	await Promise.all(dirs.splice(0).map((dir) => rm(dir, { recursive: true, force: true })));
 });
 
-const T0 = 1_000_000_000_000;
-const min = 60_000;
 const user = (text: string): Message => ({ role: "user", content: text, timestamp: T0 });
-const answer = (usage: object, more: object = {}): Message =>
-	({ ...fauxAssistantMessage("ok"), provider: "local", model: "m", timestamp: T0, usage: { input: 10, output: 5, cacheRead: 0, cacheWrite: 0, totalTokens: 0, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 }, ...usage }, ...more }) as Message;
+const answer = (usage: object, more: object = {}): Message => answerOf({ provider: "local", id: "m" }, T0, usage, more);
 const result: Message = { role: "toolResult", toolCallId: "c", toolName: "bash", content: [], isError: false, timestamp: T0 } as Message;
 
 it("decides by what the model takes and whether its cache holds, and only at a user's message", () => {
