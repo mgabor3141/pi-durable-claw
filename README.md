@@ -577,6 +577,10 @@ part after. Each row has two buttons:
   new is written, and the line you left stays in the tree.
 - **Fork** opens that turn and what led to it as a new thread, and leaves this one as it is.
 
+Threads forked from this one (and the one it was forked from) are in the same tree: their turns hang where they
+parted, and the turn each of them is at carries its title. Going to a turn of another thread moves this thread there
+and leaves that one alone.
+
 A long thread shows the turns around where you are, with buttons for more. The page is shown here only: not sent to
 the model, gone when the harness restarts, and its buttons work for 30 minutes after their last use (run `/thread`
 again for a fresh one). Memory does not follow a move either.
