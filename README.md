@@ -565,6 +565,20 @@ Memory does not follow. The notes written from a turn record what happened, and 
 taken back: a later recall, in this thread or another, can bring one up. Removing a memory is done in Hindsight
 itself; there is no tool for it yet.
 
+### The thread's tree
+
+Because nothing is deleted, a thread that was undone and written on again has several lines. `/thread` shows them all
+as a tree of turns, in the thread: the line you are on as a column, the ones undos left indented under the turn they
+part after. Each row has two buttons:
+
+- **Go here** moves the thread to the end of that turn, on whichever line it is. `/redo` goes back, until something
+  new is written, and the line you left stays in the tree.
+- **Fork** opens that turn and what led to it as a new thread, and leaves this one as it is.
+
+A long thread shows the turns around where you are, with buttons for more. The page is shown here only: not sent to
+the model, gone when the harness restarts, and its buttons work for 30 minutes after their last use (run `/thread`
+again for a fresh one). Memory does not follow a move either.
+
 ## Continue without a message
 
 `/continue` lets the agent go on from where the conversation stands: after a Stop, after a run that failed (out of
