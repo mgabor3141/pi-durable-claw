@@ -569,7 +569,7 @@ itself; there is no tool for it yet.
 
 ### The thread's tree
 
-Because nothing is deleted, a thread that was undone and written on again has several lines. `/thread` shows them all
+Because nothing is deleted, a thread that was undone and written on again has several lines. `/tree` shows them all
 as a tree of turns, in the thread: the line you are on as a column, the ones undos left indented under the turn they
 part after. Each row has two buttons:
 
@@ -581,8 +581,12 @@ Threads forked from this one (and the one it was forked from) are in the same tr
 parted, and the turn each of them is at carries its title. Going to a turn of another thread moves this thread there
 and leaves that one alone.
 
+The tree does not depend on the threads' records being right: every copy ever forked from this thread's conversation
+is in it, so a line stays findable however it was left. Only what a deleted thread was on stays gone. `/thread` is the
+same command.
+
 A long thread shows the turns around where you are, with buttons for more. The page is shown here only: not sent to
-the model, gone when the harness restarts, and its buttons work for 30 minutes after their last use (run `/thread`
+the model, gone when the harness restarts, and its buttons work for 30 minutes after their last use (run `/tree`
 again for a fresh one). Memory does not follow a move either.
 
 ## Continue without a message
