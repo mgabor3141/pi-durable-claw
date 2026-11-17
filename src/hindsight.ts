@@ -12,8 +12,7 @@
  *   to it) gets one more message asking what in the turn is worth remembering, answered by T3's text-generation model.
  *   The notes, or nothing, are stored as the turn's document, with the turn's entry range, which is how recall knows
  *   where a memory came from. One turn at a time, off the run: a turn not yet written when the harness stops is lost.
- * - Undo: the notes follow the conversation. An undo (the bridge's `undo` hooks) removes the documents of the turns
- *   it took back, and the ones not written yet are not written; a redo writes them again. The user is told each time.
+ * - An undo does not reach memory: the notes of turns that were taken back stay, as a record of what happened.
  * - Tools for scripts: `hindsight_recall`, `hindsight_retain`, `hindsight_reflect`.
  *
  * Memory never stops a turn: a failed recall says so in the block, a failed retain is logged.
@@ -21,7 +20,7 @@
 import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
 import type { AssistantMessage, Message, Model, Models, ToolResultMessage } from "@earendil-works/pi-ai";
 import { defineExtension, defineTool, GenerationTask, hook, type ContextView, type ConversationId, type EntryId, type EntryRecord, type Extension, type Harness, type ModelRef, type ToolRegistration } from "@earendil-works/pi-durable";
-import { createClient, createConfig, HindsightClient, sdk } from "@vectorize-io/hindsight-client";
+import { HindsightClient } from "@vectorize-io/hindsight-client";
 import { messageContextData, type MessageContextAnswer, type MessageContextRequest, type TextGenerationModel } from "@mgabor3141/pi-durable-t3";
 import { int, opt, str } from "@earendil-works/pi-schema";
 import { MEMORY_NOTES_CONTEXT, MEMORY_NOTES_NO_TOOLS, MEMORY_RECALL_DESCRIPTION, MEMORY_REFLECT_DESCRIPTION, MEMORY_RETAIN_DESCRIPTION, memoriesBlock, memoriesUnavailable, memoryNotesPrompt } from "./prompts.ts";
@@ -56,12 +55,6 @@ const NOTES_MAX_TOOL_ROUNDS = 2;
 const NOTES_TIMEOUT_MS = 10 * 60_000;
 /** How long storing the notes may take. */
 const RETAIN_TIMEOUT_MS = 30_000;
-/** How long a turn's stored notes are remembered here with Hindsight's operation, for an undo that comes while it works. */
-const POSTED_KEPT_MS = 60 * 60_000;
-/** How long an undo waits for Hindsight to finish storing notes it is to remove, and how often it asks. */
-const SWEEP_WAIT_MS = 30 * 60_000;
-/** Documents listed per request when an undo looks for a conversation's notes. */
-const LIST_PAGE = 100;
 /** Of the model's context window, what the copy may fill (the rest is the prompt, the answer and estimate error). */
 const NOTES_WINDOW_SHARE = 0.85;
 
@@ -214,18 +207,8 @@ function signalWithin(ms: number, signal?: AbortSignal): AbortSignal {
 
 type NotesJob = { readonly conversationId: ConversationId; readonly first: EntryId; readonly last: EntryId; readonly models: Models };
 
-/** A turn the memory step wrote notes of, or was about to: where it ran and its entries. An undo hands these to its redo. */
-type KeptTurn = { readonly conversationId: number; readonly first: number; readonly last: number };
-const turnKey = (turn: KeptTurn): string => `${turn.conversationId}:${turn.last}`;
 /** A turn's document: named by the conversation it ran in and its first entry. */
 const documentOf = (conversationId: number, first: number): string => `conversation-${conversationId}-entry-${first}`;
-const DOCUMENT_ID = /^conversation-(\d+)-entry-(\d+)$/u;
-const isKeptTurn = (value: unknown): value is KeptTurn =>
-	typeof value === "object" && value !== null && ["conversationId", "first", "last"].every((key) => Number.isInteger((value as Record<string, unknown>)[key]));
-const turns = (n: number): string => (n === 1 ? "this turn" : `these ${n} turns`);
-
-/** What an undo or a redo did to memory, for the bridge's `undo` hooks: the note is shown to the user. */
-export type MemoryUndoAnswer = { readonly note?: string; readonly kept?: KeptTurn[] };
 
 export class Hindsight {
 	readonly config: HindsightConfig;
@@ -234,23 +217,12 @@ export class Hindsight {
 	#host: MemoryHost | undefined;
 	readonly #jobs: NotesJob[] = [];
 	#draining: Promise<void> | undefined;
-	/** The memory step under way: an undo that takes its turn back abandons it. */
-	#writing: { readonly job: NotesJob; readonly abandon: AbortController } | undefined;
-	/** Notes stored lately, with the operation Hindsight stores them in: it works on after it has answered. */
-	#posted: { readonly turn: KeptTurn; readonly documentId: string; readonly operationId: string; readonly at: number }[] = [];
-	/** Documents an undo removes once Hindsight has finished storing them, by turn; a redo calls them off. */
-	readonly #sweeps = new Map<string, AbortController>();
-	/** Hindsight's generated API, for what its client class has no method for (an operation's status). */
-	readonly #api: ReturnType<typeof createClient>;
 	readonly #closed = new AbortController();
-	/** How often an undo asks Hindsight whether notes it is to remove are stored yet. */
-	static sweepEveryMs = 5_000;
 
 	constructor(config: HindsightConfig, log: Log, client?: HindsightClient) {
 		this.config = config;
 		this.#log = log;
 		this.#client = client ?? new HindsightClient({ baseUrl: config.url, userAgent: "pi-durable-claw", ...(config.apiKey === undefined ? {} : { apiKey: config.apiKey }) });
-		this.#api = createClient(createConfig({ baseUrl: config.url, headers: { "User-Agent": "pi-durable-claw", ...(config.apiKey === undefined ? {} : { Authorization: `Bearer ${config.apiKey}` }) } }));
 	}
 
 	/** Once the harness is open: what recall and the memory step read through. */
@@ -328,15 +300,11 @@ export class Hindsight {
 		this.#jobs.push(job);
 		this.#draining ??= (async () => {
 			for (let next = this.#jobs.shift(); next !== undefined && !this.#closed.signal.aborted; next = this.#jobs.shift()) {
-				const abandon = new AbortController();
-				this.#writing = { job: next, abandon };
 				try {
-					await this.notesFor(next, abandon.signal);
+					await this.notesFor(next);
 				} catch (error) {
-					// An undo took the turn back while its notes were being written: nothing failed.
-					if (!abandon.signal.aborted) this.#log.warn("memory: a turn was not stored", { conversationId: next.conversationId, first: next.first, error: (error as Error).message });
+					this.#log.warn("memory: a turn was not stored", { conversationId: next.conversationId, first: next.first, error: (error as Error).message });
 				}
-				this.#writing = undefined;
 			}
 			this.#draining = undefined;
 		})();
@@ -353,119 +321,8 @@ export class Hindsight {
 		this.#jobs.length = 0;
 	}
 
-	/**
-	 * An undo took back everything from `entryId` on, in a thread whose own conversations are `conversations` (the
-	 * bridge's `UndoHooks.undone`): the notes of the turns that reach it or start after it go too. A turn waiting for
-	 * its memory step is dropped, one whose step is under way is abandoned, and one that was stored has its document
-	 * deleted (Hindsight then removes the facts drawn from it and consolidates the observations built on them again).
-	 * Notes Hindsight is still storing (it answers a retain before it has worked through it) are deleted when it has.
-	 * Resolves with what to tell the user and the turns, for the redo. Memory never fails an undo: a failure is the note.
-	 */
-	async undone(event: { readonly conversations: readonly number[]; readonly entryId: number; readonly signal?: AbortSignal }): Promise<MemoryUndoAnswer> {
-		const own = new Set<number>(event.conversations);
-		const taken = (turn: KeptTurn): boolean => own.has(turn.conversationId) && turn.last >= event.entryId;
-		const kept = new Map<string, KeptTurn>();
-		const keep = (turn: KeptTurn): void => void (kept.has(turnKey(turn)) || kept.set(turnKey(turn), { conversationId: turn.conversationId, first: turn.first, last: turn.last }));
-		for (let index = this.#jobs.length - 1; index >= 0; index--) {
-			if (taken(this.#jobs[index]!)) keep(this.#jobs.splice(index, 1)[0]!);
-		}
-		const writing = this.#writing;
-		if (writing !== undefined && taken(writing.job)) {
-			// Not waited for: a model that is slow to stop would hold the undo, and nothing is stored after this.
-			writing.abandon.abort();
-			keep(writing.job);
-		}
-		const signal = signalWithin(RETAIN_TIMEOUT_MS, event.signal === undefined ? this.#closed.signal : AbortSignal.any([this.#closed.signal, event.signal]));
-		let waiting = 0;
-		try {
-			// Stored: a conversation's documents carry its id in theirs, and each its turn's last entry.
-			const stored: { readonly documentId: string; readonly turn: KeptTurn }[] = [];
-			for (const conversationId of own) {
-				for (let offset = 0; ; offset += LIST_PAGE) {
-					const page = await this.#client.listDocuments(this.config.bank, { q: `conversation-${conversationId}-entry-`, limit: LIST_PAGE, offset, signal });
-					for (const item of page.items) {
-						const named = DOCUMENT_ID.exec(item.id);
-						if (named === null || Number(named[1]) !== conversationId) continue;
-						const first = Number(named[2]);
-						const last = Number((item.document_metadata as { lastEntry?: unknown } | null | undefined)?.lastEntry);
-						const turn = { conversationId, first, last: Number.isInteger(last) ? last : first };
-						if (taken(turn)) stored.push({ documentId: item.id, turn });
-					}
-					if (page.items.length < LIST_PAGE) break;
-				}
-			}
-			// One at a time: Hindsight can deadlock on two documents of a bank deleted at once.
-			for (const { documentId, turn } of stored) {
-				await this.#client.deleteDocument(this.config.bank, documentId, { signal });
-				keep(turn);
-			}
-			// Still being stored: deleted now, it could be written after; so it is deleted (again) once Hindsight is done.
-			for (const posted of this.#posted.filter((candidate) => taken(candidate.turn))) {
-				if (await this.#stored(posted.operationId, signal)) continue;
-				keep(posted.turn);
-				waiting++;
-				this.#sweep(posted);
-			}
-		} catch (error) {
-			const message = (error as Error).message;
-			this.#log.warn("memory: the notes of undone turns were not all removed", { conversations: [...own], from: event.entryId, error: message });
-			return { note: `Memory: the notes written from what was taken back could not all be removed from Hindsight (${message}). What is left is still recalled.`, kept: [...kept.values()] };
-		}
-		const n = kept.size;
-		this.#log.info("memory: removed the notes of undone turns", { conversations: [...own], from: event.entryId, turns: n, waiting });
-		if (n === 0) return { note: "Memory: no notes had been written from what was taken back.", kept: [] };
-		const still = waiting === 0 ? "" : ` Hindsight is still storing ${waiting === n ? (n === 1 ? "them" : "all of them") : `those of ${waiting}`}; they are removed as soon as it has.`;
-		return { note: `Memory: the notes written from ${turns(n)} were removed from Hindsight.${still}`, kept: [...kept.values()] };
-	}
-
-	/**
-	 * A redo returned the turns an undo took (the bridge's `UndoHooks.redone`), with what `undone` handed back: their
-	 * notes are written again, by the memory step, as after a run.
-	 */
-	async redone(event: { readonly kept: unknown }): Promise<MemoryUndoAnswer | undefined> {
-		const host = this.#host;
-		const kept = Array.isArray(event.kept) ? event.kept.filter(isKeptTurn) : [];
-		if (kept.length === 0 || host === undefined) return undefined;
-		for (const turn of kept) {
-			this.#sweeps.get(turnKey(turn))?.abort();
-			this.#enqueue({ conversationId: turn.conversationId as ConversationId, first: turn.first as EntryId, last: turn.last as EntryId, models: host.models });
-		}
-		return { note: `Memory: the notes of ${turns(kept.length)} are being written again.` };
-	}
-
-	/** Whether Hindsight has finished the operation it stores a turn's notes in (done, failed, cancelled or forgotten). */
-	async #stored(operationId: string, signal: AbortSignal): Promise<boolean> {
-		const { data, error } = await sdk.getOperationStatus({ client: this.#api, path: { bank_id: this.config.bank, operation_id: operationId }, signal });
-		if (data === undefined) throw new Error(`getOperationStatus failed: ${JSON.stringify(error)}`);
-		return data.status !== "pending" && data.status !== "processing";
-	}
-
-	/** Delete a turn's document once Hindsight has stored it, off the undo: a redo, or the harness stopping, calls it off. */
-	#sweep(posted: { readonly turn: KeptTurn; readonly documentId: string; readonly operationId: string }): void {
-		const key = turnKey(posted.turn);
-		this.#sweeps.get(key)?.abort();
-		const off = new AbortController();
-		this.#sweeps.set(key, off);
-		const signal = AbortSignal.any([off.signal, this.#closed.signal, AbortSignal.timeout(SWEEP_WAIT_MS)]);
-		void (async () => {
-			try {
-				while (!(await this.#stored(posted.operationId, signal))) await new Promise((resolve) => setTimeout(resolve, Hindsight.sweepEveryMs).unref());
-				if (signal.aborted) return;
-				await this.#client.deleteDocument(this.config.bank, posted.documentId, { signal }).catch(() => {});
-				this.#log.info("memory: removed the notes of an undone turn once they were stored", { documentId: posted.documentId });
-			} catch (error) {
-				if (!off.signal.aborted && !this.#closed.signal.aborted) this.#log.warn("memory: the notes of an undone turn were not removed", { documentId: posted.documentId, error: (error as Error).message });
-			} finally {
-				if (this.#sweeps.get(key) === off) this.#sweeps.delete(key);
-			}
-		})();
-	}
-
-	/**
-	 * The memory step for one turn: what in it is worth remembering, stored as the turn's document. `abandon`: an undo
-	 * took the turn back meanwhile, and nothing is stored.
-	 */
-	async notesFor(job: NotesJob, abandon?: AbortSignal): Promise<void> {
+	/** The memory step for one turn: what in it is worth remembering, stored as the turn's document. */
+	async notesFor(job: NotesJob): Promise<void> {
 		const host = this.#host;
 		if (host === undefined) throw new Error("memory is not attached to the harness");
 		const view = await host.context(job.conversationId, job.last);
@@ -486,7 +343,7 @@ export class Hindsight {
 		const turnStartIndex = view.contributions.slice(0, firstOfTurn).reduce((sum, messages) => sum + messages.length, 0);
 		const copy = notesConversation(view.messages, model as Model<never>, Math.min(turnStartIndex, view.messages.length));
 		if (copy === undefined) throw new Error(`the turn does not fit ${ref.provider}/${ref.modelId}'s context window`);
-		const stop = abandon === undefined ? this.#closed.signal : AbortSignal.any([this.#closed.signal, abandon]);
+		const stop = this.#closed.signal;
 		const signal = signalWithin(NOTES_TIMEOUT_MS, stop);
 		const messages: Message[] = [...copy, { role: "user", content: [{ type: "text", text: memoryNotesPrompt(start.text) }], timestamp: Date.now() }];
 		let reply: AssistantMessage | undefined;
@@ -504,19 +361,14 @@ export class Hindsight {
 			return;
 		}
 		if (stop.aborted) throw new Error("abandoned");
-		const documentId = documentOf(job.conversationId, first);
-		const answer = await this.#client.retain(this.config.bank, notes, {
-			documentId,
+		await this.#client.retain(this.config.bank, notes, {
+			documentId: documentOf(job.conversationId, first),
 			context: MEMORY_NOTES_CONTEXT,
 			metadata: { conversationId: String(job.conversationId), firstEntry: String(first), lastEntry: String(job.last) },
 			...(start.at === undefined ? {} : { timestamp: new Date(start.at) }),
 			async: true,
 			signal: signalWithin(RETAIN_TIMEOUT_MS, stop),
 		});
-		// Hindsight answers before it has worked through the notes: an undo meanwhile needs the operation to wait for.
-		const now = Date.now();
-		this.#posted = this.#posted.filter((posted) => now - posted.at < POSTED_KEPT_MS && posted.documentId !== documentId);
-		if (typeof answer.operation_id === "string") this.#posted.push({ turn: { conversationId: job.conversationId, first, last: job.last }, documentId, operationId: answer.operation_id, at: now });
 	}
 
 	/** Queues the memory step for each finished turn. */

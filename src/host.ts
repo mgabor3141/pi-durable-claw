@@ -279,8 +279,6 @@ async function main(): Promise<void> {
 				onSuccess: (call) => void (call.kind === "request" && call.durationMs >= SLOW_CALL_MS && log.warn("a slow call", { method: call.method, ms: Math.round(call.durationMs) })),
 				onFailure: (call) => void (call.kind === "request" && call.durationMs >= SLOW_CALL_MS && log.warn("a slow call", { method: call.method, ms: Math.round(call.durationMs), error: call.error })),
 			},
-			// Memory follows an undo: the notes of the turns it takes back are removed, and a redo writes them again.
-			...(memory === undefined ? {} : { undo: { undone: (event) => memory.undone(event), redone: (event) => memory.redone(event) } }),
 			...(browserlessUrl === undefined
 				? {}
 				: { preview: { cdpUrl: browserlessUrl, ...(browserlessToken === undefined ? {} : { token: browserlessToken }), storageStatePath: join(stateDir, "browser-profile.json") } }),
