@@ -22,6 +22,8 @@ appendFileSync(join(root, "..", "starts.log"), ${JSON.stringify(name)} + " " + p
 writeFileSync(join(root, "..", "launcher-command.json"), process.env.CLAW_LAUNCHER ?? "none");
 if (${JSON.stringify(behaviour)} === "breaks") {
 	writeFileSync(join(root, "durable.db"), "migrated by ${name}");
+	// SQLite's write-ahead log: changes not yet in the database file, applied to whatever database is beside it.
+	writeFileSync(join(root, "durable.db-wal"), "changes by ${name}");
 	process.exit(3);
 }
 const server = createServer((request, response) => response.writeHead(200).end("{}")).listen(Number(process.env.CLAW_PORT), "127.0.0.1");
@@ -164,6 +166,7 @@ it("a version that exits before it serves is undone: the one before runs again, 
 	expect(t.starts().map((line) => line.split(" ")[0])).toEqual(["one", "bad", "one"]);
 	expect(readState(t.app)).toMatchObject({ current: one.slice(0, 12), previous: null, pending: null, unproven: false });
 	expect(readFileSync(join(t.root, "durable.db"), "utf8"), "what the bad version wrote is gone").toBe("conversations");
+	expect(existsSync(join(t.root, "durable.db-wal")), "its write-ahead log too: applied to the database put back, it broke it").toBe(false);
 	expect(t.log.join("\n")).toContain(`version ${bad.slice(0, 12)} exited (3) before it served: going back to version ${one.slice(0, 12)}`);
 	// What the harness then tells T3: the version is still the newest, and it was tried.
 	expect(await check(t.config())).toMatchObject({ current: one.slice(0, 12), latest: bad.slice(0, 12), undone: { id: bad.slice(0, 12), code: 3 } });

@@ -86,7 +86,8 @@ Nothing updates on its own.
 
 - `claw version` says what runs, what ran before it, and where each came from.
 - Before a new version starts, the harness's data is copied as it was. A version that exits before it has served
-  once is undone on the spot: the data is put back and the version before runs again. The log says so, and so does
+  once is undone on the spot: the data is put back exactly as copied (what the version added, such as the
+  database's write-ahead log, is removed) and the version before runs again. The log says so, and so does
   T3 where it offers that version again.
 - `claw rollback` restarts into the version before. The data stays as it is; the copy from before the update is in
   the `app` volume (`/app/data-before-update` in the container), for a version that cannot read what a newer one

@@ -263,11 +263,17 @@ function backUpData(config: LauncherConfig): void {
 	config.log(`kept a copy of the data as it was (${Math.round((Date.now() - started) / 100) / 10} s): ${target}`);
 }
 
-/** Put the copy back: every file and folder it holds replaces the one in the data dir. */
+/**
+ * Put the copy back: the data dir becomes exactly the copy. What the copy does not have goes, not only what it does
+ * replaced: a database's write-ahead log (`durable.db-wal`) the undone version left would otherwise be applied to the
+ * database put back, which it does not belong to, and the store would no longer open.
+ */
 function restoreData(config: LauncherConfig): void {
 	const source = backupDir(config.app);
 	if (!existsSync(source)) return;
-	for (const name of readdirSync(source)) {
+	const kept = new Set(readdirSync(source));
+	for (const name of readdirSync(config.root)) if (!kept.has(name)) rmSync(join(config.root, name), { recursive: true, force: true });
+	for (const name of kept) {
 		rmSync(join(config.root, name), { recursive: true, force: true });
 		cpSync(join(source, name), join(config.root, name), { recursive: true, preserveTimestamps: true });
 	}
