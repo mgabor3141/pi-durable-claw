@@ -310,7 +310,7 @@ async function main(): Promise<void> {
 	// A `/compact` or `/reload` sent as a queued message waits its turn: the run that ends answers it before the
 	// queue goes on.
 	toolRegistry?.install(t3.queuedCommands());
-	// Each message gets the memories recalled for it, as part of it; T3 shows them as a hindsight_recall row. The run
+	// Each message gets the memories recalled for it, as part of it; T3 shows them as a memory_recall row. The run
 	// that answers the message asks, not its sender: how long it took is logged, since the model's answer waits for it.
 	if (memory !== undefined) {
 		toolRegistry?.install(

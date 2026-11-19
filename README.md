@@ -376,7 +376,7 @@ How it works (`src/hindsight.ts`):
   - one drawn only from turns still in the model's context.
 
   After a compaction, what it removed from the context can be recalled again. T3 shows the block right after your
-  message as a `hindsight_recall` row (no tool ran): the query, exactly what the model was given, and below a "shown
+  message as a `memory_recall` row (no tool ran): the query, exactly what the model was given, and below a "shown
   here only, not sent to the model" line each memory's score and sources and what was left out and why. The bridge
   waits at most 5 seconds; a failed search becomes a line in the block saying memory could not be searched.
 - **Remembering.** After each finished turn, a copy of the conversation (as the model saw it when the turn ended;
@@ -392,8 +392,8 @@ How it works (`src/hindsight.ts`):
   vLLM), so each call mostly reads the new turn. A conversation larger than that model's context window is cut from
   its oldest turns; a turn that alone does not fit is not stored.
 - **Undo** does not reach memory: the notes of turns that were taken back stay ("Undo and redo" below).
-- **Tools** for scripts: `hindsight_recall` (observations, as the recall for each message), `hindsight_retain` (for
-  what is learned outside the conversation) and `hindsight_reflect`, listed in the codemode catalog.
+- **Tools** for scripts: `memory_recall` (observations, as the recall for each message), `memory_retain` (for
+  what is learned outside the conversation) and `memory_reflect`, listed in the codemode catalog.
 
 What Hindsight does with it (the model it calls to extract facts, the embedding model, its database) is your
 deployment's configuration. Choose the embedding model before storing anything: changing it later re-embeds every

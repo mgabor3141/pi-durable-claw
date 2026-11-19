@@ -189,8 +189,8 @@ memory. The harness recalls observations for each message (stored with it, hidde
 leaving out what the model's context already holds, which it knows from the entry range each stored turn records and
 the ids each recall stores with its block. After each turn, a copy of the conversation is asked what is worth
 remembering, on T3's text-generation model; only that answer is stored, so Hindsight extracts from notes rather than
-from transcripts full of passing detail. Scripts get `hindsight_recall`, `hindsight_retain` and
-`hindsight_reflect` (the README's "Memory"). Left to the deployment: the model Hindsight calls, its embedding model,
+from transcripts full of passing detail. Scripts get `memory_recall`, `memory_retain` and
+`memory_reflect` (the README's "Memory"). Left to the deployment: the model Hindsight calls, its embedding model,
 where it runs and whether agents share it (one bank each, `HINDSIGHT_BANK`; separate keys need Hindsight's tenant
 extension). Not built: importing past threads.
 

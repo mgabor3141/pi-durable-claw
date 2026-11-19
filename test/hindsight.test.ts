@@ -84,7 +84,7 @@ describe("recall for a message", () => {
 		messages: [],
 		contributions: [],
 		entries: [
-			{ id: 10, conversationId: 1, kind: "app.user", model: [{ role: "user", content: [{ type: "text", text: "hi" }, { type: "text", text: "<memories>\n- old\n</memories>", hidden: true, shownAs: { name: "hindsight_recall", input: {} }, data: { memories: ["o-old"] } }] }] },
+			{ id: 10, conversationId: 1, kind: "app.user", model: [{ role: "user", content: [{ type: "text", text: "hi" }, { type: "text", text: "<memories>\n- old\n</memories>", hidden: true, shownAs: { name: "memory_recall", input: {} }, data: { memories: ["o-old"] } }] }] },
 			{ id: 11, conversationId: 1, kind: "pi.assistant", model: [{ role: "assistant", content: [{ type: "text", text: "hello" }] }] },
 			{ id: 12, conversationId: 1, kind: "pi.compaction" },
 		],
@@ -111,7 +111,7 @@ describe("recall for a message", () => {
 		const memory = new Hindsight({ url: server.url, bank: "gabor", apiKey: "secret-key" }, log().log);
 		memory.attach(host);
 		const answer = await memory.recallFor({ threadId: "t", conversationId: 1 as never, text: `what do I like? ${"x".repeat(2_000)}`, signal: new AbortController().signal });
-		expect(answer?.shownAs.name).toBe("hindsight_recall");
+		expect(answer?.shownAs.name).toBe("memory_recall");
 		expect(answer?.shownAs.input).toEqual({ query: `what do I like? ${"x".repeat(784)}` });
 		expect(answer?.text).toBe(
 			"<memories>\nRecalled from long-term memory for this message. They may be out of date or not apply; the conversation wins where they disagree.\n- [2026-10-03] The user prefers short answers.\n- [2026-01-01] The user lives in Budapest.\n- No score.\n</memories>",
@@ -260,9 +260,9 @@ it("the tools recall, save and reflect in the configured bank", async () => {
 	const memory = new Hindsight({ url: server.url, bank: "b" }, log().log);
 	const tool = (name: string) => memory.tools().find((candidate) => candidate.name === name)!;
 	const run = async (name: string, args: unknown) => ((await tool(name).execute(args as never, {} as never, ctx)) as { output: { text: string }[] }).output[0]!.text;
-	expect(await run("hindsight_recall", { query: "drinks" })).toBe("- [2026-11-01] Likes tea.");
-	expect(await run("hindsight_retain", { content: "Likes tea.", context: "from a note" })).toBe("Saved to long-term memory.");
-	expect(await run("hindsight_reflect", { query: "What would they drink?" })).toBe("Probably tea.");
+	expect(await run("memory_recall", { query: "drinks" })).toBe("- [2026-11-01] Likes tea.");
+	expect(await run("memory_retain", { content: "Likes tea.", context: "from a note" })).toBe("Saved to long-term memory.");
+	expect(await run("memory_reflect", { query: "What would they drink?" })).toBe("Probably tea.");
 	expect(server.seen.map((request) => request.path)).toEqual(["/v1/default/banks/b/memories/recall", "/v1/default/banks/b/memories", "/v1/default/banks/b/reflect"]);
 	// The tool searches observations only, as the recall for each message does.
 	expect((server.seen[0]!.body as { types?: string[] }).types).toEqual(["observation"]);

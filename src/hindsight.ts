@@ -7,13 +7,13 @@
  *   consolidated memories) are stored with the message as a hidden `<memories>` block (the bridge's `messageContext`),
  *   so the provider's prompt cache holds. Left out: those below `RECALL_MIN_SCORE`, those recalled earlier and still
  *   in the model's context, and those drawn only from turns still in it; after a compaction they can come back. T3 shows
- *   the block as a `hindsight_recall` row, with what was left out and why below a display-only rule.
+ *   the block as a `memory_recall` row, with what was left out and why below a display-only rule.
  * - Retain: after each finished turn, a copy of the conversation (its model context as the turn ended, nothing written
  *   to it) gets one more message asking what in the turn is worth remembering, answered by T3's text-generation model.
  *   The notes, or nothing, are stored as the turn's document, with the turn's entry range, which is how recall knows
  *   where a memory came from. One turn at a time, off the run: a turn not yet written when the harness stops is lost.
  * - An undo does not reach memory: the notes of turns that were taken back stay, as a record of what happened.
- * - Tools for scripts: `hindsight_recall`, `hindsight_retain`, `hindsight_reflect`.
+ * - Tools for scripts: `memory_recall`, `memory_retain`, `memory_reflect`.
  *
  * Memory never stops a turn: a failed recall says so in the block, a failed retain is logged.
  */
@@ -160,7 +160,7 @@ function visibleText(message: Message | undefined): string {
 /**
  * Whether a message opens a context: the thread's first message, or the first after a compaction. Recall runs only at
  * these boundaries, as Linger, Letta and OpenViking do; a mid-thread message gets no injected memories, and the agent
- * can call `hindsight_recall` when it needs them. The current message is found in the context by its text; after a
+ * can call `memory_recall` when it needs them. The current message is found in the context by its text; after a
  * compaction the compaction entry is the one before it.
  */
 export function opensContext(view: ContextView | undefined, text: string): boolean {
@@ -265,7 +265,7 @@ export class Hindsight {
 
 	/**
 	 * The bridge's `messageContext`: the observations recalled for a message that its context does not already hold, or
-	 * a note that memory could not be searched. T3 shows it after the message as a `hindsight_recall` call.
+	 * a note that memory could not be searched. T3 shows it after the message as a `memory_recall` call.
 	 */
 	async recallFor(request: MessageContextRequest): Promise<MessageContextAnswer | undefined> {
 		const query = request.text.trim().slice(0, QUERY_MAX_CHARS);
@@ -277,7 +277,7 @@ export class Hindsight {
 			view = await this.#host?.context(request.conversationId);
 		} catch (error) {
 			if (request.signal.aborted) throw error;
-			return { text: memoriesUnavailable((error as Error).message), shownAs: { name: "hindsight_recall", input } };
+			return { text: memoriesUnavailable((error as Error).message), shownAs: { name: "memory_recall", input } };
 		}
 		if (!opensContext(view, request.text)) return undefined;
 		let holds: ReturnType<typeof contextHolds>;
@@ -286,7 +286,7 @@ export class Hindsight {
 			holds = contextHolds(view);
 		} catch (error) {
 			if (request.signal.aborted) throw error;
-			return { text: memoriesUnavailable((error as Error).message), shownAs: { name: "hindsight_recall", input } };
+			return { text: memoriesUnavailable((error as Error).message), shownAs: { name: "memory_recall", input } };
 		}
 		const kept: Recalled[] = [];
 		const low: number[] = [];
@@ -316,7 +316,7 @@ export class Hindsight {
 		const details = [...lines, ...(left.length === 0 ? [] : ["", `Left out: ${left.join("; ")}.`])].join("\n");
 		return {
 			text: memoriesBlock(kept.map(memoryLine)),
-			shownAs: { name: "hindsight_recall", input, details },
+			shownAs: { name: "memory_recall", input, details },
 			data: { memories: kept.map((memory) => memory.id) } satisfies RecallData,
 		};
 	}
@@ -413,13 +413,13 @@ export class Hindsight {
 		});
 	}
 
-	/** `hindsight_recall`, `hindsight_retain`, `hindsight_reflect`, for scripts. */
+	/** `memory_recall`, `memory_retain`, `memory_reflect`, for scripts. */
 	tools(): ToolRegistration[] {
 		const bank = this.config.bank;
 		const client = this.#client;
 		return [
 			defineTool({
-				name: "hindsight_recall",
+				name: "memory_recall",
 				description: MEMORY_RECALL_DESCRIPTION,
 				parameters: object({
 					query: str({ minLength: 1, maxLength: 2_000, description: "What to look for, in words." }),
@@ -434,7 +434,7 @@ export class Hindsight {
 				},
 			}),
 			defineTool({
-				name: "hindsight_retain",
+				name: "memory_retain",
 				description: MEMORY_RETAIN_DESCRIPTION,
 				parameters: object({
 					content: str({ minLength: 1, maxLength: 50_000, description: "What to remember, as plain statements." }),
@@ -447,7 +447,7 @@ export class Hindsight {
 				},
 			}),
 			defineTool({
-				name: "hindsight_reflect",
+				name: "memory_reflect",
 				description: MEMORY_REFLECT_DESCRIPTION,
 				parameters: object({
 					query: str({ minLength: 1, maxLength: 2_000, description: "The question." }),
