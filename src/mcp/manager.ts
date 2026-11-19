@@ -176,6 +176,8 @@ export class McpManager {
 		state.client = undefined;
 		state.transport = undefined;
 		if (client !== undefined) await client.close().catch(() => {});
+		// It may have left the configuration meanwhile.
+		if (state.dropped === true) return;
 		state.retries = 0;
 		await this.connect(server);
 	}
@@ -245,14 +247,7 @@ export class McpManager {
 		await Promise.all(
 			[...this.states.values()]
 				.filter((state) => enabled(state.entry.config) && /\$\{/.test(JSON.stringify([state.entry.config.url, state.entry.config.headers ?? {}])))
-				.map(async (state) => {
-					const client = state.client;
-					state.client = undefined;
-					state.transport = undefined;
-					if (client !== undefined) await client.close().catch(() => {});
-					state.retries = 0;
-					await this.connect(state.entry.name);
-				}),
+				.map((state) => this.reconnect(state.entry.name)),
 		);
 	}
 
@@ -507,9 +502,10 @@ export class McpManager {
 		return state.connecting;
 	}
 
-	/** Try a failed or dropped server again after the next delay, unless the manager is closing or a try is pending. */
+	/** Try a failed or dropped server again after the next delay, unless the manager is closing, the server left the
+	 * configuration, or a try is pending. */
 	private retryLater(state: McpState): void {
-		if (this.closed || state.retryTimer !== undefined || !enabled(state.entry.config)) return;
+		if (this.closed || state.dropped === true || state.retryTimer !== undefined || !enabled(state.entry.config)) return;
 		const delays = this.options.retryDelaysMs ?? DEFAULT_RETRY_DELAYS_MS;
 		const delay = delays[Math.min(state.retries, delays.length - 1)] ?? DEFAULT_RETRY_DELAYS_MS[0]!;
 		state.retries += 1;

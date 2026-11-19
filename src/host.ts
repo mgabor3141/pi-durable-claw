@@ -178,7 +178,8 @@ async function main(): Promise<void> {
 		baseNamespaces: [THREAD_NAMESPACE],
 		wrapTool: (tool) => withSecrets(tool, secrets, log),
 	});
-	secrets.subscribe(() => void mcp.secretsChanged());
+	// Nothing waits on the reconnects: a rejection must not become an unhandled one, which ends the process.
+	secrets.subscribe(() => void mcp.secretsChanged().catch((error: unknown) => log.warn("MCP reconnect after a secrets change failed", { error: String(error) })));
 	await mcp.load();
 
 	let toolRegistry: Registry | undefined;

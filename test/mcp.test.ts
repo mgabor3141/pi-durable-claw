@@ -39,6 +39,27 @@ function fakeServer() {
 	return client;
 }
 
+/** Like `fakeServer`, but it answers `initialize` only once `release()` is called; `closed` says whether the client hung up. */
+function heldServer() {
+	const { client, server } = createInMemoryTransportPair();
+	void server.start();
+	let release!: () => void;
+	const released = new Promise<void>((resolve) => (release = resolve));
+	server.onMessage((message) => {
+		const request = message as { id?: unknown; method?: string };
+		if (request.id === undefined) return;
+		const result =
+			request.method === "initialize"
+				? { protocolVersion: "2025-06-18", capabilities: { tools: {} }, serverInfo: { name: "test", version: "1" } }
+				: { tools: [{ name: "search", inputSchema: { type: "object", properties: {} } }] };
+		// A reply held past the client's hang-up has nowhere to go.
+		void (request.method === "initialize" ? released : Promise.resolve()).then(() => server.send({ jsonrpc: "2.0", id: request.id, result } as never)).catch(() => {});
+	});
+	const state = { transport: client, release, closed: false };
+	client.onClose(() => (state.closed = true));
+	return state;
+}
+
 async function until(check: () => boolean): Promise<void> {
 	for (let i = 0; i < 200 && !check(); i++) await new Promise((resolve) => setTimeout(resolve, 10));
 }
@@ -351,4 +372,34 @@ describe("the MCP manager", () => {
 		expect(seen).toEqual([{ Authorization: "Bearer t0ken-value-123" }]);
 		await manager.close();
 	});
+
+	it("a server removed while it is still connecting is not retried, nor reconnected for a secret, once its connect fails", async () => {
+		const unhandled: unknown[] = [];
+		const onUnhandled = (reason: unknown) => unhandled.push(reason);
+		process.on("unhandledRejection", onUnhandled);
+		const path = await tempConfig({ mcpServers: {} });
+		let attempts = 0;
+		// It never answers: the connect times out after the server left the config.
+		const manager = new McpManager({ source: fileSource(path), transportFactory: () => (attempts++, heldServer().transport), connectTimeoutMs: 50, retryDelaysMs: [10] });
+		try {
+			await manager.load();
+			manager.attach(createRegistry());
+			await manager.start();
+			await writeFile(path, JSON.stringify({ mcpServers: { slow: { type: "http", url: "http://slow.test/mcp?key=${KEY}" } } }));
+			await manager.reload();
+			expect(manager.status("slow")).toMatchObject({ status: "connecting" });
+			// A secret is saved: it waits for the connect in flight before connecting again.
+			const secretsChanged = manager.secretsChanged();
+			await writeFile(path, JSON.stringify({ mcpServers: {} }));
+			await manager.reload();
+			await expect(secretsChanged).resolves.toBeUndefined();
+			await new Promise((resolve) => setTimeout(resolve, 200));
+			expect(unhandled).toEqual([]);
+			expect(attempts, "no retry of a removed server").toBe(1);
+		} finally {
+			process.off("unhandledRejection", onUnhandled);
+			await manager.close();
+		}
+	});
+
 });
