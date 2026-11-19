@@ -11,7 +11,7 @@ import { createRegistry, defineExtension, defineTool, Harness } from "@earendil-
 import { NodeExecutionEnv } from "@earendil-works/pi-durable/env/node";
 import { openNodeSqliteStorage } from "@earendil-works/pi-durable/storage/sqlite/node";
 import { afterEach, describe, expect, it } from "vitest";
-import { Hindsight, harnessMemoryHost, hindsightConfig, notesConversation, RECALL_MIN_SCORE } from "../src/hindsight.ts";
+import { Hindsight, harnessMemoryHost, hindsightConfig, notesConversation, opensContext, RECALL_MIN_SCORE } from "../src/hindsight.ts";
 import { MEMORY_NOTES_CONTEXT, MEMORY_NOTES_NO_TOOLS } from "../src/prompts.ts";
 import { object } from "../src/schema.ts";
 
@@ -60,6 +60,23 @@ describe("hindsightConfig", () => {
 	});
 });
 
+describe("opensContext", () => {
+	const user = (id: number, text: string) => ({ id, conversationId: 1, kind: "app.user", model: [{ role: "user", content: [{ type: "text", text }] }] });
+	const assistant = (id: number) => ({ id, conversationId: 1, kind: "pi.assistant", model: [{ role: "assistant", content: [{ type: "text", text: "ok" }] }] });
+	const view = (entries: unknown[]) => ({ head: undefined, messages: [], contributions: [], entries }) as never;
+
+	it("is true for the first message of a thread and the first after a compaction, false in between", () => {
+		expect(opensContext(undefined, "hello")).toBe(true);
+		expect(opensContext(view([]), "hello")).toBe(true);
+		expect(opensContext(view([user(1, "hi")]), "hi")).toBe(true);
+		expect(opensContext(view([user(1, "hi"), assistant(2), user(3, "more")]), "more")).toBe(false);
+		expect(opensContext(view([user(1, "hi"), assistant(2)]), "new topic")).toBe(false);
+		expect(opensContext(view([user(1, "hi"), assistant(2), { id: 3, conversationId: 1, kind: "pi.compaction" }]), "new topic")).toBe(true);
+		expect(opensContext(view([user(1, "hi"), assistant(2), { id: 3, conversationId: 1, kind: "pi.compaction" }, user(4, "new topic")]), "new topic")).toBe(true);
+		expect(opensContext(view([{ id: 3, conversationId: 1, kind: "pi.compaction" }]), "new topic")).toBe(true);
+	});
+});
+
 describe("recall for a message", () => {
 	/** A context still holding entries 10 and 11; entry 10's message carries an earlier recall of `o-old`. */
 	const view = {
@@ -69,6 +86,7 @@ describe("recall for a message", () => {
 		entries: [
 			{ id: 10, conversationId: 1, kind: "app.user", model: [{ role: "user", content: [{ type: "text", text: "hi" }, { type: "text", text: "<memories>\n- old\n</memories>", hidden: true, shownAs: { name: "hindsight_recall", input: {} }, data: { memories: ["o-old"] } }] }] },
 			{ id: 11, conversationId: 1, kind: "pi.assistant", model: [{ role: "assistant", content: [{ type: "text", text: "hello" }] }] },
+			{ id: 12, conversationId: 1, kind: "pi.compaction" },
 		],
 	};
 	const host = { context: async () => view as never, notesModel: async () => undefined, models: createModels() };

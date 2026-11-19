@@ -157,6 +157,29 @@ function visibleText(message: Message | undefined): string {
 		.trim();
 }
 
+/**
+ * Whether a message opens a context: the thread's first message, or the first after a compaction. Recall runs only at
+ * these boundaries, as Linger, Letta and OpenViking do; a mid-thread message gets no injected memories, and the agent
+ * can call `hindsight_recall` when it needs them. The current message is found in the context by its text; after a
+ * compaction the compaction entry is the one before it.
+ */
+export function opensContext(view: ContextView | undefined, text: string): boolean {
+	const entries = view?.entries ?? [];
+	const wanted = text.trim().replace(/\s+/gu, " ");
+	let at = -1;
+	for (let index = entries.length - 1; index >= 0; index -= 1) {
+		const entry = entries[index]!;
+		if (entry.kind !== "app.user") continue;
+		if (visibleText(entry.model?.[0]).replace(/\s+/gu, " ") === wanted) {
+			at = index;
+			break;
+		}
+	}
+	const before = at === -1 ? entries : entries.slice(0, at);
+	if (before.at(-1)?.kind === "pi.compaction") return true;
+	return !before.some((entry) => entry.kind === "app.user" || entry.kind === "pi.assistant");
+}
+
 /** The start of a turn's first message with text, for the memory step to find the turn by. */
 function turnStart(entries: readonly EntryRecord[]): { text: string; at?: number } | undefined {
 	for (const entry of entries) {
@@ -249,13 +272,17 @@ export class Hindsight {
 		if (query === "") return undefined;
 		const input = { query };
 		let response: { results?: Recalled[] | null; source_facts?: Record<string, Recalled> | null };
+		let view: ContextView | undefined;
+		try {
+			view = await this.#host?.context(request.conversationId);
+		} catch (error) {
+			if (request.signal.aborted) throw error;
+			return { text: memoriesUnavailable((error as Error).message), shownAs: { name: "hindsight_recall", input } };
+		}
+		if (!opensContext(view, request.text)) return undefined;
 		let holds: ReturnType<typeof contextHolds>;
 		try {
-			const [recalled, view] = await Promise.all([
-				this.#client.recall(this.config.bank, query, { types: ["observation"], maxTokens: RECALL_MAX_TOKENS, budget: "mid", includeSourceFacts: true, signal: request.signal }),
-				this.#host?.context(request.conversationId),
-			]);
-			response = recalled as typeof response;
+			response = (await this.#client.recall(this.config.bank, query, { types: ["observation"], maxTokens: RECALL_MAX_TOKENS, budget: "mid", includeSourceFacts: true, signal: request.signal })) as typeof response;
 			holds = contextHolds(view);
 		} catch (error) {
 			if (request.signal.aborted) throw error;
