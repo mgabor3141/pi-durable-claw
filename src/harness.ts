@@ -28,11 +28,15 @@ type SecretsLogger = Parameters<typeof withSecrets>[2];
 /**
  * What one codemode script's VM may allocate (`CLAW_CODEMODE_MEMORY_MB`, default 256 MiB). The VMs run in worker threads
  * of the host process, so without a limit a runaway script takes the host down with it; with one, the script fails with
- * QuickJS's `out of memory` and the turn goes on. Large data belongs in tools and files, not in script memory.
+ * QuickJS's `out of memory` and the turn goes on. Large data belongs in tools and files, not in script memory. Not a
+ * positive number: fails loudly.
  */
 export function codemodeMemoryLimitBytes(env: Env = process.env): number {
-	const megabytes = Number(setting(env, "CLAW_CODEMODE_MEMORY_MB"));
-	return (Number.isFinite(megabytes) && megabytes > 0 ? megabytes : 256) * 1024 * 1024;
+	const value = setting(env, "CLAW_CODEMODE_MEMORY_MB");
+	if (value === undefined) return 256 * 1024 * 1024;
+	const megabytes = Number(value);
+	if (!Number.isFinite(megabytes) || megabytes <= 0) throw new Error(`CLAW_CODEMODE_MEMORY_MB must be a number of MiB above 0, not ${JSON.stringify(value)}`);
+	return megabytes * 1024 * 1024;
 }
 
 /** One QuickJS sandbox per process is enough: each execution gets its own VM and worker. */
