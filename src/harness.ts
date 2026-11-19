@@ -14,6 +14,7 @@ import { compactionExtension, type CompactionOptions } from "./compaction.ts";
 import { browserTools, type SharedBrowserProvider } from "./browser.ts";
 import { abortable, imageCheckExtension, type T3Attachment } from "@mgabor3141/pi-durable-t3";
 import { workspaceTools } from "./tools.ts";
+import { type Machines, machineTools, onMachine } from "./machines.ts";
 import { imageFitExtension } from "./images.ts";
 import { directCallsExtension } from "./direct-calls.ts";
 import { webTools, type WebConfig } from "./web.ts";
@@ -47,7 +48,7 @@ export function codemodeSandbox(): CodemodeSandbox {
 export interface HarnessLate {
 	/** The bridge: T3's text-generation model (`summarize`), the models hidden from its picker (left out of the lists a
 	 * script sees), and whose a conversation is (a person's thread keeps its prompt cache for an hour). */
-	bridge?: Pick<T3Attachment, "textGenerationModel" | "hiddenModels" | "threadOf">;
+	bridge?: Pick<T3Attachment, "textGenerationModel" | "hiddenModels" | "threadOf" | "threadOrigin" | "requestApproval">;
 	/** T3's preview browser, when one is configured: the `browser_*` tools' pages. */
 	previewBrowser?: SharedBrowserProvider;
 }
@@ -75,6 +76,9 @@ export interface HarnessExtensionOptions {
 	readonly models?: HarnessOptions["models"];
 	/** Told what each compaction's summary cost, and when one could not be asked for on the conversation (`compaction.ts`). */
 	readonly compaction?: CompactionOptions;
+	/** Other machines (`machines.ts`): `bash`, `read`, `write` and `edit` take a `machine`, and scripts get the tools that
+	 * manage them and `copy_file`. */
+	readonly machines?: Machines;
 }
 
 /**
@@ -86,10 +90,24 @@ export interface HarnessExtensionOptions {
  * MCP manager registers, are left out of it and found with `searchTools()`. The system prompt is fixed for a thread
  * (`fixed-prompt.ts`).
  */
+/** The workspace tools that also run on a machine, and what each says it is about to do there, for the approval card. */
+const ON_MACHINE: Readonly<Record<string, (args: Record<string, unknown>) => string>> = {
+	bash: (args) => clip(String(args["command"] ?? "")),
+	read: (args) => String(args["path"] ?? ""),
+	write: (args) => String(args["path"] ?? ""),
+	edit: (args) => String(args["path"] ?? ""),
+};
+const clip = (text: string) => (text.length > 300 ? `${text.slice(0, 300)}…` : text);
+const machineAware = (tool: ToolRegistration, machines: Machines): ToolRegistration => {
+	const doing = ON_MACHINE[tool.name];
+	return doing === undefined ? tool : onMachine(tool, machines, doing);
+};
+
 export function harnessExtensions(options: HarnessExtensionOptions = {}): readonly Extension[] {
 	const tools: ToolRegistration[] = [
 		...(options.extraTools ?? []),
-		...workspaceTools(options.images),
+		...(options.machines === undefined ? workspaceTools(options.images) : workspaceTools(options.images).map((tool) => machineAware(tool, options.machines!))),
+		...(options.machines === undefined ? [] : machineTools(options.machines)),
 		...webTools(options.web ?? {}),
 		// The browser's sessions do not listen for Stop; each call returns the moment it is stopped.
 		...(options.browser === true ? browserTools(options.late).map(abortable) : []),

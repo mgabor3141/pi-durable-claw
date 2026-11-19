@@ -34,6 +34,7 @@ import { webConfig } from "./web.ts";
 import { deviceName, readRemoteEnabled, readStatusFile, Tailnet, tailnetUrl, writeRemoteEnabled, type TailnetStatus } from "./tailnet.ts";
 import { attachT3, mintPairingCode } from "@mgabor3141/pi-durable-t3";
 import { installShutdown } from "./shutdown.ts";
+import { machineApprovalMs, Machines, machinesCommand } from "./machines.ts";
 import { titleThread } from "./title.ts";
 
 // An empty setting is an unset one (an `.env` line left blank).
@@ -198,6 +199,8 @@ async function main(): Promise<void> {
 	else await memory.check();
 	// Filled in once the bridge is attached (below); the harness's own tools read it at each call.
 	const late: HarnessLate = {};
+	// Other machines the agent adds and the user approves; their keys and host keys stay here (`machines.ts`).
+	const machines = new Machines({ dir: join(root, "machines"), approvalMs: machineApprovalMs(process.env), bridge: () => late.bridge, log });
 	const updates = launcherUpdates(process.env, log);
 	const NONE_HIDDEN: ReadonlySet<string> = new Set();
 	// The threads a person started keep their prompt cache for an hour, so a pause does not cost the whole context
@@ -213,6 +216,7 @@ async function main(): Promise<void> {
 		models: cacheRetention.models(listedModels(models, () => late.bridge?.hiddenModels() ?? NONE_HIDDEN)),
 		mcpNamespaces: mcp.namespaces(),
 		late,
+		machines,
 		secrets: { store: secrets, log },
 		// A summary's request starts with the conversation's own, so nearly all of its input should be `cacheRead`.
 		compaction: {
@@ -266,6 +270,7 @@ async function main(): Promise<void> {
 			listen,
 			label: LABEL,
 			routes: [{ method: "GET", path: OAUTH_CALLBACK_PATH, handle: (request) => oauthCallback(mcp, request) }],
+			commands: [machinesCommand(machines)],
 			titleThread: titleThread(harness, models),
 			// A webhook task's URL: where a sender reaches this harness (CLAW_PUBLIC_URL, else the tailnet address).
 			webhookOrigin: () => publicUrl(root),
@@ -339,6 +344,7 @@ async function main(): Promise<void> {
 	const shutdown = async () => {
 		stopping = true;
 		memory?.close();
+		machines.close();
 		await tailnet.close();
 		await mcp.close();
 		await t3.close();

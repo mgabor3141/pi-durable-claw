@@ -108,8 +108,8 @@ installing.
 
 Stop the stack (`docker compose down`) and archive `./data`, keeping ownership (e.g. `sudo tar -cpzf claw.tgz data`).
 Restore all of it together: the conversations (`harness/durable.db`) and the bridge's state (`harness/t3/`) are a pair,
-and the workspace's host key is the one the harness trusts. The archive holds the harness's SSH key and your
-`auth.json`, so treat it like your credentials.
+and the workspace's host key is the one the harness trusts. The archive holds the harness's SSH keys (the
+workspace's and every machine's) and your `auth.json`, so treat it like your credentials.
 
 ## Workspace tools
 
@@ -149,7 +149,31 @@ no second layer of quoting. It is `bash` running `ssh -n -o BatchMode=yes -o Str
 seen for the first time is trusted and its key saved in the workspace's `~/.ssh/known_hosts`; a host whose key has
 changed since fails with exit code 255. A secret goes into the
 remote command as `${NAME}`. A bare `$NAME` of a secret is refused, since the remote shell does not have it; any other
-`$VAR` or `${VAR}` belongs to the remote shell.
+`$VAR` or `${VAR}` belongs to the remote shell. `ssh` stays until machines (below) do all it does; then it goes.
+
+## Machines
+
+The agent can work on other machines through the harness, which holds the keys and the connection, and asks you
+before it connects. `machine_add({ name, host, user?, port?, cwd? })` names a machine and returns the harness's own
+public key for it, as an `authorized_keys` line (`restrict`: no forwarding of any kind). The agent installs it there
+with access it has, or asks you to; the private key never leaves `./data/harness/machines/`. From then on `bash`,
+`read`, `write` and `edit` take `machine: "<name>"` and run there as they run in the workspace (pi-env's daemon over
+SSH, as the workspace itself is reached: the same results, Stop and timeouts, and a secret in a command as in the
+workspace). `copy_file({ from: { path, machine? }, to: { path, machine? } })` moves a file of any size or kind between
+the workspace and a machine, or between machines. `machines_list()` and `machine_remove({ name })` do what they say.
+
+The first use of a machine in a thread waits for your approval: T3's approval card in the run, and "Needs approval" in
+the sidebar. It says what the agent wants it for, and at the first connection the machine's host key fingerprint, to
+compare with the machine's own (`ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub` there); allowing trusts that key,
+and a key that changes later is refused. **Deny** tells the agent no, and so does a message you type instead, with its
+text. **Allow for 1 hour** (`CLAW_MACHINE_APPROVAL_HOURS`), **Allow in this thread** (its child threads and side chats
+too, not its forks) and **Always allow** each say how long. A card nobody answers ends after 30 minutes and the agent
+is told so; a scheduled task's thread waits the same way, so grant what it needs ahead.
+
+`/machines` lists the machines, their address, their access in the thread you send it in, whether a connection is open,
+and the trusted host key. `/machines allow <name> <30m|8h|2d|thread|always>` grants without a card, and
+`/machines revoke <name>` takes every grant back and closes the connection, ending what runs there. The harness
+reaches a machine from its container, as the workspace does: a machine the workspace reaches, it reaches.
 
 ## A fixed system prompt
 

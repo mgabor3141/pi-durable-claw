@@ -1,0 +1,594 @@
+/**
+ * Other machines, reached by the harness. The agent names a machine (`machine_add`) and installs the harness's public
+ * key for it there itself; the harness keeps the private key (never in the workspace), trusts the machine's host key
+ * once the user approved it, and holds the connection: pi-env's daemon over SSH, as the workspace is reached, so
+ * `bash`, `read`, `write` and `edit` given `machine` run there as they run in the workspace.
+ *
+ * A connection needs the user's approval, asked on T3's approval card in the thread whose call needs it: for a while
+ * (`CLAW_MACHINE_APPROVAL_HOURS`), for that thread (and the child threads and side chats under it), or always. `/machines`
+ * lists the machines and their access, grants and revokes it. A revoke ends the connection, and with it what runs there.
+ *
+ * Kept in `<root>/machines/`: `machines.json` (the machines and their grants, read at each use, so an edit by hand
+ * counts), a keypair per machine, and `known_hosts`, each host key under the machine's own alias.
+ */
+import { execFileSync } from "node:child_process";
+import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
+import type { Context } from "@earendil-works/chord/context";
+import type { ToolRegistration } from "@earendil-works/pi-durable";
+import type { ExecutionEnv } from "@earendil-works/pi-durable/env";
+import { acceptHostKey, connectSsh, forgetHostKey, HostKeyChangedError, HostKeyUnknownError, RemoteExecutionEnv, scanHostKey, type Connection, type SshTarget } from "@earendil-works/pi-env";
+import type { ApprovalOutcome, HostCommand, T3Attachment } from "@mgabor3141/pi-durable-t3";
+import { int, opt, str } from "@earendil-works/pi-schema";
+import { type Env, setting } from "./env.ts";
+import { object } from "./schema.ts";
+
+/** A machine as `machines.json` keeps it. */
+export interface MachineConfig {
+	readonly host: string;
+	readonly user?: string;
+	readonly port?: number;
+	/** Where a call without an absolute path works; default the user's home there. */
+	readonly cwd?: string;
+}
+
+/** Access the user granted: until a time, in a thread (and the threads under it), or always. */
+export type MachineGrant =
+	| { readonly machine: string; readonly scope: "until"; readonly until: number }
+	| { readonly machine: string; readonly scope: "thread"; readonly threadId: string }
+	| { readonly machine: string; readonly scope: "always" };
+
+interface MachinesFile {
+	readonly machines: Readonly<Record<string, MachineConfig>>;
+	readonly grants: readonly MachineGrant[];
+}
+
+/** What of the bridge machines need: whose a conversation is, and the approval card. */
+export type MachinesBridge = Pick<T3Attachment, "threadOf" | "threadOrigin" | "requestApproval">;
+
+export interface MachinesOptions {
+	/** `<root>/machines`. */
+	readonly dir: string;
+	/** How long "Allow for …" lasts. */
+	readonly approvalMs: number;
+	/** The bridge, once attached (read at each use). */
+	readonly bridge: () => MachinesBridge | undefined;
+	/** The `ssh` program; default `ssh`. */
+	readonly ssh?: string;
+	readonly now?: () => number;
+	readonly log?: { info(message: string, fields?: Record<string, unknown>): void; warn(message: string, fields?: Record<string, unknown>): void };
+}
+
+const NAME = /^[a-z0-9][a-z0-9-]{0,62}$/;
+const EMPTY: MachinesFile = { machines: {}, grants: [] };
+/** How long an approval card waits. */
+const APPROVAL_TIMEOUT_MS = 30 * 60 * 1000;
+
+/** A machine's name as the error messages say it, and the agent's guide to the ones there are. */
+class MachineError extends Error {}
+
+export class Machines {
+	readonly #options: MachinesOptions;
+	/** Open connections, by machine; each with the address it was opened for, so an edited machine connects again. */
+	readonly #open = new Map<string, { readonly key: string; readonly connection: Promise<{ connection: Connection; home: string }> }>();
+	/** Approval cards waiting, by machine and thread: calls that need the same one wait for it together. */
+	readonly #asking = new Map<string, Promise<void>>();
+
+	constructor(options: MachinesOptions) {
+		this.#options = options;
+		mkdirSync(options.dir, { recursive: true, mode: 0o700 });
+	}
+
+	get #file(): string {
+		return join(this.#options.dir, "machines.json");
+	}
+
+	#now(): number {
+		return this.#options.now?.() ?? Date.now();
+	}
+
+	/** `machines.json` as it is now. A file that does not parse fails loudly: it is the user's too. */
+	read(): MachinesFile {
+		if (!existsSync(this.#file)) return EMPTY;
+		let parsed: unknown;
+		try {
+			parsed = JSON.parse(readFileSync(this.#file, "utf8"));
+		} catch (error) {
+			throw new Error(`${this.#file} is not valid JSON: ${(error as Error).message}`);
+		}
+		const file = parsed as Partial<MachinesFile> | null;
+		if (typeof file !== "object" || file === null || typeof file.machines !== "object" || file.machines === null || !Array.isArray(file.grants)) {
+			throw new Error(`${this.#file} must be { "machines": { … }, "grants": [ … ] }`);
+		}
+		for (const [name, machine] of Object.entries(file.machines)) {
+			if (!NAME.test(name) || typeof machine?.host !== "string" || machine.host === "") throw new Error(`${this.#file}: machine ${JSON.stringify(name)} needs a name of lowercase letters, digits and dashes, and a host`);
+		}
+		return { machines: file.machines, grants: file.grants };
+	}
+
+	#write(file: MachinesFile): void {
+		const temporary = `${this.#file}.tmp`;
+		writeFileSync(temporary, `${JSON.stringify(file, null, "\t")}\n`, { mode: 0o600 });
+		renameSync(temporary, this.#file);
+	}
+
+	#machine(name: string): MachineConfig {
+		const machines = this.read().machines;
+		const machine = machines[name];
+		if (machine === undefined) {
+			const names = Object.keys(machines);
+			throw new MachineError(`No machine named ${JSON.stringify(name)}. ${names.length === 0 ? "There are none yet: add one with machine_add." : `There are: ${names.join(", ")}.`}`);
+		}
+		return machine;
+	}
+
+	#keyFile(name: string): string {
+		return join(this.#options.dir, name, "id_ed25519");
+	}
+
+	/** The target pi-env connects to: the machine's own key, and its host key under its own alias. */
+	#target(name: string, machine: MachineConfig): SshTarget {
+		return {
+			host: machine.host,
+			...(machine.user === undefined ? {} : { user: machine.user }),
+			...(machine.port === undefined ? {} : { port: machine.port }),
+			identityFile: this.#keyFile(name),
+			knownHostsFile: join(this.#options.dir, "known_hosts"),
+			hostKeyAlias: `claw-machine-${name}`,
+			...(this.#options.ssh === undefined ? {} : { ssh: this.#options.ssh }),
+		};
+	}
+
+	/** The line to put in the machine's `~/.ssh/authorized_keys`: the harness's key for it, with no forwarding of any kind. */
+	authorizedKey(name: string): string {
+		return `restrict ${readFileSync(`${this.#keyFile(name)}.pub`, "utf8").trim()}`;
+	}
+
+	/** Add a machine, or change one: its key is made the first time. A changed address forgets the host key it had. */
+	add(name: string, machine: MachineConfig): { readonly authorizedKey: string; readonly changed: boolean } {
+		if (!NAME.test(name)) throw new MachineError(`A machine's name is lowercase letters, digits and dashes (up to 63), not ${JSON.stringify(name)}.`);
+		if (machine.host.trim() === "" || /\s/.test(machine.host) || machine.host.startsWith("-")) throw new MachineError(`${JSON.stringify(machine.host)} is not a host name or address.`);
+		const file = this.read();
+		const before = file.machines[name];
+		const key = this.#keyFile(name);
+		if (!existsSync(key)) {
+			mkdirSync(join(this.#options.dir, name), { recursive: true, mode: 0o700 });
+			execFileSync("ssh-keygen", ["-q", "-t", "ed25519", "-N", "", "-C", `claw-machine-${name}`, "-f", key]);
+		}
+		const next: MachineConfig = {
+			host: machine.host,
+			...(machine.user === undefined ? {} : { user: machine.user }),
+			...(machine.port === undefined ? {} : { port: machine.port }),
+			...(machine.cwd === undefined ? {} : { cwd: machine.cwd }),
+		};
+		const changed = before !== undefined && JSON.stringify(before) !== JSON.stringify(next);
+		this.#write({ ...file, machines: { ...file.machines, [name]: next } });
+		if (changed && (before.host !== next.host || before.port !== next.port)) void forgetHostKey(this.#target(name, before)).catch(() => {});
+		if (changed) this.#close(name);
+		return { authorizedKey: this.authorizedKey(name), changed };
+	}
+
+	/** Remove a machine: its key, its host key, its grants, and its connection. */
+	async remove(name: string): Promise<void> {
+		const machine = this.#machine(name);
+		this.#close(name);
+		await forgetHostKey(this.#target(name, machine)).catch(() => {});
+		const file = this.read();
+		const { [name]: _removed, ...machines } = file.machines;
+		this.#write({ machines, grants: file.grants.filter((grant) => grant.machine !== name) });
+		rmSync(join(this.#options.dir, name), { recursive: true, force: true });
+	}
+
+	/** Grant access without a card (`/machines allow`). */
+	grant(grant: MachineGrant): void {
+		this.#machine(grant.machine);
+		const file = this.read();
+		this.#write({ ...file, grants: [...this.#live(file.grants).filter((each) => !sameScope(each, grant)), grant] });
+	}
+
+	/** Take back every grant of a machine, and end its connection. */
+	revoke(name: string): number {
+		this.#machine(name);
+		const file = this.read();
+		const kept = file.grants.filter((grant) => grant.machine !== name);
+		this.#write({ ...file, grants: kept });
+		this.#close(name);
+		return file.grants.length - kept.length;
+	}
+
+	/** Grants still in force (an expired one is dropped when the file is next written). */
+	#live(grants: readonly MachineGrant[]): MachineGrant[] {
+		const now = this.#now();
+		return grants.filter((grant) => grant.scope !== "until" || grant.until > now);
+	}
+
+	/** The grant that lets `threadId` (or no thread) use `name` now: always, until a time, or the thread's own or that of
+	 * a thread above it whose child or side chat it is. */
+	allowed(name: string, threadId: string | undefined): MachineGrant | undefined {
+		const grants = this.#live(this.read().grants).filter((grant) => grant.machine === name);
+		const standing = grants.find((grant) => grant.scope === "always") ?? grants.filter((grant) => grant.scope === "until").sort((a, b) => b.until - a.until)[0];
+		if (standing !== undefined || threadId === undefined) return standing;
+		const bridge = this.#options.bridge();
+		const seen = new Set<string>();
+		for (let current: string | undefined = threadId; current !== undefined && !seen.has(current); ) {
+			seen.add(current);
+			const here = current;
+			const grant = grants.find((each) => each.scope === "thread" && each.threadId === here);
+			if (grant !== undefined) return grant;
+			const origin: ReturnType<MachinesBridge["threadOrigin"]> = bridge?.threadOrigin(current);
+			current = origin !== undefined && origin.parentThreadId !== null && (origin.relationshipToParent === "subagent" || origin.sideChat) ? origin.parentThreadId : undefined;
+		}
+		return undefined;
+	}
+
+	/**
+	 * The machine as the call's environment: approved (a grant, or the card), and connected. `doing` says what the call
+	 * would do there, for the card.
+	 */
+	/** The thread a conversation is the head of. */
+	threadOf(conversationId: number): string | undefined {
+		return this.#options.bridge()?.threadOf(conversationId as never)?.threadId;
+	}
+
+	async env(name: string, conversationId: number, doing: string, signal: AbortSignal | undefined): Promise<RemoteExecutionEnv> {
+		const machine = this.#machine(name);
+		const threadId = this.threadOf(conversationId);
+		if (this.allowed(name, threadId) === undefined) await this.#approve(name, machine, conversationId, threadId, doing, signal);
+		const { connection, home } = await this.#connection(name, machine);
+		return new RemoteExecutionEnv({ connection, id: `pi-env:claw-machine-${name}`, cwd: machine.cwd ?? home });
+	}
+
+	/** Ask on the card, once per machine and thread at a time; trust the host key it showed when allowed. */
+	async #approve(name: string, machine: MachineConfig, conversationId: number, threadId: string | undefined, doing: string, signal: AbortSignal | undefined): Promise<void> {
+		const bridge = this.#options.bridge();
+		if (bridge === undefined || threadId === undefined) throw new MachineError(`Using ${name} needs the user's approval, which only a thread can ask for: ask the user to allow it with /machines allow ${name}.`);
+		const key = `${name}\u0000${threadId}`;
+		const asking = this.#asking.get(key);
+		if (asking !== undefined) {
+			await asking;
+			if (this.allowed(name, threadId) === undefined) throw new MachineError(`The user did not allow ${name}.`);
+			return;
+		}
+		const ask = this.#ask(bridge, name, machine, conversationId, threadId, doing, signal);
+		this.#asking.set(key, ask.then(() => undefined, () => undefined));
+		try {
+			await ask;
+		} finally {
+			this.#asking.delete(key);
+		}
+	}
+
+	async #ask(bridge: MachinesBridge, name: string, machine: MachineConfig, conversationId: number, threadId: string, doing: string, signal: AbortSignal | undefined): Promise<void> {
+		const target = this.#target(name, machine);
+		const scanned = await this.#unknownHostKey(name, target);
+		const hours = this.#options.approvalMs / 3_600_000;
+		const forAWhile = Number.isInteger(hours) ? `${hours} hour${hours === 1 ? "" : "s"}` : `${Math.round(this.#options.approvalMs / 60_000)} minutes`;
+		const address = `${machine.user === undefined ? "" : `${machine.user}@`}${machine.host}${machine.port === undefined ? "" : `:${machine.port}`}`;
+		// One paragraph: T3 shows the reason as one.
+		const reason = [
+			`The agent wants to use ${name} (${address}): run commands and read and change files there, as its user. Wanted for: ${doing}.`,
+			...(scanned === undefined ? [] : [`First connection: ${name} shows the host key ${scanned.fingerprints.map(shortFingerprint).join(", ")}. Allowing trusts it; compare it with the machine's own first (ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub there).`]),
+		].join(" ");
+		const outcome: ApprovalOutcome = await bridge.requestApproval(
+			{
+				conversationId,
+				prompt: `ssh ${address}`,
+				reason,
+				appName: name,
+				options: [
+					{ decision: "decline", label: "Deny" },
+					{ decision: "accept", label: `Allow for ${forAWhile}` },
+					{ decision: "acceptForSession", label: "Allow in this thread" },
+					{ decision: "acceptAlways", label: `Always allow ${name}` },
+				],
+				timeoutMs: APPROVAL_TIMEOUT_MS,
+			},
+			signal,
+		);
+		if (outcome.status === "timed_out") throw new MachineError(`Nobody answered the approval for ${name} in ${APPROVAL_TIMEOUT_MS / 60_000} minutes. Say in your reply what you needed it for.`);
+		if (outcome.status !== "decided") throw new MachineError(`The approval for ${name} ended unanswered (stopped).`);
+		if (outcome.decision === "decline" || outcome.decision === "cancel") {
+			throw new MachineError(`The user did not allow ${name}${outcome.feedback === undefined ? "." : `, and said: ${outcome.feedback}`}`);
+		}
+		if (scanned !== undefined) await acceptHostKey(target, scanned.lines);
+		const grant: MachineGrant =
+			outcome.decision === "acceptAlways"
+				? { machine: name, scope: "always" }
+				: outcome.decision === "acceptForSession"
+					? { machine: name, scope: "thread", threadId }
+					: { machine: name, scope: "until", until: this.#now() + this.#options.approvalMs };
+		this.grant(grant);
+		this.#options.log?.info("machine allowed", { machine: name, scope: grant.scope, threadId });
+	}
+
+	/** The host key the machine shows when none is trusted for it yet; `undefined` when one is. */
+	async #unknownHostKey(name: string, target: SshTarget): Promise<{ lines: string[]; fingerprints: string[] } | undefined> {
+		const known = join(this.#options.dir, "known_hosts");
+		if (existsSync(known) && readFileSync(known, "utf8").split("\n").some((line) => line.startsWith(`${target.hostKeyAlias} `))) return undefined;
+		try {
+			return await scanHostKey(target);
+		} catch (error) {
+			throw new MachineError(`Cannot reach ${name} (${target.host}): ${(error as Error).message.trim()}`);
+		}
+	}
+
+	async #connection(name: string, machine: MachineConfig): Promise<{ connection: Connection; home: string }> {
+		const key = JSON.stringify(machine);
+		const open = this.#open.get(name);
+		if (open !== undefined && open.key === key) return open.connection;
+		if (open !== undefined) this.#close(name);
+		const target = this.#target(name, machine);
+		const connection = connectSsh({ ...target, onLog: (line) => this.#options.log?.info("machine daemon", { machine: name, line: line.trim() }) }).then(
+			({ connection, remote }) => ({ connection, home: remote.home }),
+			(error: unknown) => {
+				this.#open.delete(name);
+				throw new MachineError(connectFailure(name, this, error));
+			},
+		);
+		this.#open.set(name, { key, connection });
+		return connection;
+	}
+
+	/** End a machine's connection, and with it what runs there. */
+	#close(name: string): void {
+		const open = this.#open.get(name);
+		this.#open.delete(name);
+		void open?.connection.then(({ connection }) => connection.close(), () => {});
+	}
+
+	/** Is a connection to `name` open (or opening)? */
+	connected(name: string): boolean {
+		return this.#open.has(name);
+	}
+
+	close(): void {
+		for (const name of [...this.#open.keys()]) this.#close(name);
+	}
+
+	/** The host key trusted for a machine, as `ssh-keygen -l` prints it; `undefined` before the first approval. */
+	hostKeyFingerprint(name: string): string | undefined {
+		const known = join(this.#options.dir, "known_hosts");
+		if (!existsSync(known)) return undefined;
+		const lines = readFileSync(known, "utf8").split("\n").filter((line) => line.startsWith(`claw-machine-${name} `));
+		if (lines.length === 0) return undefined;
+		try {
+			return execFileSync("ssh-keygen", ["-l", "-f", "-"], { input: lines.join("\n") + "\n" }).toString().trim().split("\n").map(shortFingerprint).join(", ");
+		} catch {
+			return undefined;
+		}
+	}
+
+	/** How a machine's access stands, in words, for `threadId` (if any). */
+	access(name: string, threadId: string | undefined): string {
+		const grant = this.allowed(name, threadId);
+		if (grant === undefined) {
+			const elsewhere = this.#live(this.read().grants).filter((each) => each.machine === name && each.scope === "thread").length;
+			return elsewhere === 0 ? "asks" : `asks here (allowed in ${elsewhere} other thread${elsewhere === 1 ? "" : "s"})`;
+		}
+		if (grant.scope === "always") return "always allowed";
+		if (grant.scope === "thread") return grant.threadId === threadId ? "allowed in this thread" : "allowed in a thread above this one";
+		return `allowed until ${new Date(grant.until).toISOString().slice(0, 16).replace("T", " ")} UTC`;
+	}
+}
+
+/** `256 SHA256:… alias (ED25519)`, as `ssh-keygen -l` prints a key, as `SHA256:… (ED25519)`. */
+const shortFingerprint = (line: string): string => {
+	const words = line.trim().split(/\s+/);
+	return words.length >= 3 ? `${words[1]} ${words.at(-1)}` : line.trim();
+};
+
+const sameScope = (a: MachineGrant, b: MachineGrant): boolean =>
+	a.machine === b.machine && a.scope === b.scope && (a.scope !== "thread" || (b.scope === "thread" && a.threadId === b.threadId));
+
+/** Why a connection failed, with what to do about it. */
+function connectFailure(name: string, machines: Machines, error: unknown): string {
+	if (error instanceof HostKeyChangedError) {
+		return `${name}'s host key has CHANGED since it was trusted: the connection is refused. If the machine was reinstalled, ask the user to check it, then remove and add it again (machine_remove, machine_add).`;
+	}
+	if (error instanceof HostKeyUnknownError) return `${name}'s host key is not trusted yet; try again to be asked.`;
+	const message = error instanceof Error ? error.message.trim() : String(error);
+	if (/permission denied|publickey/i.test(message)) {
+		return `${name} refused the harness's key (${message}). Put this line in ~/.ssh/authorized_keys of that user there:\n${machines.authorizedKey(name)}`;
+	}
+	return `Cannot connect to ${name}: ${message}`;
+}
+
+/** How long "Allow for …" lasts: `CLAW_MACHINE_APPROVAL_HOURS` (default 1). Not a positive number: fails loudly. */
+export function machineApprovalMs(env: Env): number {
+	const value = setting(env, "CLAW_MACHINE_APPROVAL_HOURS");
+	if (value === undefined) return 3_600_000;
+	const hours = Number(value);
+	if (!Number.isFinite(hours) || hours <= 0) throw new Error(`CLAW_MACHINE_APPROVAL_HOURS must be a number of hours above 0, not ${JSON.stringify(value)}`);
+	return hours * 3_600_000;
+}
+
+/** Parse a duration such as `30m`, `8h`, `2d`; `undefined` when it is none. */
+export function parseDuration(text: string): number | undefined {
+	const match = /^(\d+(?:\.\d+)?)\s*(m|min|h|d)$/.exec(text.trim());
+	if (match === null) return undefined;
+	const unit = { m: 60_000, min: 60_000, h: 3_600_000, d: 86_400_000 }[match[2] as "m" | "min" | "h" | "d"];
+	const ms = Number(match[1]) * unit;
+	return ms > 0 ? ms : undefined;
+}
+
+/** `/machines`: the machines and their access in the thread it is sent in; `allow`, `revoke`. */
+export function machinesCommand(machines: Machines): HostCommand {
+	return {
+		name: "machines",
+		description: "The machines the agent may use and their access; shown here only, not sent to the model",
+		hint: "allow <name> <30m|8h|thread|always>, or revoke <name>",
+		async run({ threadId, argument }) {
+			const words = argument.split(/\s+/).filter((word) => word !== "");
+			if (words[0] === "allow") {
+				const [, name, how] = words;
+				if (name === undefined || how === undefined) return "Usage: `/machines allow <name> <30m|8h|2d|thread|always>`";
+				const ms = parseDuration(how);
+				const grant: MachineGrant | undefined =
+					how === "always" ? { machine: name, scope: "always" } : how === "thread" ? { machine: name, scope: "thread", threadId } : ms === undefined ? undefined : { machine: name, scope: "until", until: Date.now() + ms };
+				if (grant === undefined) return `Not a duration: \`${how}\`. Give one such as \`30m\`, \`8h\` or \`2d\`, or \`thread\`, or \`always\`.`;
+				machines.grant(grant);
+				return `${name}: ${machines.access(name, threadId)}. The host key is trusted at its first connection${machines.hostKeyFingerprint(name) === undefined ? ", without asking: compare it after with `/machines`" : ""}.`;
+			}
+			if (words[0] === "revoke") {
+				const name = words[1];
+				if (name === undefined) return "Usage: `/machines revoke <name>`";
+				const count = machines.revoke(name);
+				return `${name}: ${count === 0 ? "had no access granted" : `access taken back (${count} grant${count === 1 ? "" : "s"})`}; its connection is closed. The agent is asked again next time.`;
+			}
+			if (words.length > 0) return "Usage: `/machines`, `/machines allow <name> <30m|8h|2d|thread|always>`, `/machines revoke <name>`";
+			const all = Object.entries(machines.read().machines);
+			if (all.length === 0) return "No machines yet. The agent adds one with `machine_add`, and installs the key it gets there.";
+			const rows = all.map(([name, machine]) => {
+				const address = `${machine.user === undefined ? "" : `${machine.user}@`}${machine.host}${machine.port === undefined ? "" : `:${machine.port}`}`;
+				const fingerprint = machines.hostKeyFingerprint(name);
+				return `| ${name} | \`${address}\` | ${machines.access(name, threadId)} | ${machines.connected(name) ? "open" : "—"} | ${fingerprint === undefined ? "not trusted yet" : `\`${fingerprint}\``} |`;
+			});
+			return [
+				"| Machine | Address | Access | Connection | Host key |",
+				"| --- | --- | --- | --- | --- |",
+				...rows,
+				"",
+				"`/machines allow <name> <30m|8h|2d|thread|always>` grants access, `/machines revoke <name>` takes it back. Shown here only: not sent to the model.",
+			].join("\n");
+		},
+	};
+}
+
+/** The machine a tool call names, as its environment; without one, the call's own (the workspace). */
+type EnvOf = (machine: string | undefined, api: { conversationId: number; env: unknown }, doing: string, signal: AbortSignal | undefined) => Promise<unknown>;
+
+/** `tool` with an optional `machine`: given, the call runs on that machine (approved and connected), as it would in
+ * the workspace. `doing` says, for the approval card, what the call is about to do. */
+export function onMachine(tool: ToolRegistration, machines: Machines, doing: (args: Record<string, unknown>) => string): ToolRegistration {
+	const parameters = tool.parameters as unknown as { properties: Record<string, unknown> };
+	const envOf: EnvOf = async (machine, api, what, signal) => (machine === undefined ? api.env : machines.env(machine, api.conversationId, what, signal));
+	return {
+		...tool,
+		parameters: {
+			...parameters,
+			properties: { ...parameters.properties, machine: { type: "string", description: "Run it on this machine (machines_list) instead of the workspace" } },
+		} as never,
+		async execute(args, api, context) {
+			const { machine, ...rest } = args as Record<string, unknown>;
+			if (machine === undefined || machine === null || machine === "") return tool.execute(rest as never, api, context);
+			if (typeof machine !== "string") throw new Error("machine: give a machine's name");
+			const env = await envOf(machine, api as never, `${tool.name} ${doing(rest)}`, context.abortSignal);
+			return tool.execute(rest as never, { ...api, env } as never, context);
+		},
+	} as ToolRegistration;
+}
+
+/** The tools that manage machines and move files between them: `machine_add`, `machine_remove`, `machines_list`,
+ * `copy_file`. Scripts only. */
+export function machineTools(machines: Machines): ToolRegistration[] {
+	const text = (value: unknown) => ({ output: [{ type: "text" as const, text: typeof value === "string" ? value : JSON.stringify(value, null, 2) }] });
+	return [
+		{
+			name: "machine_add",
+			description:
+				"Add another machine the harness can reach, or change one, under a name. Returns the harness's public key for it: put that line in ~/.ssh/authorized_keys of the user there (with access you have, or ask the user to). The private key stays with the harness. Then pass machine: name to bash, read, write or edit; the first use asks the user to approve the connection.",
+			parameters: object({
+				name: str({ description: "Lowercase letters, digits and dashes: nas, pi, gpu-box" }),
+				host: str({ description: "Host name or address" }),
+				user: opt(str({ description: "The user to log in as; default the harness's own (root)" })),
+				port: opt(int({ minimum: 1, maximum: 65535, description: "SSH port; default 22" })),
+				cwd: opt(str({ description: "Where commands start and relative paths resolve; default that user's home" })),
+			}),
+			callers: ["tools"],
+			async execute(args: { name: string; host: string; user?: string; port?: number; cwd?: string }) {
+				const { authorizedKey, changed } = machines.add(args.name, {
+					host: args.host,
+					...(args.user === undefined ? {} : { user: args.user }),
+					...(args.port === undefined ? {} : { port: args.port }),
+					...(args.cwd === undefined ? {} : { cwd: args.cwd }),
+				});
+				return text({ name: args.name, changed, authorizedKey, next: `Append authorizedKey to ~/.ssh/authorized_keys of ${args.user ?? "that user"} on ${args.host}, then use machine: "${args.name}".` });
+			},
+		} as ToolRegistration,
+		{
+			name: "machine_remove",
+			description: "Remove a machine: the harness's key for it, its trusted host key, its access grants, and its connection.",
+			parameters: object({ name: str() }),
+			callers: ["tools"],
+			async execute(args: { name: string }) {
+				await machines.remove(args.name);
+				return text(`Removed ${args.name}. Its key line can be deleted from authorized_keys there.`);
+			},
+		} as ToolRegistration,
+		{
+			name: "machines_list",
+			description: "The machines you can use (machine: name on bash, read, write, edit), with their address, access in this thread, and the key line to install.",
+			parameters: object({}),
+			callers: ["tools"],
+			async execute(_args, api) {
+				const threadId = machines.threadOf(api.conversationId);
+				const all = Object.entries(machines.read().machines).map(([name, machine]) => ({
+					name,
+					...machine,
+					access: machines.access(name, threadId),
+					hostKeyTrusted: machines.hostKeyFingerprint(name) !== undefined,
+					authorizedKey: machines.authorizedKey(name),
+				}));
+				return text(all);
+			},
+		} as ToolRegistration,
+		{
+			name: "copy_file",
+			description:
+				"Copy a file, of any size or kind, between the workspace and a machine, or between machines: from and to are each { path, machine? } (no machine: the workspace). Overwrites the destination; makes its folder. For a folder, tar it first.",
+			parameters: object({
+				from: object({ path: str(), machine: opt(str()) }),
+				to: object({ path: str(), machine: opt(str()) }),
+			}),
+			callers: ["tools"],
+			async execute(args: { from: { path: string; machine?: string }; to: { path: string; machine?: string } }, api, context) {
+				const envOf = async (side: { path: string; machine?: string }, doing: string) =>
+					(side.machine === undefined || side.machine === "" ? api.env : await machines.env(side.machine, api.conversationId, doing, context.abortSignal)) as ExecutionEnv | undefined;
+				const source = await envOf(args.from, `copy_file from ${args.from.path}`);
+				const target = await envOf(args.to, `copy_file to ${args.to.path}`);
+				if (source === undefined || target === undefined) throw new Error("No execution environment is configured");
+				const bytes = await copyFile(source, args.from.path, target, args.to.path, context);
+				return text(`Copied ${bytes} bytes.`);
+			},
+		} as ToolRegistration,
+	];
+}
+
+const CHUNK = 4 * 1024 * 1024;
+
+/** Copy `from` in `source` to `to` in `target` a chunk at a time, through a temporary file renamed into place. */
+async function copyFile(source: ExecutionEnv, from: string, target: ExecutionEnv, to: string, context: Context): Promise<number> {
+	const fail = (what: string, error: { message: string }) => new Error(`${what}: ${error.message}`);
+	const destination = await target.absolutePath(to, context);
+	if (!destination.ok) throw fail(to, destination.error);
+	const folder = destination.value.slice(0, destination.value.lastIndexOf("/")) || "/";
+	const made = await target.createDir(folder, { recursive: true }, context);
+	if (!made.ok) throw fail(folder, made.error);
+	const reader = await source.openBinaryReader(from, undefined, context);
+	if (!reader.ok) throw fail(from, reader.error);
+	const temporary = `${destination.value}.copying-${process.pid}-${Date.now()}`;
+	try {
+		const info = await reader.value.info(context);
+		if (!info.ok) throw fail(from, info.error);
+		if (info.value.kind !== "file") throw new Error(`${from} is not a file`);
+		const started = await target.writeFile(temporary, new Uint8Array(), context);
+		if (!started.ok) throw fail(to, started.error);
+		let offset = 0;
+		for (;;) {
+			const chunk = await reader.value.read(offset, CHUNK, context);
+			if (!chunk.ok) throw fail(from, chunk.error);
+			if (chunk.value.length === 0) break;
+			const written = await target.appendFile(temporary, chunk.value, context);
+			if (!written.ok) throw fail(to, written.error);
+			offset += chunk.value.length;
+		}
+		const moved = await target.renameFile(temporary, destination.value, context);
+		if (!moved.ok) throw fail(to, moved.error);
+		return offset;
+	} catch (error) {
+		await target.remove(temporary, { force: true }, context).catch(() => {});
+		throw error;
+	} finally {
+		await reader.value.close(context);
+	}
+}
