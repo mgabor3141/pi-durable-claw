@@ -34,7 +34,6 @@ const harness = await openHarness({
 	storagePath,
 	workspace,
 	models,
-	cwd: "/home/agent",
 });
 const root = await harness.root(context, { agent: { model: { provider: "faux", modelId: "faux-1" }, cwd: "/home/agent" } });
 harness.resume();

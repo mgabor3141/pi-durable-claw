@@ -85,15 +85,6 @@ export interface HarnessExtensionOptions {
 	readonly machines?: Machines;
 }
 
-/**
- * The extensions of the assistant conversation: the preamble, upstream's durable `codemode` extension, and the
- * harness's own tools — the workspace's `read`/`write`/`bash` (pi-durable's coding tools over the call's
- * `ExecutionEnv`, i.e. pi-env SSH to the workspace container; plus any `extraTools`) — all with `callers: ["tools"]`,
- * so only codemode scripts call them. The codemode section is a catalog (`codemode-catalog.ts`): every one of them on
- * one line, `read`/`write`/`edit`/`bash` in full, the rest's declarations from `describeTool()`; MCP tools, which the
- * MCP manager registers, are left out of it and found with `searchTools()`. The system prompt is fixed for a thread
- * (`fixed-prompt.ts`).
- */
 /** The workspace tools that also run on a machine, and what each says it is about to do there, for the approval card. */
 const ON_MACHINE: Readonly<Record<string, (args: Record<string, unknown>) => string>> = {
 	bash: (args) => clip(String(args["command"] ?? "")),
@@ -107,11 +98,22 @@ const machineAware = (tool: ToolRegistration, machines: Machines): ToolRegistrat
 	return doing === undefined ? tool : onMachine(tool, machines, doing);
 };
 
+/**
+ * The extensions of the assistant conversation: the preamble, upstream's durable `codemode` extension, and the
+ * harness's own tools. The workspace's `read`/`write`/`edit`/`bash` (pi-durable's coding tools over the call's
+ * `ExecutionEnv`, i.e. pi-env SSH to the workspace container) are the model's as well as the scripts'; the rest
+ * (`ssh`, the `extraTools`, the web, browser, machine, summarize and secrets tools) have `callers: ["tools"]`, so only
+ * codemode scripts call them. The codemode section is a catalog (`codemode-catalog.ts`): every one of them on one line,
+ * `read`/`write`/`edit`/`bash` in full, the rest's declarations from `describeTool()`; MCP tools, which the MCP manager
+ * registers, are left out of it and found with `searchTools()`. The system prompt is fixed for a thread
+ * (`fixed-prompt.ts`).
+ */
 export function harnessExtensions(options: HarnessExtensionOptions = {}): readonly Extension[] {
+	const machines = options.machines;
 	const tools: ToolRegistration[] = [
 		...(options.extraTools ?? []),
-		...(options.machines === undefined ? workspaceTools(options.images) : workspaceTools(options.images).map((tool) => machineAware(tool, options.machines!))),
-		...(options.machines === undefined ? [] : machineTools(options.machines)),
+		...workspaceTools(options.images).map((tool) => (machines === undefined ? tool : machineAware(tool, machines))),
+		...(machines === undefined ? [] : machineTools(machines)),
 		...webTools(options.web ?? {}),
 		// The browser's sessions do not listen for Stop; each call returns the moment it is stopped.
 		...(options.browser === true ? browserTools(options.late).map(abortable) : []),
@@ -145,7 +147,6 @@ export interface HarnessConfig extends HarnessExtensionOptions {
 	workspace: WorkspaceConnection;
 	/** The model catalog. */
 	models: HarnessOptions["models"];
-	cwd?: string;
 	/** Called with the registry before the harness opens, so integrations can install dynamic extensions. */
 	onRegistry?: (registry: Registry) => void;
 }
@@ -171,8 +172,8 @@ export const RETRY_POLICY = { enabled: true, maxRetries: 64, baseDelayMs: 2_000,
 export const PROVIDER_RETRY = { maxRetries: 3, maxRetryDelayMs: 60_000 } as const;
 
 /**
- * A pi-durable Harness whose only model-facing tool is upstream's `codemode`, whose environment is the workspace over
- * SSH (pi-env), and whose scripts reach the workspace tools as nested calls.
+ * A pi-durable Harness whose model calls `codemode` and the workspace's `read`/`write`/`edit`/`bash`, whose environment
+ * is the workspace over SSH (pi-env), and whose scripts reach the harness's tools as nested calls.
  */
 export async function openHarness(
 	options: HarnessConfig,
@@ -191,7 +192,7 @@ export async function openHarness(
 			registry,
 			// Every tool call's environment is the workspace container over SSH, starting where this conversation
 			// says it works: a project's root, a Scratch thread's own folder, or the home fallback.
-			env: (target) => workspaceEnv(options.workspace.connection, target.cwd ?? options.cwd ?? WORKSPACE_HOME),
+			env: (target) => workspaceEnv(options.workspace.connection, target.cwd ?? WORKSPACE_HOME),
 			settings: { toolExecution: "sequential", retry: RETRY_POLICY, stream: PROVIDER_RETRY },
 			conversationCreated: recordConversationStart(),
 		},
