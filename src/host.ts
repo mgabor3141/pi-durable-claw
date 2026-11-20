@@ -283,7 +283,7 @@ async function main(): Promise<void> {
 			},
 			...(browserlessUrl === undefined
 				? {}
-				: { preview: { cdpUrl: browserlessUrl, ...(browserlessToken === undefined ? {} : { token: browserlessToken }), storageStatePath: join(stateDir, "browser-profile.json") } }),
+				: { preview: { cdpUrl: browserlessUrl, ...(browserlessToken === undefined ? {} : { token: browserlessToken }) } }),
 			log,
 		});
 	} catch (error) {

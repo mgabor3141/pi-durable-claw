@@ -383,7 +383,7 @@ When `BROWSERLESS_URL` is set, the bridge also offers T3's in-app Browser panel:
 from the same Browserless Chromium. T3's panel opens a tab, receives JPEG frames and forwards pointer and
 keyboard input, so the same browser is visible and controllable from the web or mobile client. A URL passed to
 `browser_open` is opened in that same T3 preview tab; the tab is visible in the Browser panel. The agent and the user operate one page. If the preview browser does not answer, `browser_open` fails with its
-error; there is no other browser to fall back to. This is a live view, not a page reader. Preview tabs share a durable storageState profile (cookies and origins' localStorage, kept at the bridge's stateDir/browser-profile.json). A preview tab has no
+error; there is no other browser to fall back to. This is a live view, not a page reader. Preview tabs share the browser's own context, so their cookies, localStorage and cache are Browserless's profile: mount a profile directory in the Browserless container to keep them across its restarts. A preview tab has no
 upload/download or file chooser; closing the panel closes its tab. The URL is reached from Browserless, not from
 the device, so no host forwarder or proxy is needed.
 

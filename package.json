@@ -21,7 +21,7 @@
     "@earendil-works/pi-env": "1.6.0",
     "@earendil-works/pi-mcp": "1.6.0",
     "@earendil-works/pi-schema": "1.6.0",
-    "@mgabor3141/pi-durable-t3": "github:mgabor3141/pi-durable-t3#a93a14f3313b5e1b370b17acd981f89230d7d40e",
+    "@mgabor3141/pi-durable-t3": "github:mgabor3141/pi-durable-t3#485d841ab07c934e82ed19c0efd68fd04cbad0b1",
     "@vectorize-io/hindsight-client": "1.2.0",
     "playwright-core": "1.64.1"
   },
