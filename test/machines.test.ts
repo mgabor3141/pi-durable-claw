@@ -53,7 +53,17 @@ beforeAll(async () => {
 		join(dir, "sshd_config"),
 		[`Port ${PORT}`, "ListenAddress 127.0.0.1", `HostKey ${join(dir, "host_ed25519")}`, `PidFile ${join(dir, "sshd.pid")}`, `AuthorizedKeysFile ${join(dir, "authorized_keys")}`, "PasswordAuthentication no", "KbdInteractiveAuthentication no", "UsePAM no", "StrictModes no", ""].join("\n"),
 	);
-	sshd = spawn(SSHD, ["-D", "-e", "-f", join(dir, "sshd_config")], { stdio: "ignore" });
+	// OpenSSH 9.8+ penalises an address that connects without logging in (ssh-keyscan, as the gate reads a host key) or
+	// fails to: every test connects from 127.0.0.1, so the penalties are off where this sshd knows the option.
+	const penalties = (() => {
+		try {
+			execFileSync(SSHD, ["-t", "-f", join(dir, "sshd_config"), "-o", "PerSourcePenalties=no"], { stdio: "ignore" });
+			return ["-o", "PerSourcePenalties=no"];
+		} catch {
+			return [];
+		}
+	})();
+	sshd = spawn(SSHD, ["-D", "-e", "-f", join(dir, "sshd_config"), ...penalties], { stdio: "ignore" });
 	if (!(await listening(PORT))) {
 		sshd.kill();
 		sshd = undefined;
