@@ -402,4 +402,57 @@ describe("the MCP manager", () => {
 		}
 	});
 
+	it("a connect that succeeds after its server was removed or edited, or the manager closed, installs nothing and closes its client", async () => {
+		const path = await tempConfig({ mcpServers: {} });
+		const held: ReturnType<typeof heldServer>[] = [];
+		const manager = new McpManager({
+			source: fileSource(path),
+			transportFactory: (_server, config) => {
+				if (config.url.includes("fast")) return fakeServer();
+				const server = heldServer();
+				held.push(server);
+				return server.transport;
+			},
+			connectTimeoutMs: 2000,
+		});
+		await manager.load();
+		const registry = createRegistry();
+		manager.attach(registry);
+		await manager.start();
+		const slow = JSON.stringify({ mcpServers: { slow: { type: "http", url: "http://slow.test/mcp" } } });
+
+		// Removed while connecting, then the connect succeeds.
+		await writeFile(path, slow);
+		await manager.reload();
+		await until(() => held.length === 1);
+		await writeFile(path, JSON.stringify({ mcpServers: {} }));
+		await manager.reload();
+		held[0]!.release();
+		await until(() => held[0]!.closed);
+		await new Promise((resolve) => setTimeout(resolve, 20));
+		expect(held[0]!.closed, "the late client is closed").toBe(true);
+		expect(registry.snapshot().extension("mcp:slow"), "the removed server's tools stay gone").toBeUndefined();
+
+		// Edited while connecting: the new entry connects, then the old connect succeeds.
+		await writeFile(path, slow);
+		await manager.reload();
+		await until(() => held.length === 2);
+		await writeFile(path, JSON.stringify({ mcpServers: { slow: { type: "http", url: "http://fast.test/mcp" } } }));
+		await manager.reload();
+		await until(() => (registry.snapshot().extension("mcp:slow")?.tools?.length ?? 0) > 0);
+		held[1]!.release();
+		await until(() => held[1]!.closed);
+		await new Promise((resolve) => setTimeout(resolve, 20));
+		expect(held[1]!.closed, "the late client is closed").toBe(true);
+		expect(registry.snapshot().extension("mcp:slow")?.tools?.map((tool) => tool.name), "the edited entry's tools, not the old one's").toEqual(["mcp__slow__search"]);
+
+		// Closed while connecting.
+		await writeFile(path, slow);
+		await manager.reload();
+		await until(() => held.length === 3);
+		await manager.close();
+		held[2]!.release();
+		await until(() => held[2]!.closed);
+		expect(held[2]!.closed, "the late client is closed").toBe(true);
+	});
 });

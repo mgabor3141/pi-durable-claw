@@ -472,6 +472,11 @@ export class McpManager {
 					this.options.connectTimeoutMs ?? DEFAULT_CONNECT_TIMEOUT_MS,
 					`MCP server "${server}" did not connect`,
 				);
+				// The server left the configuration (or the manager closed) while this connected: nothing will use this client.
+				if (state.dropped === true || this.closed) {
+					await client.close().catch(() => {});
+					return;
+				}
 				state.client = client;
 				state.transport = transport;
 				state.instructions = client.instructions;
