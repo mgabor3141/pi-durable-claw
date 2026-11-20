@@ -11,8 +11,6 @@ import type { Harness } from "@earendil-works/pi-durable";
 import type { TitleThread } from "@mgabor3141/pi-durable-t3";
 import { TITLE_ASK, TITLE_SYSTEM_PROMPT, titleContext, titlePrompt, titleRegenerateAsk } from "./prompts.ts";
 
-export { titleContext } from "./prompts.ts";
-
 export function titleThread(harness: Harness, models: Models): TitleThread {
 	return async ({ conversationId, at, reason, previousTitle, signal, model: configured, guidance }) => {
 		const ctx = BACKGROUND_CONTEXT;

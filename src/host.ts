@@ -31,7 +31,7 @@ import { SecretStore, withSecrets, withSigningSecret } from "./secrets.ts";
 import { connectWorkspace, ensureKeypair, WORKSPACE_HOME, workspaceEnv, workspaceTarget } from "./workspace.ts";
 import { setting, settingList } from "./env.ts";
 import { webConfig } from "./web.ts";
-import { deviceName, readRemoteEnabled, readStatusFile, Tailnet, tailnetUrl, writeRemoteEnabled, type TailnetStatus } from "./tailnet.ts";
+import { deviceName, readRemoteEnabled, readStatusFile, statusFile, Tailnet, tailnetUrl, writeRemoteEnabled, type TailnetStatus } from "./tailnet.ts";
 import { attachT3, mintPairingCode } from "@mgabor3141/pi-durable-t3";
 import { installShutdown } from "./shutdown.ts";
 import { machineApprovalMs, Machines, machinesCommand } from "./machines.ts";
@@ -331,9 +331,10 @@ async function main(): Promise<void> {
 		);
 	}
 
-	// Agent `browser_open` pages are T3's preview tabs, the ones the user sees; there is no other browser.
-	// What the harness's own tools need from the bridge: `summarize` generates with T3's text-generation model when it names
-	// one of ours (titles get it per request), and `browser_open` opens T3's preview tabs.
+	// What the harness's own parts read from the bridge, at each use: T3's text-generation model (`summarize` and memory
+	// notes, when it names one of ours; titles get it per request), the models hidden from its picker (a script's model
+	// lists), whose a thread is (cache retention, machines) and the approval card (machines). Agent `browser_open` pages
+	// are T3's preview tabs, the ones the user sees; there is no other browser.
 	late.bridge = t3;
 	const previewBrowser = t3.previewBrowser;
 	if (previewBrowser !== undefined) late.previewBrowser = (conversationId, url) => previewBrowser.open(conversationId, url);
@@ -406,7 +407,7 @@ async function remoteCommand(root: string, action: string): Promise<number> {
 	const fresh = (): TailnetStatus | undefined => {
 		const status = readStatusFile(root);
 		if (status === undefined) return undefined;
-		if (!wasOn && statSync(join(root, "tailscale", "status.json")).mtimeMs < since) return undefined;
+		if (!wasOn && statSync(statusFile(root)).mtimeMs < since) return undefined;
 		return status;
 	};
 	for (let waited = 0; waited < 90_000; waited += 1_000) {

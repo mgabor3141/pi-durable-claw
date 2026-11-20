@@ -8,6 +8,8 @@
  * Keep this file the single place to review what the model is told.
  */
 
+import type { Skill } from "./skills.ts";
+
 /* -------------------------------------------------------------------------- */
 /* Compaction                                                                 */
 /* -------------------------------------------------------------------------- */
@@ -188,13 +190,7 @@ export function cwdSection(cwd: string): string {
 	return "<cwd>\n" + cwd + "\n</cwd>";
 }
 
-export interface SkillListing {
-	readonly name: string;
-	readonly description: string;
-	readonly path: string;
-}
-
-export function skillsSection(scope: "global" | "local", skills: readonly SkillListing[]): string | undefined {
+export function skillsSection(scope: "global" | "local", skills: readonly Skill[]): string | undefined {
 	if (skills.length === 0) return undefined;
 	const lines = [
 		"The following skills provide specialized instructions for specific tasks.",

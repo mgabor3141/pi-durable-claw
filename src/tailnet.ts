@@ -41,7 +41,7 @@ export interface TailnetOptions {
 	/** The program and leading arguments; default `claw-tailnet` on PATH. */
 	readonly command?: readonly string[];
 	readonly log: { info(message: string, fields?: Record<string, unknown>): void; warn(message: string, fields?: Record<string, unknown>): void };
-	/** How often `remote.json` is checked, in ms (default 2000). */
+	/** How often `remote.json` and `status.json` are checked, in ms (default 1000). */
 	readonly pollMs?: number;
 }
 
@@ -123,10 +123,6 @@ export class Tailnet implements RemoteAccess {
 
 	current(): RemoteAccessState {
 		return advertised(this.#status, this.#options.workspace.user);
-	}
-
-	status(): TailnetStatus | undefined {
-		return this.#status;
 	}
 
 	subscribe(listener: () => void): () => void {
