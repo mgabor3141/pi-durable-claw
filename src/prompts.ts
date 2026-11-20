@@ -245,8 +245,10 @@ export function summarizePrompt(task: string, input: string): string {
 /* Thread titles                                                              */
 /* -------------------------------------------------------------------------- */
 
-export const TITLE_SYSTEM_PROMPT =
-	"You name chat threads. Reply with only the title, at most 6 words, without quotes or a trailing period.";
+/** T3 names the project so the model leaves it out: the UI shows it beside the title. */
+export function titleSystemPrompt(projectTitle: string): string {
+	return `You name chat threads. Reply with only the title, at most 6 words, without quotes or a trailing period. Never include the project name (${JSON.stringify(projectTitle)}); the UI already shows it next to the title.`;
+}
 
 export const TITLE_ASK = "Write a title for this conversation.";
 export const TITLE_EARLIER_CONTENT_LEFT_OUT = "[Earlier content left out]";
@@ -266,7 +268,8 @@ function clipTitle(text: string, budget: number): string {
 		: `${text.slice(0, Math.ceil(budget / 2))}\n[…]\n${text.slice(text.length - Math.floor(budget / 2))}`;
 }
 
-/** The transcript as text, within the budget, oldest first. */
+/** The transcript as text, within the budget, oldest first. A hidden block (the host's note beside a message, such as
+ * a side chat's on its main thread) is not what the user wrote, and T3 titles from the message text alone. */
 export function titleContext(messages: readonly { role: string; content: unknown }[]): string {
 	const sections = messages.flatMap((message) => {
 		if (message.role !== "user" && message.role !== "assistant") return [];
@@ -275,7 +278,7 @@ export function titleContext(messages: readonly { role: string; content: unknown
 			typeof content === "string"
 				? content
 				: Array.isArray(content)
-					? content.flatMap((block: { type?: string; text?: string }) => (block.type === "text" && block.text ? [block.text] : [])).join("\n")
+					? content.flatMap((block: { type?: string; text?: string; hidden?: boolean }) => (block.type === "text" && block.text && block.hidden !== true ? [block.text] : [])).join("\n")
 					: ""
 		).trim();
 		return text === "" ? [] : [`${message.role.toUpperCase()}:\n${clipTitle(text, TITLE_MAX_MESSAGE)}`];
