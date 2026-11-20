@@ -1,4 +1,4 @@
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawnSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { rm } from "node:fs/promises";
 import { Socket } from "node:net";
@@ -25,15 +25,20 @@ export async function setup(): Promise<() => Promise<void>> {
 		input: readFileSync(join(pubDir, "id_ed25519.pub")),
 		stdio: ["pipe", "ignore", "inherit"],
 	});
-	for (let i = 0; i < 100; i++) {
-		const open = await new Promise<boolean>((resolve) => {
+	let open = false;
+	for (let i = 0; i < 100 && !open; i++) {
+		open = await new Promise<boolean>((resolve) => {
 			const s = new Socket();
 			s.once("connect", () => { s.destroy(); resolve(true); });
 			s.once("error", () => resolve(false));
 			s.connect(PORT, "127.0.0.1");
 		});
-		if (open) break;
-		await sleep(100);
+		if (!open) await sleep(100);
+	}
+	// Without sshd every SSH test would fail later with a connection error, far from the cause: stop here with its logs.
+	if (!open) {
+		const logs = spawnSync("docker", ["logs", CONTAINER], { encoding: "utf8" });
+		throw new Error(`The workspace's sshd did not listen on 127.0.0.1:${PORT} within 10 seconds. docker logs ${CONTAINER}:\n${logs.stdout}${logs.stderr}`);
 	}
 	return async () => {
 		docker(["rm", "-f", CONTAINER]);
