@@ -68,13 +68,11 @@ export interface McpManagerOptions {
 type McpState = {
 	readonly entry: McpServerEntry;
 	client?: McpClient;
-	transport?: McpTransport;
 	tools: McpTool[];
 	registeredNames: string[];
 	status: "idle" | "connecting" | "connected" | "failed" | "disconnected";
 	error?: string;
 	connecting?: Promise<void>;
-	instructions?: string;
 	/** Reconnect attempts since the last success, and the pending one. */
 	retries: number;
 	retryTimer?: ReturnType<typeof setTimeout>;
@@ -174,7 +172,6 @@ export class McpManager {
 		await state.connecting?.catch(() => {});
 		const client = state.client;
 		state.client = undefined;
-		state.transport = undefined;
 		if (client !== undefined) await client.close().catch(() => {});
 		// It may have left the configuration meanwhile.
 		if (state.dropped === true) return;
@@ -376,7 +373,6 @@ export class McpManager {
 			[...this.states.values()].map(async (state) => {
 				const client = state.client;
 				state.client = undefined;
-				state.transport = undefined;
 				state.status = "idle";
 				if (client !== undefined) await client.close().catch(() => {});
 			}),
@@ -461,7 +457,6 @@ export class McpManager {
 				client.onClose(() => {
 					if (state.client !== client || state.dropped === true) return;
 					state.client = undefined;
-					state.transport = undefined;
 					state.status = "disconnected";
 					this.options.logger?.warn("MCP server disconnected", { server });
 					this.retryLater(state);
@@ -478,8 +473,6 @@ export class McpManager {
 					return;
 				}
 				state.client = client;
-				state.transport = transport;
-				state.instructions = client.instructions;
 				state.status = "connected";
 				state.retries = 0;
 				state.needsSignIn = false;
@@ -493,7 +486,6 @@ export class McpManager {
 				state.needsSignIn = this.options.oauth !== undefined && usesOAuth(config) && needsSignIn(error);
 				state.error = state.needsSignIn ? mcpNeedsSignIn(server) : error instanceof Error ? error.message : String(error);
 				state.client = undefined;
-				state.transport = undefined;
 				if (client !== undefined) await client.close().catch(() => {});
 				else if (transport !== undefined) await transport.close().catch(() => {});
 				this.options.logger?.warn(state.needsSignIn ? "MCP server needs a sign-in" : "MCP server failed", { server, error: state.error });
@@ -525,7 +517,6 @@ export class McpManager {
 		try {
 			const tools = await client.listTools({ timeoutMs: state.entry.config.timeout ?? 60_000 });
 			state.tools = tools;
-			state.instructions = client.instructions;
 			state.error = undefined;
 			state.status = "connected";
 			this.options.logger?.info("MCP tools loaded", { server: state.entry.name, tools: tools.length });
@@ -561,7 +552,6 @@ export class McpManager {
 					server: state.entry.name,
 					tool,
 					name,
-					exposure,
 					timeoutMs: state.entry.config.timeout ?? 60_000,
 					getClient: () => this.clientFor(state.entry.name),
 				})),

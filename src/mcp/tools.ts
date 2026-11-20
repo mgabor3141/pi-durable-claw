@@ -15,7 +15,6 @@ import {
 } from "@earendil-works/pi-mcp";
 import type { ToolExecutionApi, ToolExecutionResult, ToolRegistration } from "@earendil-works/pi-durable";
 import type { Context } from "@earendil-works/chord/context";
-import type { McpExposure } from "./config.ts";
 import { abortable } from "@mgabor3141/pi-durable-t3";
 import { type Schema } from "@earendil-works/pi-schema";
 
@@ -220,14 +219,13 @@ export interface McpToolOptions {
 	readonly server: string;
 	readonly tool: McpTool;
 	readonly name: string;
-	readonly exposure: McpExposure;
 	readonly timeoutMs: number;
 	readonly getClient: () => Promise<{ callTool(name: string, args?: Record<string, unknown>, options?: McpRequestOptions): Promise<CallToolResult> }>;
 }
 
-/** One MCP tool as a pi-durable registration, with its exposure determining how the model reaches it. */
+/** One MCP tool as a pi-durable registration, called from scripts. */
 export function createMcpToolRegistration(options: McpToolOptions): ToolRegistration<Schema, McpToolDetails> {
-	const { server, tool, exposure } = options;
+	const { server, tool } = options;
 	const title = tool.title ?? tool.annotations?.title;
 	const description = tool.description?.trim() || title || `MCP tool ${tool.name} from server ${server}`;
 	// Connecting may wait on the server, which the request's signal does not cover: Stop returns at once.
@@ -237,7 +235,7 @@ export function createMcpToolRegistration(options: McpToolOptions): ToolRegistra
 		parameters: toParameters(tool.inputSchema),
 		structuredOutputSchema: createMcpResultSchema(tool.outputSchema),
 		// Only scripts call it, and `deferred` keeps it out of the codemode section's listing: `searchTools()` finds it.
-		callers: exposure === "codemode" ? ["tools"] : [],
+		callers: ["tools"],
 		deferred: true,
 		replay: "unsafe",
 		async execute(args, api, context) {
