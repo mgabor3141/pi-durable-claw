@@ -158,7 +158,8 @@ export class Machines {
 	}
 
 	/** Add a machine, or change one: its key is made the first time. A changed address (host, user or port) drops the
-	 * grants it had, since the user allowed that address, not the name; a changed host or port also forgets the host key. */
+	 * grants it had, since the user allowed that address, not the name, and ends its connection; a changed host or port
+	 * also forgets the host key. Only `cwd` changed keeps both: it plays no part in the connection. */
 	async add(name: string, machine: MachineConfig): Promise<{ readonly authorizedKey: string; readonly changed: boolean }> {
 		if (!NAME.test(name)) throw new MachineError(`A machine's name is lowercase letters, digits and dashes (up to 63), not ${JSON.stringify(name)}.`);
 		if (machine.host.trim() === "" || /\s/.test(machine.host) || machine.host.startsWith("-")) throw new MachineError(`${JSON.stringify(machine.host)} is not a host name or address.`);
@@ -179,7 +180,7 @@ export class Machines {
 		const moved = before !== undefined && address(before) !== address(next);
 		this.#write({ machines: { ...file.machines, [name]: next }, grants: moved ? file.grants.filter((grant) => grant.machine !== name) : file.grants });
 		if (moved && (before.host !== next.host || before.port !== next.port)) await forgetHostKey(this.#target(name, before)).catch(() => {});
-		if (changed) this.#close(name);
+		if (moved) this.#close(name);
 		return { authorizedKey: this.authorizedKey(name), changed };
 	}
 
@@ -337,7 +338,7 @@ export class Machines {
 	}
 
 	async #connection(name: string, machine: MachineConfig): Promise<{ connection: Connection; home: string }> {
-		const key = JSON.stringify(machine);
+		const key = address(machine);
 		const open = this.#open.get(name);
 		if (open !== undefined && open.key === key) return open.connection;
 		if (open !== undefined) this.#close(name);

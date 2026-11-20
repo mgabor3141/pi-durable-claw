@@ -164,6 +164,21 @@ describe("machines", () => {
 		expect(asked).toHaveLength(1);
 	});
 
+	it("keeps the connection and the grants when only cwd changes", async () => {
+		if (sshd === undefined) return;
+		const { machines, asked } = make("cwd", () => ({ status: "decided", decision: "acceptAlways" }));
+		await machines.add("box", { host: "127.0.0.1", port: PORT, user });
+		await install(machines, "box");
+		const env = await machines.env("box", 1, "bash true", undefined);
+		const running = exec(env as never, "sleep 1; echo finished");
+		expect(await machines.add("box", { host: "127.0.0.1", port: PORT, user, cwd: "/tmp" })).toMatchObject({ changed: true });
+		expect((await running).stdout.trim()).toBe("finished");
+		expect(machines.connected("box")).toBe(true);
+		expect(machines.access("box", "t1")).toBe("always allowed");
+		expect((await machines.env("box", 1, "bash pwd", undefined)).cwd).toBe("/tmp");
+		expect(asked).toHaveLength(1);
+	});
+
 	it("drops a machine's grants when its address changes, and its host key when its host or port does", async () => {
 		if (sshd === undefined) return;
 		const { machines, asked } = make("moved", () => ({ status: "decided", decision: "acceptAlways" }));
