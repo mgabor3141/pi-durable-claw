@@ -327,9 +327,11 @@ function harnessCommand(config: LauncherConfig, id: string, args: readonly strin
 	return [join(dir, main), "--root", config.root, "--listen", config.listen, ...(config.pubkeyDir === undefined ? [] : ["--pubkey-dir", config.pubkeyDir]), ...args];
 }
 
-async function serves(port: number): Promise<boolean> {
+/** Asked where the harness was told to listen: a deployment may put it on one interface, where loopback finds nothing. */
+async function serves(config: LauncherConfig): Promise<boolean> {
+	const host = config.listen === "0.0.0.0" || config.listen === "::" ? "127.0.0.1" : config.listen.includes(":") ? `[${config.listen}]` : config.listen;
 	try {
-		return (await fetch(`http://127.0.0.1:${port}/.well-known/t3/environment`, { signal: AbortSignal.timeout(2_000) })).ok;
+		return (await fetch(`http://${host}:${config.port}/.well-known/t3/environment`, { signal: AbortSignal.timeout(2_000) })).ok;
 	} catch {
 		return false;
 	}
@@ -379,7 +381,7 @@ export async function supervise(config: LauncherConfig): Promise<number> {
 			let proven = !state.unproven;
 			const watch = state.unproven
 				? setInterval(() => {
-						void serves(config.port).then((up) => {
+						void serves(config).then((up) => {
 							if (!up || proven || readState(config.app).current !== id) return;
 							proven = true;
 							clearInterval(watch);

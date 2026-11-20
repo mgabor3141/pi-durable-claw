@@ -26,7 +26,7 @@ if (${JSON.stringify(behaviour)} === "breaks") {
 	writeFileSync(join(root, "durable.db-wal"), "changes by ${name}");
 	process.exit(3);
 }
-const server = createServer((request, response) => response.writeHead(200).end("{}")).listen(Number(process.env.CLAW_PORT), "127.0.0.1");
+const server = createServer((request, response) => response.writeHead(200).end("{}")).listen(Number(process.env.CLAW_PORT), process.argv[process.argv.indexOf("--listen") + 1]);
 process.on("SIGTERM", () => server.close(() => process.exit(0)));
 `;
 
@@ -174,6 +174,21 @@ it("a version that exits before it serves is undone: the one before runs again, 
 		if (tries > 200) throw new Error("the version before never served again");
 		await new Promise((resolve) => setTimeout(resolve, 50));
 	}
+	t.signals.emit("SIGTERM");
+	expect(await running).toBe(0);
+});
+
+it("a version that listens on one interface is proven there", { timeout: 60_000 }, async () => {
+	const t = await setup();
+	const one = t.publish("one", "serves");
+	const config = { ...t.config(), listen: "127.0.0.2" };
+	const running = supervise(config);
+	await t.until("the first version to start", () => t.starts().length === 1);
+	const two = t.publish("two", "serves");
+	await update(config, undefined);
+	t.signals.emit("SIGHUP");
+	await t.until("the second version to serve", () => readState(t.app).current === two.slice(0, 12) && !readState(t.app).unproven);
+	expect(readState(t.app)).toMatchObject({ previous: one.slice(0, 12) });
 	t.signals.emit("SIGTERM");
 	expect(await running).toBe(0);
 });
