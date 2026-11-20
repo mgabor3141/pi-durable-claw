@@ -137,11 +137,23 @@ it("the first start installs the newest version and runs it; an update restarts 
 	expect(readFileSync(join(t.app, "data-before-update", "durable.db"), "utf8")).toBe("conversations");
 	expect(readdirSync(join(t.app, "versions")).sort()).toEqual([id, two.slice(0, 12)].sort());
 
-	// Back to the one before, by hand.
+	// Back to the one before, by hand. The copy from before the update stays as it was: it is for a version that cannot
+	// read what the newer one wrote, which is when someone goes back.
+	writeFileSync(join(t.root, "durable.db"), "conversations, as two wrote them");
 	expect(rollback(t.config())).toContain(`version ${id}`);
 	t.signals.emit("SIGHUP");
-	await t.until("the first version to serve again", () => readState(t.app).current === id && !readState(t.app).unproven);
+	await t.until("the first version to start again", () => t.starts().length === 3);
 	expect(t.starts().map((line) => line.split(" ")[0])).toEqual(["one", "two", "one"]);
+	expect(readState(t.app)).toEqual({ current: id, previous: two.slice(0, 12), pending: null, unproven: false, undone: null });
+	expect(readFileSync(join(t.app, "data-before-update", "durable.db"), "utf8")).toBe("conversations");
+
+	// Forward again: an update like any other, with the data copied as it is now.
+	expect(await update(t.config(), undefined)).toContain(`version ${two.slice(0, 12)} is installed`);
+	t.signals.emit("SIGHUP");
+	await t.until("the second version to start again", () => t.starts().length === 4);
+	expect(readState(t.app)).toMatchObject({ current: two.slice(0, 12), previous: id });
+	expect(readFileSync(join(t.app, "data-before-update", "durable.db"), "utf8")).toBe("conversations, as two wrote them");
+	await t.until("the second version to serve again", () => !readState(t.app).unproven);
 
 	t.signals.emit("SIGTERM");
 	expect(await running).toBe(0);

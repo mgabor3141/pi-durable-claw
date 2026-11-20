@@ -472,7 +472,9 @@ export function rollback(config: LauncherConfig): string {
 	const state = readState(config.app);
 	if (specOf(config.pin) !== "latest") throw new LauncherError(`CLAW_VERSION is ${specOf(config.pin)}, and the harness returns to it at every start: change it in .env instead`);
 	if (state.previous === null || versionInfo(config.app, state.previous) === undefined) throw new LauncherError("there is no version before this one to go back to");
-	writeState(config.app, { ...state, pending: state.previous });
+	// Switched here rather than left waiting for the restart's switch: that one copies the data and has the version
+	// prove itself, and the copy is what someone going back may need, from before the update.
+	writeState(config.app, { ...state, current: state.previous, previous: state.current, pending: null, unproven: false });
 	const note = `The data stays as it is now; a copy from before the last update is in ${backupDir(config.app)}.`;
 	return signalLauncher(config.app) ? `the harness is restarting into version ${state.previous}. ${note}` : `the harness runs version ${state.previous} from its next start. ${note}`;
 }
