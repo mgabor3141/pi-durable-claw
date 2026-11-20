@@ -20,7 +20,10 @@ import type { ImageProcessor } from "@earendil-works/pi-durable/tools";
 import { crc32, deflateSync } from "node:zlib";
 
 const dirs: string[] = [];
-afterEach(async () => void (await Promise.all(dirs.splice(0).map((dir) => rm(dir, { recursive: true, force: true })))));
+afterEach(async () => {
+	vi.unstubAllEnvs();
+	await Promise.all(dirs.splice(0).map((dir) => rm(dir, { recursive: true, force: true })));
+});
 async function dir() {
 	const made = await mkdtemp(join(tmpdir(), "pdc-read-"));
 	dirs.push(made);
@@ -131,6 +134,8 @@ it("a script that reads a PNG can show it: the codemode result carries the pictu
 	const faux = fauxProvider({ provider: "faux" });
 	const models = createModels();
 	models.setProvider(faux.provider);
+	// A script's result files (the images it shows) go to a new `pi-codemode-*` dir under the temp dir: here, the test's own.
+	vi.stubEnv("TMPDIR", cwd);
 	const harness = await Harness.open(await openNodeSqliteStorage(join(cwd, "durable.db")), { models, registry, env: () => new NodeExecutionEnv({ cwd }) }, BACKGROUND_CONTEXT);
 	try {
 		const conversation = await harness.root(BACKGROUND_CONTEXT, { agent: { model: { provider: "faux", modelId: faux.models[0]!.id } } });
@@ -160,6 +165,8 @@ async function runScript(cwd: string, code: string, images?: ImageProcessor): Pr
 	const faux = fauxProvider({ provider: "faux" });
 	const models = createModels();
 	models.setProvider(faux.provider);
+	// A script's result files (the images it shows) go to a new `pi-codemode-*` dir under the temp dir: here, the test's own.
+	vi.stubEnv("TMPDIR", cwd);
 	const harness = await Harness.open(await openNodeSqliteStorage(join(cwd, "durable.db")), { models, registry, env: () => new NodeExecutionEnv({ cwd }) }, BACKGROUND_CONTEXT);
 	try {
 		const conversation = await harness.root(BACKGROUND_CONTEXT, { agent: { model: { provider: "faux", modelId: faux.models[0]!.id } } });
