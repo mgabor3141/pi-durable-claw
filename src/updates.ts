@@ -34,7 +34,7 @@ export function launcherUpdates(env: Env, log: { warn(message: string, fields?: 
 	const answer = <T>(output: string): T => JSON.parse(output.trim().split("\n").at(-1) ?? "") as T;
 	return {
 		command: UPDATE_COMMAND,
-		// T3 shows the provider's version as "claw 680f25f, pi 1.5.2, t3 0.1.9".
+		// T3 shows the provider's version as "claw 680f25f, pi 1.6.0, t3 0.1.11".
 		name: "claw",
 		check: async ({ signal }) => {
 			const { current, latest, undone } = answer<Check>(await run("check", signal));

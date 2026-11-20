@@ -77,7 +77,7 @@ workspace).
 
 ### Update
 
-In T3: Settings → Providers shows the harness's version on the `pi` provider, as "claw 680f25f, pi 1.5.2, t3 0.1.9"
+In T3: Settings → Providers shows the harness's version on the `pi` provider, as "claw 680f25f, pi 1.6.0, t3 0.1.11"
 (the harness's commit, then the pi and T3 releases it is built on; the list shows the first part, the provider's own
 panel all of it), and "Update available" with **Update now** when there is a newer one (the sidebar's update button and "Update all" offer it too), in the web app and the
 desktop app. The harness looks for a newer version when it starts, every hour, and when you press Refresh there.
