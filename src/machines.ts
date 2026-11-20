@@ -272,7 +272,16 @@ export class Machines {
 	 * once per call (a memo), trusted only while none is, and a grant replaces its like.
 	 */
 	async gate(uses: readonly { readonly machine: string; readonly doing: string }[], api: HookApi, context: Context): Promise<{ readonly block: string } | Park | undefined> {
-		const bridge = await this.#options.bridge;
+		// A gate woken at startup waits for the bridge; Stop and the harness's close end the wait (a host whose attach failed
+		// closes before it exits, and must not hang on it).
+		const signal = context.abortSignal;
+		const bridge = await Promise.race([
+			this.#options.bridge,
+			new Promise<never>((_, reject) => {
+				if (signal?.aborted === true) reject(signal.reason);
+				signal?.addEventListener("abort", () => reject(signal.reason), { once: true });
+			}),
+		]);
 		const threadId = bridge.threadOf(api.conversationId)?.threadId;
 		for (const { machine: name, doing } of uses) {
 			let machine: MachineConfig;

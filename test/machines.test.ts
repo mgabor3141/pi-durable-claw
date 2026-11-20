@@ -180,6 +180,26 @@ describe("machines", () => {
 		expect(fake.asked).toHaveLength(1);
 	});
 
+	it("lets Stop and the harness's close end a gate that waits for a bridge that never attaches", { timeout: 60_000 }, async () => {
+		if (sshd === undefined) return;
+		const machines = new Machines({ dir: join(dir, "never"), approvalMs: 3_600_000, bridge: new Promise<never>(() => {}) });
+		made.push(machines);
+		await machines.add("box", { host: "127.0.0.1", port: PORT, user });
+		const registry = createRegistry();
+		for (const extension of harnessExtensions({ machines })) registry.install(extension);
+		const faux = fauxProvider({ provider: "faux" });
+		const models = createModels();
+		models.setProvider(faux.provider);
+		faux.setResponses([fauxAssistantMessage([fauxToolCall("bash", { command: "whoami", machine: "box" }, { id: "b" })], { stopReason: "toolUse" }), fauxAssistantMessage("done")]);
+		const harness = await Harness.open(await openNodeSqliteStorage(join(dir, "never", "durable.db")), { models, registry, env: () => new NodeExecutionEnv({ cwd: dir }) }, BACKGROUND_CONTEXT);
+		const conversation = await harness.root(BACKGROUND_CONTEXT, { agent: { model: { provider: "faux", modelId: faux.models[0]!.id }, cwd: dir } });
+		await conversation.submit({ type: "input", content: "go" }, BACKGROUND_CONTEXT);
+		await new Promise((resolve) => setTimeout(resolve, 500));
+		const within = <T>(promise: Promise<T>, ms: number) => Promise.race([promise.then(() => "ended"), new Promise((resolve) => setTimeout(() => resolve("hangs"), ms))]);
+		expect(await within(conversation.abort(BACKGROUND_CONTEXT), 3_000)).toBe("ended");
+		expect(await within(harness.close(BACKGROUND_CONTEXT), 5_000)).toBe("ended");
+	});
+
 	it("gates the calls that use a machine, by the tools that take one and copy_file's two sides", async () => {
 		const doing = { bash: (args: Record<string, unknown>) => String(args["command"]) };
 		expect(machineUses({ name: "bash", arguments: { command: "ls", machine: "box" } }, doing)).toEqual([{ machine: "box", doing: "bash ls" }]);
