@@ -168,7 +168,8 @@ compare with the machine's own (`ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pu
 and a key that changes later is refused. **Deny** tells the agent no, and so does a message you type instead, with its
 text. **Allow for 1 hour** (`CLAW_MACHINE_APPROVAL_HOURS`), **Allow in this thread** (its child threads and side chats
 too, not its forks) and **Always allow** each say how long. A card nobody answers ends after 30 minutes and the agent
-is told so; a scheduled task's thread waits the same way, so grant what it needs ahead.
+is told so; a scheduled task's thread waits the same way, so grant what it needs ahead, and connect to it once from a
+thread so its host key is trusted.
 
 `/machines` lists the machines, their address, their access in the thread you send it in, whether a connection is open,
 and the trusted host key. `/machines allow <name> <30m|8h|2d|thread|always>` grants without a card (but a machine's

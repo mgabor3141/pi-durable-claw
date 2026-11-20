@@ -146,7 +146,8 @@ export class Machines {
 		};
 	}
 
-	/** The `known_hosts` lines trusted for a machine: none before its first approval. */
+	/** The `known_hosts` lines trusted for a machine: none until the user allowed it on a card, or after its host or port
+	 * changed. */
 	#knownHostLines(name: string): string[] {
 		const known = join(this.#options.dir, "known_hosts");
 		return existsSync(known) ? readFileSync(known, "utf8").split("\n").filter((line) => line.startsWith(`${alias(name)} `)) : [];
@@ -370,7 +371,7 @@ export class Machines {
 		for (const name of [...this.#open.keys()]) this.#close(name);
 	}
 
-	/** The host key trusted for a machine, as `ssh-keygen -l` prints it; `undefined` before the first approval. */
+	/** The host key trusted for a machine, as `ssh-keygen -l` prints it; `undefined` while none is (`#knownHostLines`). */
 	hostKeyFingerprint(name: string): string | undefined {
 		const lines = this.#knownHostLines(name);
 		if (lines.length === 0) return undefined;
