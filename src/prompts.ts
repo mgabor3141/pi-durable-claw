@@ -389,7 +389,7 @@ export function memoryNotesPrompt(turnStart: string): string {
 		"- what can be looked up again in files, code or on the web, unless the user decided something about it;",
 		"- small talk.",
 		"",
-		"Write only what is settled. A recommendation the user has not acted on is not a decision.";
+		"Write only what is settled. A recommendation the user has not acted on is not a decision.",
 		"",
 		'Write one statement per line. Each must make sense on its own, without this conversation, and say who it is about ("The user ...", "The agent ...").',
 		"",
