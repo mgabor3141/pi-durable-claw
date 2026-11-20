@@ -524,7 +524,8 @@ export class McpManager {
 			state.error = error instanceof Error ? error.message : String(error);
 			this.options.logger?.warn("MCP tool listing failed", { server: state.entry.name, error: state.error });
 		}
-		this.install(state);
+		// Removed while it listed: drop() may already have uninstalled the extension before the listing failed.
+		if (state.dropped !== true) this.install(state);
 	}
 
 	/** Install (or replace) the server's extension and its tool registrations. */

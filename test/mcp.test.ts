@@ -381,7 +381,7 @@ describe("the MCP manager", () => {
 		const path = await tempConfig({ mcpServers: {} });
 		let attempts = 0;
 		// It never answers: the connect times out after the server left the config.
-		const manager = new McpManager({ source: fileSource(path), transportFactory: () => (attempts++, heldServer().transport), connectTimeoutMs: 50, retryDelaysMs: [10] });
+		const manager = new McpManager({ source: fileSource(path), transportFactory: () => (attempts++, heldServer().transport), connectTimeoutMs: 300, retryDelaysMs: [10] });
 		try {
 			await manager.load();
 			manager.attach(createRegistry());
@@ -455,5 +455,33 @@ describe("the MCP manager", () => {
 		held[2]!.release();
 		await until(() => held[2]!.closed);
 		expect(held[2]!.closed, "the late client is closed").toBe(true);
+	});
+
+	it("a server removed while it lists its tools does not put them back", async () => {
+		const path = await tempConfig({ mcpServers: {} });
+		const { client, server } = createInMemoryTransportPair();
+		void server.start();
+		// It answers `initialize` and never `tools/list`.
+		server.onMessage((message) => {
+			const request = message as { id?: unknown; method?: string };
+			if (request.method !== "initialize") return;
+			void server.send({ jsonrpc: "2.0", id: request.id, result: { protocolVersion: "2025-06-18", capabilities: { tools: {} }, serverInfo: { name: "test", version: "1" } } } as never);
+		});
+		// Closing resolves at once, as StreamableHttpTransport's does without a session: before the pending listing fails.
+		const close = client.close.bind(client);
+		client.close = async () => void close();
+		const manager = new McpManager({ source: fileSource(path), transportFactory: () => client, connectTimeoutMs: 2000 });
+		await manager.load();
+		const registry = createRegistry();
+		manager.attach(registry);
+		await manager.start();
+		await writeFile(path, JSON.stringify({ mcpServers: { slow: { type: "http", url: "http://slow.test/mcp" } } }));
+		await manager.reload();
+		await until(() => manager.status("slow")?.status === "connected");
+		await writeFile(path, JSON.stringify({ mcpServers: {} }));
+		await manager.reload();
+		await new Promise((resolve) => setTimeout(resolve, 20));
+		expect(registry.snapshot().extension("mcp:slow"), "the removed server's tools stay gone").toBeUndefined();
+		await manager.close();
 	});
 });
