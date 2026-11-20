@@ -3,11 +3,12 @@
  * Browserless: `HINDSIGHT_URL` turns it on, `HINDSIGHT_API_KEY` when the server requires one, `HINDSIGHT_BANK` names the
  * memory bank (default `claw`). Without `HINDSIGHT_URL` there is no memory, and the log says so.
  *
- * - Recall: each message that starts or steers a turn is searched for, and the observations that come back (Hindsight's
- *   consolidated memories) are stored with the message as a hidden `<memories>` block (the bridge's `messageContext`),
- *   so the provider's prompt cache holds. Left out: those below `RECALL_MIN_SCORE`, those recalled earlier and still
- *   in the model's context, and those drawn only from turns still in it; after a compaction they can come back. T3 shows
- *   the block as a `memory_recall` row, with what was left out and why below a display-only rule.
+ * - Recall: the message that opens a context (a thread's first, or the first after a compaction: `opensContext`) is
+ *   searched for, and the observations that come back (Hindsight's consolidated memories) are stored with the message as
+ *   a hidden `<memories>` block (the bridge's `messageContext`), so the provider's prompt cache holds. Left out: those
+ *   below `RECALL_MIN_SCORE`, those recalled earlier and still in the model's context, and those drawn only from turns
+ *   still in it; after a compaction they can come back. T3 shows the block as a `memory_recall` row, with what was left
+ *   out and why below a display-only rule.
  * - Retain: after each finished turn, a copy of the conversation (its model context as the turn ended, nothing written
  *   to it) gets one more message asking what in the turn is worth remembering, answered by T3's text-generation model.
  *   The notes, or nothing, are stored as the turn's document, with the turn's entry range, which is how recall knows

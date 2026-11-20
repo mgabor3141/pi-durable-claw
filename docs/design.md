@@ -2,9 +2,10 @@
 
 Status: `docker compose up` runs the harness and a workspace (the README has the install). Built: codemode over the
 workspace, web search and page fetch, the browser through T3's preview, MCP servers over HTTP (with OAuth and the
-harness's secrets), the thread tools, scheduled tasks (not the webhook trigger) and a system prompt fixed per thread.
-Memory is Hindsight, deployed by you and connected by `HINDSIGHT_URL`. Not built: spending caps, notifications, the release flow and self-update,
-devcontainers, host conversations. Sections marked **unverified** are assumptions a spike must confirm.
+harness's secrets), the thread tools, scheduled tasks (webhook triggers included), other machines (asked for first),
+updates from T3 or `claw update` (undone when a version does not come up) and a system prompt fixed per thread.
+Memory is Hindsight, deployed by you and connected by `HINDSIGHT_URL`. Not built: spending caps, notifications,
+self-update, devcontainers, host conversations. Sections marked **unverified** are assumptions a spike must confirm.
 
 ## Goal
 
@@ -22,7 +23,8 @@ Two kinds of people use it, as with Home Assistant or Immich:
 1. **Agent-written code never runs where the keys are.** Codemode is the one exception, and it is safe by
    construction (below).
 2. **Full autonomy, no approvals.** The agent runs without approval prompts. Safety comes from what each place holds,
-   not from asking.
+   not from asking. The one exception is another machine of yours (below): it holds what the workspace does not, so
+   the agent asks before it first uses one in a thread.
 3. **No UI of our own.** T3 Code is the frontend. Every screen we build is a screen we maintain forever.
 4. **Replicate T3, don't invent.** Where T3 defines a feature (scheduling, orchestration), the bridge replicates its
    contract. Where pi provides something (tool search, MCP, codemode), use it.
@@ -42,7 +44,7 @@ Two kinds of people use it, as with Home Assistant or Immich:
         │ SSH (pi-env)              │ SSH (pi-env), only from a host conversation
 ┌───────┴─────────────────────┐   ┌─┴───────────────────────────┐
 │ execution containers        │   │ operator's computer         │
-│   workspace (hako image)    │   │   started by the operator,  │
+│   workspace (Debian image)  │   │   started by the operator,  │
 │   one devcontainer/project  │   │   never by the agent        │
 │   bash, files; no keys      │   └─────────────────────────────┘
 └─────────────────────────────┘
@@ -59,7 +61,9 @@ Two kinds of people use it, as with Home Assistant or Immich:
 
 ### Codemode
 
-pi's codemode runs model-written JavaScript in QuickJS compiled to WebAssembly: no file system, no network, no timers.
+pi's codemode runs model-written JavaScript in QuickJS compiled to WebAssembly: no file system, no network. Its
+timers are the harness's (`codemode-timers.ts`): a wait is a journaled host call, so a resumed script does not wait
+again.
 The script can only call the tools it is given. A tool that declares a structured output schema gives the script its
 full value; a plain-text result is capped (50 KB / 2,000 lines by default, raisable per tool), so our MCP adapter
 passes MCP's `structuredContent` through as structured output. We set the sandbox's memory limit ourselves (without
@@ -75,8 +79,8 @@ already got, completed nested calls never run twice, and the script continues li
 them as well; every other harness tool is registered with `callers: ["tools"]`, so only scripts call it, and so are MCP
 tools: the codemode section is a catalog of the harness's tools (the model's own four named once, the rest on one line
 each, with `describeTool()` for their declarations) and leaves MCP tools out, which scripts find with `searchTools()`.
-The model is offered those four, `codemode` and the bridge's `request_secret`, and that list never changes, so the
-prompt cache holds (the README's "A fixed system prompt").
+The model is offered those four, `codemode` and the bridge's `request_secret` and `ask_user`, and that list never
+changes, so the prompt cache holds (the README's "A fixed system prompt").
 **Verified (spike):** upstream's extension runs a model script whose only capabilities are the conversation's
 script-callable tools — a key-bearing harness tool and the workspace's `read`/`write`/`bash`, pi-durable's own coding
 tools over pi-env — with the key never reaching the container and the model offered exactly `[codemode]`; after a
@@ -85,7 +89,8 @@ the interrupted nested call is not rerun, and the script completes.
 
 ### Execution containers
 
-- The **workspace**: the agent's own container for files, scripts and scratch work. Default image: hako.
+- The **workspace**: the agent's own container for files, scripts and scratch work. Its image is plain Debian with sshd
+  and a few tools (`images/workspace`); hako has no sshd image yet.
 - One **devcontainer per project** for coding, with bash.
 - They hold no keys and have network access. They run on the server, so the operator's computer is not in the
   everyday loop.
@@ -96,6 +101,13 @@ the interrupted nested call is not rerun, and the script completes.
   read/write/exec (`python3`) all work. No change to pi-env was needed.
 - Version 1 uses a fixed compose setup (one workspace, a folder per project). Creating devcontainers on demand needs
   something with Docker access and is deferred.
+
+### Other machines
+
+A machine of yours that the agent may use (the README's "Machines"): the agent names it with `machine_add`, which
+returns the harness's own public key for it, and `bash`, `read`, `write` and `edit` then take `machine`. The harness
+holds that key and the connection (pi-env over SSH, as for the workspace), so neither reaches the workspace. A
+thread's first use of a machine waits for your approval in T3, and a grant says how long it lasts.
 
 ### The operator's computer
 
@@ -135,7 +147,7 @@ code. Verified in T3's web app (playwright + chromium, screenshots in `.memory/`
 
 | Profile | Tools (what the model is offered) |
 |---|---|
-| assistant | read/write/edit/bash, codemode and the bridge's request_secret — every other tool, MCP tools included, is `callers: ["tools"]` |
+| assistant | read/write/edit/bash, codemode and the bridge's request_secret and ask_user — every other tool, MCP tools included, is `callers: ["tools"]` |
 | dev project | read/write/edit/bash on the project's devcontainer, plus codemode |
 | host conversation | read/write/edit/bash on the operator's computer |
 
@@ -150,8 +162,8 @@ code. Verified in T3's web app (playwright + chromium, screenshots in `.memory/`
 - **Orchestration**: the agent's thread tools (`thread_prompt`, `thread_wait`, `thread_read`, `thread_search`,
   `thread_list`, `thread_cancel`) start and drive child threads; outside MCP clients get T3's orchestrator toolkit on
   `/mcp`. Agents will be able to prompt dev-project agents (they hold no keys); none can reach a host conversation.
-- **Schedules** replicate T3's scheduled tasks: interval and fixed time. The signed webhook (a cheap watcher waking the
-  agent only when something changed) is not built; the bridge refuses it.
+- **Schedules** replicate T3's scheduled tasks: interval, fixed time and webhook (each request runs the task, with the
+  request in its prompt; a task can check a signature: the README's "Webhooks").
 - An MCP tool that is rarely needed and destructive can be hidden per tool (`toolExposure: { "delete_*": "hidden" }`).
   Nothing is hidden unless the configuration says so.
 - Executor is not used: with keys in the harness, pi's codemode already isolates them, and nesting Executor's
@@ -175,8 +187,9 @@ Three layers:
 1. **Data**: memory files, skills, feedback. The agent edits them freely.
 2. **Integrations**: keyless MCP servers it writes in the workspace; key-bearing ones the operator sets up.
 3. **Code**: the harness repository is just another devcontainer project. The agent develops and tests there,
-   against a snapshot of the production store. A release builds the harness image; the operator deploys it. The
-   deploy snapshots the store, recreates the container and rolls back if the health check fails. pi-durable resumes
+   against a snapshot of the production store. A release is a commit of the repository; the operator updates to it
+   from T3 or with `claw update`. The image's launcher installs it beside the running version, copies the data,
+   restarts into it, and undoes it if it exits before it has served once (the README's "Update"). pi-durable resumes
    in-flight work after the restart. Self-update, the agent restarting into a new release, would bring back a
    restart tool (removed while nothing needed it: MCP configuration and secrets apply live, the prompt has `/reload`).
 
@@ -185,7 +198,8 @@ Three layers:
 [Hindsight](https://github.com/vectorize-io/hindsight), adopted as a service rather than built: retain, recall and
 reflect over memory banks, with consolidated observations, and recall by vector, keyword, entity graph and time. It is
 an integration point, like Browserless: you deploy Hindsight, `HINDSIGHT_URL` connects it, and without it there is no
-memory. The harness recalls observations for each message (stored with it, hidden, so the prompt cache holds),
+memory. The harness recalls observations for the message that opens a context, a thread's first or the first after a
+compaction (stored with it, hidden, so the prompt cache holds; later, the agent calls `memory_recall` when it needs to),
 leaving out what the model's context already holds, which it knows from the entry range each stored turn records and
 the ids each recall stores with its block. After each turn, a copy of the conversation is asked what is worth
 remembering, on T3's text-generation model; only that answer is stored, so Hindsight extracts from notes rather than
@@ -227,8 +241,7 @@ custom app on T3's client runtime. **To check:** the pi mobile UI mentioned on t
 
 ## Plan
 
-1. Scheduling in the bridge — done, except the webhook trigger: interval and fixed-time tasks fire, the bridge
-   refuses webhook triggers.
+1. Done: scheduling in the bridge (interval, fixed-time and webhook tasks).
 2. Done: a pi-durable codemode tool with the workspace's read/write/bash injected over pi-env to an sshd container.
 3. Done (v0): harness and workspace images and a compose file for a fresh machine. The T3 bridge installs as a package
    from git; the harness's SSH public key reaches the workspace through a small shared volume.
@@ -236,13 +249,14 @@ custom app on T3's client runtime. **To check:** the pi mobile UI mentioned on t
    with OAuth and the harness's secrets; tools are called from codemode. stdio servers are refused.
 5. Done: orchestration (the thread tools, and T3's orchestrator toolkit on `/mcp`). Not done: dev-project devcontainers.
 6. Done: memory (Hindsight, as an integration point). Not done: spending caps; ntfy.
-7. Release flow: store snapshot, deploy, health check, rollback; then self-update.
+7. Done: the release flow (a copy of the data before each update, undo of a version that does not come up,
+   `claw rollback`). Not done: self-update.
 8. Host conversations.
 
 ## Prior art
 
 - [piclaw](https://github.com/rcarmo/piclaw) by Rui Carmo: the Dream memory model, spending caps and notification
   policy above are adapted from it, and its family mode informed "one harness per person".
-- [hako](https://github.com/mgabor3141/hako): "the boundary is the absence of secrets", and the default workspace image.
+- [hako](https://github.com/mgabor3141/hako): "the boundary is the absence of secrets".
 - [What is Codemode](https://lucumr.pocoo.org/2026/10/6/codemode/), Armin Ronacher.
 - OpenClaw, which this replaces.

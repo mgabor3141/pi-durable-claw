@@ -16,7 +16,9 @@ the rest of the design is not built yet.
 - **Execution containers** are where the agent runs bash, Python and its own scripts. They hold no keys, so they need
   no permission system.
 
-That is why there are no approval prompts: a full-autonomy agent can use what you gave it, but cannot steal it.
+That is why the agent works without approval prompts: a full-autonomy agent can use what you gave it, but cannot
+steal it. The one thing it asks for first is another machine of yours ("Machines" below), which holds what the
+workspace does not.
 
 ## Install
 
@@ -42,7 +44,8 @@ Requirements: a Linux server with Docker (Compose v2) and git, and a model provi
 Everything worth keeping lives in `./data`, next to `compose.yaml`: `harness/` (your credentials, conversations,
 pairings, settings, the harness's SSH key), `workspace/` (the agent's files, at `/home/agent` in its container)
 and `workspace-ssh/` (the workspace's host key). The containers own them as uid 1000. The workspace's sshd is not published, and the Docker
-socket is never mounted. There is no hako sshd image yet, so the workspace is a plain Debian image (python3, git, curl).
+socket is never mounted. There is no hako sshd image yet, so the workspace is a plain Debian image (python3, git, curl,
+jq, imagemagick, unzip, openssh-client).
 
 ### Remote access (optional)
 
@@ -392,19 +395,20 @@ does not (the log says so, and recalls say so until it answers).
 
 How it works (`src/hindsight.ts`):
 
-- **Recall.** Each message that starts or steers a turn (from you, another thread or the scheduler; not a note or a
-  child's report) is searched for, and the observations that come back are stored with the message as a hidden
-  `<memories>` block, through the bridge's `messageContext`. Observations are what Hindsight consolidates from the
-  facts it extracted: de-duplicated, each backed by its sources. Stored with the message, not added to each request,
-  so the prompt cache holds. Hindsight fills a 1,024-token budget with the best matches; claw then leaves out:
+- **Recall.** The message that opens a context, a thread's first or the first after a compaction (from you, another
+  thread or the scheduler; not a note or a child's report), is searched for, and the observations that come back are
+  stored with the message as a hidden `<memories>` block, through the bridge's `messageContext`. Observations are what
+  Hindsight consolidates from the facts it extracted: de-duplicated, each backed by its sources. Stored with the
+  message, not added to each request, so the prompt cache holds. Hindsight fills a 1,024-token budget with the best matches; claw then leaves out:
   - a match whose reranker score is below 0.01 (`RECALL_MIN_SCORE`): low on purpose, since the scores order well but
     are not absolute, so it only drops what has nothing to do with the message;
   - one recalled for an earlier message and still in the model's context;
   - one drawn only from turns still in the model's context.
 
-  After a compaction, what it removed from the context can be recalled again. T3 shows the block right after your
-  message as a `memory_recall` row (no tool ran): the query, exactly what the model was given, and below a "shown
-  here only, not sent to the model" line each memory's score and sources and what was left out and why. The bridge
+  A later message gets no recall of its own; the agent calls `memory_recall` when it needs to. After a compaction,
+  what it removed from the context can be recalled again. T3 shows the block right after your message as a
+  `memory_recall` row (no tool ran): the query, exactly what the model was given, and below a "shown here only, not
+  sent to the model" line each memory's score and sources and what was left out and why. The bridge
   waits at most 5 seconds; a failed search becomes a line in the block saying memory could not be searched.
 - **Remembering.** After each finished turn, a copy of the conversation (as the model saw it when the turn ended;
   nothing is written to the thread) gets one more message: what in the latest turn is worth remembering weeks from
@@ -419,7 +423,7 @@ How it works (`src/hindsight.ts`):
   vLLM), so each call mostly reads the new turn. A conversation larger than that model's context window is cut from
   its oldest turns; a turn that alone does not fit is not stored.
 - **Undo** does not reach memory: the notes of turns that were taken back stay ("Undo and redo" below).
-- **Tools** for scripts: `memory_recall` (observations, as the recall for each message), `memory_retain` (for
+- **Tools** for scripts: `memory_recall` (observations, as the recall that opens a context), `memory_retain` (for
   what is learned outside the conversation) and `memory_reflect`, listed in the codemode catalog.
 
 What Hindsight does with it (the model it calls to extract facts, the embedding model, its database) is your
@@ -640,9 +644,10 @@ same way, so an agent is told to ask only what it cannot find out.
 ## When it feels slow
 
 The harness logs two things for it. `a slow call` names a call from T3 that took over half a second (`method`, `ms`).
-`memory: recall for a message` says how long Hindsight took to recall for a message (`ms`): the message is taken at
-once and the thread shows as working, and the model's first request waits for the recall (5 seconds at most), so
-that time is added to how long the answer takes to start. `docker compose logs harness | grep -e "a slow call" -e "recall for a message"` shows both.
+`memory: recall for a message` says how long the recall for a message took (`ms`; only a message that opens a context
+is searched for, the others are only checked for that): the message is taken at once and the thread shows as working,
+and the model's first request waits for the recall (5 seconds at most), so that time is added to how long the answer
+takes to start. `docker compose logs harness | grep -e "a slow call" -e "recall for a message"` shows both.
 
 What T3 is sent is compressed (HTTP gzip, and the socket's frames), as T3's own server does.
 
@@ -674,7 +679,7 @@ ends it after that long (pi-durable's codemode; it does not use the sandbox's 5-
 ## Shape
 
 ```
-T3 Code (desktop · web · mobile) ── harness container ── execution containers (hako, devcontainers)
+T3 Code (desktop · web · mobile) ── harness container ── execution containers (workspace, devcontainers)
                                     pi-durable, bridge,      bash, files, scripts; no keys
                                     keys, MCP servers,
                                     codemode, threads, schedules
