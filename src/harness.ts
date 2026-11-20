@@ -153,6 +153,8 @@ export const THREAD_NAMESPACE: ToolNamespace = {
 export function threadToolExtensions(threadTools: Extension): readonly Extension[] {
 	const tools = threadTools.tools ?? [];
 	const threads = (tool: ToolRegistration) => tool.name.startsWith("thread_");
+	// A bridge that renamed its thread tools would silently drop the `## thread` heading and change the prompt.
+	if (!tools.some(threads)) throw new Error(`${threadTools.name} brings no thread_* tools: the thread namespace would be empty`);
 	return [
 		{ ...threadTools, namespace: THREAD_NAMESPACE, tools: tools.filter(threads) },
 		defineExtension({ name: `${threadTools.name}-t3`, tools: tools.filter((tool) => !threads(tool)) }),
