@@ -8,7 +8,6 @@
  * `toolExposure`, `description`, `enabled`.
  */
 
-import { readFile, stat } from "node:fs/promises";
 import type { McpOAuthConfig } from "./oauth.ts";
 
 /** How the model reaches a server's tools: from codemode scripts (found with `searchTools()`), or not at all. */
@@ -61,25 +60,6 @@ export function workspaceSource(files: WorkspaceFiles, path: string, context: un
 			if (text.ok) return text.value;
 			if (text.error.code === "not_found") return undefined;
 			throw new Error(text.error.message);
-		},
-	};
-}
-
-/** A configuration file on this machine. */
-export function fileSource(path: string): McpConfigSource {
-	return {
-		describe: path,
-		version: async () => {
-			const info = await stat(path).catch(() => undefined);
-			return info === undefined ? undefined : `${info.mtimeMs}:${info.size}`;
-		},
-		read: async () => {
-			try {
-				return await readFile(path, "utf8");
-			} catch (error) {
-				if ((error as NodeJS.ErrnoException).code === "ENOENT") return undefined;
-				throw error;
-			}
 		},
 	};
 }

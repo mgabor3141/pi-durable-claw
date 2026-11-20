@@ -10,7 +10,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createRegistry } from "@earendil-works/pi-durable";
 import { afterEach, expect, it } from "vitest";
-import { fileSource } from "../src/mcp/config.ts";
+import { fileSource } from "./fixtures/mcp-config.ts";
 import { McpManager } from "../src/mcp/manager.ts";
 import { McpOAuth } from "../src/mcp/oauth.ts";
 import { SecretStore } from "../src/secrets.ts";

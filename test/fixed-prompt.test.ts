@@ -14,7 +14,7 @@ import { openNodeSqliteStorage } from "@earendil-works/pi-durable/storage/sqlite
 import { afterEach, describe, expect, it } from "vitest";
 import { PROMPT_SECTIONS, fixedPromptExtension } from "../src/fixed-prompt.ts";
 import { codemodeSandbox, harnessExtensions } from "../src/harness.ts";
-import { fileSource } from "../src/mcp/config.ts";
+import { fileSource } from "./fixtures/mcp-config.ts";
 import { McpManager } from "../src/mcp/manager.ts";
 import { ConversationStartDoc, recordConversationStart, workspaceContextExtension } from "../src/context.ts";
 import { preambleExtension } from "../src/preamble.ts";
