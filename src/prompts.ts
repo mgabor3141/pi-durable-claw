@@ -406,6 +406,21 @@ export const MEMORY_NOTES_NO_TOOLS = "No tools are available in the memory step.
 export const MEMORY_NOTES_CONTEXT =
 	'Notes a personal agent wrote after one turn of its conversation with the user: one statement per line, each something worth remembering. "The user" is the person the agent works for; "the agent" is the assistant itself, and what it says it did is its own account.';
 
+export const MEMORY_PAGES_LIST_DESCRIPTION =
+	"List the memory wiki: its folders and pages, with ids and names. Pages are curated knowledge documents the agent can read and maintain.";
+export const MEMORY_PAGES_SEARCH_DESCRIPTION =
+	"Search the memory wiki by meaning and keywords. Returns whole pages ranked, with snippets; use it before reading a page.";
+export const MEMORY_PAGES_READ_DESCRIPTION =
+	"Read one memory page as Markdown with frontmatter.";
+export const MEMORY_PAGES_CREATE_DESCRIPTION =
+	"Create a memory page that answers one question. Content is generated from memory and refreshed as memory changes. Give a name and the question it should answer.";
+export const MEMORY_PAGES_CREATE_FOLDER_DESCRIPTION =
+	"Create a folder in the memory wiki, optionally under another folder.";
+export const MEMORY_PAGES_UPDATE_DESCRIPTION =
+	"Rename or move a page or folder, or change a page's question, tags or token budget. Changing the question rebuilds the page from memory.";
+export const MEMORY_PAGES_DELETE_DESCRIPTION =
+	"Delete a page or folder and its whole subtree. This is irreversible; use it only for a page that is wrong or no longer wanted.";
+
 export const MEMORY_RECALL_DESCRIPTION =
 	"Search long-term memory for what is known from earlier conversations: facts about the user, their preferences, decisions and past work. Memories arrive automatically with a thread's first message and with the first message after a compaction (<memories>); other messages do not get them, so search when you need something from earlier. Returns the memories, newest knowledge first, each with the date it was learned.";
 export const MEMORY_RETAIN_DESCRIPTION =

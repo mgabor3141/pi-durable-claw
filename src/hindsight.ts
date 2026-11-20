@@ -23,8 +23,8 @@ import type { AssistantMessage, Message, Model, Models, ToolResultMessage } from
 import { defineExtension, defineTool, GenerationTask, hook, type ContextView, type ConversationId, type EntryId, type EntryRecord, type Extension, type Harness, type ModelRef, type ToolRegistration } from "@earendil-works/pi-durable";
 import { HindsightClient } from "@vectorize-io/hindsight-client";
 import { messageContextData, type MessageContextAnswer, type MessageContextRequest, type TextGenerationModel } from "@mgabor3141/pi-durable-t3";
-import { int, opt, str } from "@earendil-works/pi-schema";
-import { MEMORY_NOTES_CONTEXT, MEMORY_NOTES_NO_TOOLS, MEMORY_RECALL_DESCRIPTION, MEMORY_REFLECT_DESCRIPTION, MEMORY_RETAIN_DESCRIPTION, memoriesBlock, memoriesUnavailable, memoryNotesPrompt } from "./prompts.ts";
+import { arr, int, opt, str } from "@earendil-works/pi-schema";
+import { MEMORY_NOTES_CONTEXT, MEMORY_NOTES_NO_TOOLS, MEMORY_PAGES_CREATE_DESCRIPTION, MEMORY_PAGES_CREATE_FOLDER_DESCRIPTION, MEMORY_PAGES_DELETE_DESCRIPTION, MEMORY_PAGES_LIST_DESCRIPTION, MEMORY_PAGES_READ_DESCRIPTION, MEMORY_PAGES_SEARCH_DESCRIPTION, MEMORY_PAGES_UPDATE_DESCRIPTION, MEMORY_RECALL_DESCRIPTION, MEMORY_REFLECT_DESCRIPTION, MEMORY_RETAIN_DESCRIPTION, memoriesBlock, memoriesUnavailable, memoryNotesPrompt } from "./prompts.ts";
 import { object } from "./schema.ts";
 import { setting, type Env } from "./env.ts";
 
@@ -458,6 +458,113 @@ export class Hindsight {
 				async execute(args, _api, context) {
 					const answer = await client.reflect(bank, args.query, { ...(args.context === undefined ? {} : { context: args.context }), budget: "mid", ...(context.abortSignal === undefined ? {} : { signal: context.abortSignal }) });
 					return { output: [{ type: "text" as const, text: answer.text }] };
+				},
+			}),
+			defineTool({
+				name: "memory_pages_list",
+				description: MEMORY_PAGES_LIST_DESCRIPTION,
+				parameters: object({}),
+				callers: ["tools"],
+				async execute(_args, _api, context) {
+					const tree = await client.getKnowledgeBaseTree(bank, { ...(context.abortSignal === undefined ? {} : { signal: context.abortSignal }) });
+					return { output: [{ type: "text" as const, text: JSON.stringify(tree, null, 2) }] };
+				},
+			}),
+			defineTool({
+				name: "memory_pages_search",
+				description: MEMORY_PAGES_SEARCH_DESCRIPTION,
+				parameters: object({
+					query: str({ minLength: 1, maxLength: 2_000, description: "What to search for." }),
+					limit: opt(int({ minimum: 1, maximum: 50, description: "How many pages to return. Default 10." })),
+				}),
+				callers: ["tools"],
+				async execute(args, _api, context) {
+					const found = await client.searchKnowledgeBase(bank, args.query, {
+						...(args.limit === undefined ? {} : { limit: args.limit }),
+						...(context.abortSignal === undefined ? {} : { signal: context.abortSignal }),
+					});
+					return { output: [{ type: "text" as const, text: JSON.stringify(found, null, 2) }] };
+				},
+			}),
+			defineTool({
+				name: "memory_pages_read",
+				description: MEMORY_PAGES_READ_DESCRIPTION,
+				parameters: object({ pageId: str({ minLength: 1, description: "The page id from memory_pages_list or memory_pages_search." }) }),
+				callers: ["tools"],
+				async execute(args, _api, context) {
+					const page = await client.getKnowledgePage(bank, args.pageId, { ...(context.abortSignal === undefined ? {} : { signal: context.abortSignal }) });
+					return { output: [{ type: "text" as const, text: page.markdown }] };
+				},
+			}),
+			defineTool({
+				name: "memory_pages_create",
+				description: MEMORY_PAGES_CREATE_DESCRIPTION,
+				parameters: object({
+					name: str({ minLength: 1, maxLength: 200, description: "The page name." }),
+					sourceQuery: str({ minLength: 1, maxLength: 2_000, description: "The one question the page answers, in words." }),
+					parentId: opt(str({ minLength: 1, description: "Folder id to put the page under. Omit for the root." })),
+					tags: opt(arr(str({ minLength: 1 }), { maxItems: 32, description: "Optional tags that scope the memories the page is built from." })),
+					maxTokens: opt(int({ minimum: 512, maximum: 8_192, description: "Page budget in tokens." })),
+				}),
+				callers: ["tools"],
+				async execute(args, _api, context) {
+					const created = await client.createKnowledgePage(bank, args.name, args.sourceQuery, {
+						...(args.parentId === undefined ? {} : { parentId: args.parentId }),
+						...(args.tags === undefined ? {} : { tags: args.tags }),
+						...(args.maxTokens === undefined ? {} : { maxTokens: args.maxTokens }),
+						...(context.abortSignal === undefined ? {} : { signal: context.abortSignal }),
+					});
+					return { output: [{ type: "text" as const, text: JSON.stringify(created, null, 2) }] };
+				},
+			}),
+			defineTool({
+				name: "memory_pages_create_folder",
+				description: MEMORY_PAGES_CREATE_FOLDER_DESCRIPTION,
+				parameters: object({
+					name: str({ minLength: 1, maxLength: 200, description: "The folder name." }),
+					parentId: opt(str({ minLength: 1, description: "Folder id to nest under. Omit for the root." })),
+				}),
+				callers: ["tools"],
+				async execute(args, _api, context) {
+					const created = await client.createKnowledgeFolder(bank, args.name, {
+						...(args.parentId === undefined ? {} : { parentId: args.parentId }),
+						...(context.abortSignal === undefined ? {} : { signal: context.abortSignal }),
+					});
+					return { output: [{ type: "text" as const, text: JSON.stringify(created, null, 2) }] };
+				},
+			}),
+			defineTool({
+				name: "memory_pages_update",
+				description: MEMORY_PAGES_UPDATE_DESCRIPTION,
+				parameters: object({
+					nodeId: str({ minLength: 1, description: "The page or folder id." }),
+					name: opt(str({ minLength: 1, maxLength: 200, description: "New name." })),
+					parentId: opt(str({ minLength: 1, description: "Folder id to move it under." })),
+					sourceQuery: opt(str({ minLength: 1, maxLength: 2_000, description: "New question for a page; rebuilds it." })),
+					tags: opt(arr(str({ minLength: 1 }), { maxItems: 32, description: "Replacement page tags ([] clears them)." })),
+					maxTokens: opt(int({ minimum: 512, maximum: 8_192, description: "New page budget in tokens." })),
+				}),
+				callers: ["tools"],
+				async execute(args, _api, context) {
+					const updated = await client.updateKnowledgeNode(bank, args.nodeId, {
+						...(args.name === undefined ? {} : { name: args.name }),
+						...(args.parentId === undefined ? {} : { parentId: args.parentId }),
+						...(args.sourceQuery === undefined ? {} : { sourceQuery: args.sourceQuery }),
+						...(args.tags === undefined ? {} : { tags: args.tags }),
+						...(args.maxTokens === undefined ? {} : { maxTokens: args.maxTokens }),
+						...(context.abortSignal === undefined ? {} : { signal: context.abortSignal }),
+					});
+					return { output: [{ type: "text" as const, text: JSON.stringify(updated, null, 2) }] };
+				},
+			}),
+			defineTool({
+				name: "memory_pages_delete",
+				description: MEMORY_PAGES_DELETE_DESCRIPTION,
+				parameters: object({ nodeId: str({ minLength: 1, description: "The page or folder id to delete." }) }),
+				callers: ["tools"],
+				async execute(args, _api, context) {
+					await client.deleteKnowledgeNode(bank, args.nodeId, { ...(context.abortSignal === undefined ? {} : { signal: context.abortSignal }) });
+					return { output: [{ type: "text" as const, text: "Deleted." }] };
 				},
 			}),
 		];

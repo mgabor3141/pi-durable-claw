@@ -32,7 +32,7 @@ async function fakeHindsight(answers: Record<string, (seen: Seen) => { status?: 
 	const server: Server = createServer(async (request, response) => {
 		const entry: Seen = { method: request.method ?? "", path: request.url ?? "", body: await body(request), ...(request.headers.authorization === undefined ? {} : { auth: request.headers.authorization }) };
 		seen.push(entry);
-		const key = Object.keys(answers).find((suffix) => entry.path.endsWith(suffix));
+		const key = Object.keys(answers).find((suffix) => entry.path.endsWith(suffix) || entry.path.split("?")[0]!.endsWith(suffix));
 		const answer = key === undefined ? { status: 404, json: { detail: "not found" } } : answers[key]!(entry);
 		response.writeHead(answer.status ?? 200, { "content-type": "application/json" });
 		response.end(JSON.stringify(answer.json));
@@ -251,6 +251,28 @@ it("after each turn, a copy of the conversation is asked what to remember; the n
 	expect(warnings).toEqual(["memory: a turn was not stored"]);
 });
 
+it("the page tools list, search, read and create pages", async () => {
+	const server = await fakeHindsight({
+		"/knowledge-base/tree": () => ({ json: { nodes: [{ id: "p", name: "Profile" }] } }),
+		"/knowledge-base/search": () => ({ json: { results: [{ id: "p", name: "Profile", score: 1 }], total: 1 } }),
+		"/knowledge-base/pages/p": () => ({ json: { id: "p", name: "Profile", markdown: "# Profile\n\nGábor." } }),
+		"/knowledge-base/pages": () => ({ json: { page_id: "p2", mental_model_id: "m2" } }),
+	});
+	const memory = new Hindsight({ url: server.url, bank: "b" }, log().log);
+	const tool = (name: string) => memory.tools().find((candidate) => candidate.name === name)!;
+	const run = async (name: string, args: unknown) => ((await tool(name).execute(args as never, {} as never, ctx)) as { output: { text: string }[] }).output[0]!.text;
+	expect(await run("memory_pages_list", {})).toContain("Profile");
+	expect(await run("memory_pages_search", { query: "profile" })).toContain("Profile");
+	expect(await run("memory_pages_read", { pageId: "p" })).toBe("# Profile\n\nGábor.");
+	expect(await run("memory_pages_create", { name: "Profile", sourceQuery: "Who is Gábor?" })).toContain("p2");
+	expect(server.seen.map((request) => request.path.split("?")[0])).toEqual([
+		"/v1/default/banks/b/knowledge-base/tree",
+		"/v1/default/banks/b/knowledge-base/search",
+		"/v1/default/banks/b/knowledge-base/pages/p",
+		"/v1/default/banks/b/knowledge-base/pages",
+	]);
+});
+
 it("the tools recall, save and reflect in the configured bank", async () => {
 	const server = await fakeHindsight({
 		"/memories/recall": () => ({ json: { results: [{ id: "1", text: "Likes tea.", mentioned_at: "2026-11-01T00:00:00Z" }] } }),
@@ -266,5 +288,5 @@ it("the tools recall, save and reflect in the configured bank", async () => {
 	expect(server.seen.map((request) => request.path)).toEqual(["/v1/default/banks/b/memories/recall", "/v1/default/banks/b/memories", "/v1/default/banks/b/reflect"]);
 	// The tool searches observations only, as the recall for each message does.
 	expect((server.seen[0]!.body as { types?: string[] }).types).toEqual(["observation"]);
-	expect(memory.tools().map((candidate) => candidate.callers)).toEqual([["tools"], ["tools"], ["tools"]]);
+	expect(memory.tools().map((candidate) => candidate.callers)).toEqual(Array.from({ length: 10 }, () => ["tools"]));
 });
