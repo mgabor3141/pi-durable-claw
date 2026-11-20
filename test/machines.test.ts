@@ -170,12 +170,17 @@ describe("machines", () => {
 		await machines.add("box", { host: "127.0.0.1", port: PORT, user });
 		await install(machines, "box");
 		const env = await machines.env("box", 1, "bash true", undefined);
-		const running = exec(env as never, "sleep 1; echo finished");
+		// Settled either way, so a command the connection's end kills fails the expectation, not the run.
+		const running = exec(env as never, "sleep 1; echo finished").then(
+			(result) => result.stdout.trim(),
+			(error: Error) => error.message,
+		);
 		expect(await machines.add("box", { host: "127.0.0.1", port: PORT, user, cwd: "/tmp" })).toMatchObject({ changed: true });
-		expect((await running).stdout.trim()).toBe("finished");
-		expect(machines.connected("box")).toBe(true);
 		expect(machines.access("box", "t1")).toBe("always allowed");
-		expect((await machines.env("box", 1, "bash pwd", undefined)).cwd).toBe("/tmp");
+		// Another thread's call while the command still runs: it uses the same connection, with the new cwd.
+		expect((await machines.env("box", 3, "bash pwd", undefined)).cwd).toBe("/tmp");
+		expect(await running).toBe("finished");
+		expect(machines.connected("box")).toBe(true);
 		expect(asked).toHaveLength(1);
 	});
 
