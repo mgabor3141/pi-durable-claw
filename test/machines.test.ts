@@ -11,7 +11,7 @@ import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
 import type { ToolRegistration } from "@earendil-works/pi-durable";
 import { NodeExecutionEnv } from "@earendil-works/pi-durable/env/node";
 import type { ApprovalAsk, ApprovalOutcome, ThreadOrigin } from "@mgabor3141/pi-durable-t3";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
 import { machineApprovalMs, Machines, machinesCommand, machineTools, onMachine, parseDuration } from "../src/machines.ts";
 import { object } from "../src/schema.ts";
 
@@ -84,9 +84,16 @@ function fakeBridge(answer: (ask: ApprovalAsk) => ApprovalOutcome | Promise<Appr
 	};
 }
 
+/** The machines each test made: their connections are closed after it, as each holds a daemon with its threads. */
+const made: Machines[] = [];
+afterEach(() => {
+	for (const machines of made.splice(0)) machines.close();
+});
+
 const make = (name: string, answer: Parameters<typeof fakeBridge>[0], now?: () => number) => {
 	const fake = fakeBridge(answer);
 	const machines = new Machines({ dir: join(dir, name), approvalMs: 3_600_000, bridge: () => fake.bridge as never, ...(now === undefined ? {} : { now }) });
+	made.push(machines);
 	return { machines, asked: fake.asked };
 };
 
@@ -102,19 +109,19 @@ const exec = async (env: unknown, command: string) => {
 describe("machines", () => {
 	it("makes a key per machine, given as a restricted authorized_keys line, and keeps them in a file", async () => {
 		const { machines } = make("keys", () => ({ status: "cancelled" }));
-		const { authorizedKey } = machines.add("nas", { host: "nas.lan", user: "max" });
+		const { authorizedKey } = await machines.add("nas", { host: "nas.lan", user: "max" });
 		expect(authorizedKey).toMatch(/^restrict ssh-ed25519 \S+ claw-machine-nas$/);
-		expect(machines.add("nas", { host: "nas.lan", user: "max" })).toEqual({ authorizedKey, changed: false });
+		expect(await machines.add("nas", { host: "nas.lan", user: "max" })).toEqual({ authorizedKey, changed: false });
 		expect(JSON.parse(await readFile(join(dir, "keys", "machines.json"), "utf8"))).toEqual({ machines: { nas: { host: "nas.lan", user: "max" } }, grants: [] });
-		expect(() => machines.add("Bad Name", { host: "x" })).toThrow("lowercase letters");
-		expect(() => machines.add("ok", { host: "-oProxyCommand=x" })).toThrow("not a host");
+		await expect(machines.add("Bad Name", { host: "x" })).rejects.toThrow("lowercase letters");
+		await expect(machines.add("ok", { host: "-oProxyCommand=x" })).rejects.toThrow("not a host");
 		await expect(machines.env("nope", 1, "bash true", undefined)).rejects.toThrow('No machine named "nope". There are: nas.');
 	});
 
 	it("asks once on the card, trusting the host key it showed, then runs there; a grant in a thread covers its child, not a fork", async () => {
 		if (sshd === undefined) return;
 		const { machines, asked } = make("ask", () => ({ status: "decided", decision: "acceptForSession" }));
-		machines.add("box", { host: "127.0.0.1", port: PORT, user });
+		await machines.add("box", { host: "127.0.0.1", port: PORT, user });
 		await install(machines, "box");
 		// Two calls at once: one card.
 		const [env] = await Promise.all([machines.env("box", 1, "bash whoami", undefined), machines.env("box", 1, "bash pwd", undefined)]);
@@ -139,11 +146,49 @@ describe("machines", () => {
 		expect(machines.access("box", "child")).toBe("allowed in a thread above this one");
 	});
 
+	it("asks on the card at the first connection even with access granted, so the user sees the host key it trusts", async () => {
+		if (sshd === undefined) return;
+		const { machines, asked } = make("granted", () => ({ status: "decided", decision: "acceptAlways" }));
+		await machines.add("box", { host: "127.0.0.1", port: PORT, user });
+		await install(machines, "box");
+		const said = await machinesCommand(machines).run({ threadId: "t1", argument: "allow box always" });
+		// Outside a thread there is no card to show the key on.
+		await expect(machines.env("box", 99, "bash true", undefined)).rejects.toThrow("box's host key is not trusted yet, and only a thread's approval card can show it to the user");
+		const env = await machines.env("box", 1, "bash whoami", undefined);
+		expect(said).toBe("box: always allowed. Its host key is not trusted yet, so its first connection still asks on the card, showing the key to compare.");
+		expect(asked).toHaveLength(1);
+		expect(asked[0]!.reason).toContain("First connection: box shows the host key");
+		expect((await exec(env as never, "whoami")).stdout.trim()).toBe(user);
+		// Trusted now: the grant is enough.
+		await machines.env("box", 3, "bash true", undefined);
+		expect(asked).toHaveLength(1);
+	});
+
+	it("drops a machine's grants when its address changes, and its host key when its host or port does", async () => {
+		if (sshd === undefined) return;
+		const { machines, asked } = make("moved", () => ({ status: "decided", decision: "acceptAlways" }));
+		await machines.add("box", { host: "127.0.0.1", port: PORT, user });
+		await install(machines, "box");
+		await machines.env("box", 1, "bash true", undefined);
+		// Another user: the grant goes and the connection with it; the host key stays, as the host is the same.
+		await machines.add("box", { host: "127.0.0.1", port: PORT, user: "someone-else" });
+		expect(machines.access("box", "t1")).toBe("asks");
+		expect(machines.connected("box")).toBe(false);
+		expect(machines.hostKeyFingerprint("box")).toBeDefined();
+		// Another port: the host key is forgotten by the time add returns, so the next card shows the key again.
+		await machines.add("box", { host: "127.0.0.1", port: PORT + 1, user });
+		expect(machines.hostKeyFingerprint("box")).toBeUndefined();
+		await machines.add("box", { host: "127.0.0.1", port: PORT, user });
+		await machines.env("box", 1, "bash true", undefined);
+		expect(asked).toHaveLength(2);
+		expect(asked[1]!.reason).toContain("First connection");
+	});
+
 	it("says what the user answered on a decline, and asks again after a revoke, which ends the connection", async () => {
 		if (sshd === undefined) return;
 		let answer: ApprovalOutcome = { status: "decided", decision: "decline", feedback: "use the pi instead" };
 		const { machines, asked } = make("decline", () => answer);
-		machines.add("box", { host: "127.0.0.1", port: PORT, user });
+		await machines.add("box", { host: "127.0.0.1", port: PORT, user });
 		await install(machines, "box");
 		await expect(machines.env("box", 1, "bash true", undefined)).rejects.toThrow("The user did not allow box, and said: use the pi instead");
 		answer = { status: "decided", decision: "accept" };
@@ -162,7 +207,7 @@ describe("machines", () => {
 		let now = Date.now();
 		let answer: ApprovalOutcome = { status: "decided", decision: "accept" };
 		const { machines, asked } = make("expiry", () => answer, () => now);
-		machines.add("box", { host: "127.0.0.1", port: PORT, user });
+		await machines.add("box", { host: "127.0.0.1", port: PORT, user });
 		await install(machines, "box");
 		await machines.env("box", 1, "bash true", undefined);
 		now += 3_600_001;
@@ -174,14 +219,14 @@ describe("machines", () => {
 	it("names the key line to install when the machine refuses the key", async () => {
 		if (sshd === undefined) return;
 		const { machines } = make("refused", () => ({ status: "decided", decision: "acceptAlways" }));
-		const { authorizedKey } = machines.add("box", { host: "127.0.0.1", port: PORT, user });
+		const { authorizedKey } = await machines.add("box", { host: "127.0.0.1", port: PORT, user });
 		await expect(machines.env("box", 1, "bash true", undefined)).rejects.toThrow(authorizedKey);
 	});
 
 	it("runs a tool given `machine` there, and the workspace's without", async () => {
 		if (sshd === undefined) return;
 		const { machines } = make("tool", () => ({ status: "decided", decision: "acceptAlways" }));
-		machines.add("box", { host: "127.0.0.1", port: PORT, user, cwd: "/tmp" });
+		await machines.add("box", { host: "127.0.0.1", port: PORT, user, cwd: "/tmp" });
 		await install(machines, "box");
 		const seen: unknown[] = [];
 		const probe = { name: "bash", description: "", parameters: object({}), execute: async (args: unknown, api: { env: { id: string; cwd: string } }) => (seen.push([args, api.env.id, api.env.cwd]), { output: [] }) } as unknown as ToolRegistration;
@@ -199,7 +244,7 @@ describe("machines", () => {
 	it("copies a file of any kind between the workspace and a machine", async () => {
 		if (sshd === undefined) return;
 		const { machines } = make("copy", () => ({ status: "decided", decision: "acceptAlways" }));
-		machines.add("box", { host: "127.0.0.1", port: PORT, user });
+		await machines.add("box", { host: "127.0.0.1", port: PORT, user });
 		await install(machines, "box");
 		const copy = machineTools(machines).find((tool) => tool.name === "copy_file")!;
 		const bytes = new Uint8Array(9 * 1024 * 1024).map((_, index) => (index * 7919) % 256);
@@ -214,7 +259,7 @@ describe("machines", () => {
 		const { machines } = make("command", () => ({ status: "cancelled" }));
 		const command = machinesCommand(machines);
 		expect(await command.run({ threadId: "t1", argument: "" })).toContain("No machines yet");
-		machines.add("nas", { host: "nas.lan", user: "max", port: 2222 });
+		await machines.add("nas", { host: "nas.lan", user: "max", port: 2222 });
 		expect(await command.run({ threadId: "t1", argument: "" })).toContain("| nas | `max@nas.lan:2222` | asks | — | not trusted yet |");
 		expect(await command.run({ threadId: "t1", argument: "allow nas 8h" })).toMatch(/^nas: allowed until /);
 		expect(await command.run({ threadId: "t1", argument: "allow nas soon" })).toContain("Not a duration");

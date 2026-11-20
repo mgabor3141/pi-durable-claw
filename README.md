@@ -171,8 +171,10 @@ too, not its forks) and **Always allow** each say how long. A card nobody answer
 is told so; a scheduled task's thread waits the same way, so grant what it needs ahead.
 
 `/machines` lists the machines, their address, their access in the thread you send it in, whether a connection is open,
-and the trusted host key. `/machines allow <name> <30m|8h|2d|thread|always>` grants without a card, and
-`/machines revoke <name>` takes every grant back and closes the connection, ending what runs there. The harness
+and the trusted host key. `/machines allow <name> <30m|8h|2d|thread|always>` grants without a card (but a machine's
+first connection still asks, to show you its host key), and `/machines revoke <name>` takes every grant back and closes
+the connection, ending what runs there. You allow a machine at its address: when `machine_add` gives it another host,
+user or port, its grants go, and with another host or port, its trusted host key too. The harness
 reaches a machine from its container, as the workspace does: a machine the workspace reaches, it reaches.
 
 ## A fixed system prompt

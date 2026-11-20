@@ -7,6 +7,8 @@
  * A connection needs the user's approval, asked on T3's approval card in the thread whose call needs it: for a while
  * (`CLAW_MACHINE_APPROVAL_HOURS`), for that thread (and the child threads and side chats under it), or always. `/machines`
  * lists the machines and their access, grants and revokes it. A revoke ends the connection, and with it what runs there.
+ * The user approves an address and the host key it shows: until that key is trusted, the card asks even with a grant,
+ * and a machine given another address loses its grants.
  *
  * Kept in `<root>/machines/`: `machines.json` (the machines and their grants, read at each use, so an edit by hand
  * counts), a keypair per machine, and `known_hosts`, each host key under the machine's own alias. A machine is added
@@ -74,7 +76,8 @@ const address = (machine: MachineConfig): string => `${machine.user === undefine
 
 export class Machines {
 	readonly #options: MachinesOptions;
-	/** Open connections, by machine; each with the address it was opened for, so an edited machine connects again. */
+	/** Open connections, by machine; each with the address it was opened for, so a machine given another address connects
+	 * again. */
 	readonly #open = new Map<string, { readonly key: string; readonly connection: Promise<{ connection: Connection; home: string }> }>();
 	/** Approval cards waiting, by machine and thread: calls that need the same one wait for it together. */
 	readonly #asking = new Map<string, Promise<void>>();
@@ -154,8 +157,9 @@ export class Machines {
 		return `restrict ${readFileSync(`${this.#keyFile(name)}.pub`, "utf8").trim()}`;
 	}
 
-	/** Add a machine, or change one: its key is made the first time. A changed address forgets the host key it had. */
-	add(name: string, machine: MachineConfig): { readonly authorizedKey: string; readonly changed: boolean } {
+	/** Add a machine, or change one: its key is made the first time. A changed address (host, user or port) drops the
+	 * grants it had, since the user allowed that address, not the name; a changed host or port also forgets the host key. */
+	async add(name: string, machine: MachineConfig): Promise<{ readonly authorizedKey: string; readonly changed: boolean }> {
 		if (!NAME.test(name)) throw new MachineError(`A machine's name is lowercase letters, digits and dashes (up to 63), not ${JSON.stringify(name)}.`);
 		if (machine.host.trim() === "" || /\s/.test(machine.host) || machine.host.startsWith("-")) throw new MachineError(`${JSON.stringify(machine.host)} is not a host name or address.`);
 		const file = this.read();
@@ -172,8 +176,9 @@ export class Machines {
 			...(machine.cwd === undefined ? {} : { cwd: machine.cwd }),
 		};
 		const changed = before !== undefined && JSON.stringify(before) !== JSON.stringify(next);
-		this.#write({ ...file, machines: { ...file.machines, [name]: next } });
-		if (changed && (before.host !== next.host || before.port !== next.port)) void forgetHostKey(this.#target(name, before)).catch(() => {});
+		const moved = before !== undefined && address(before) !== address(next);
+		this.#write({ machines: { ...file.machines, [name]: next }, grants: moved ? file.grants.filter((grant) => grant.machine !== name) : file.grants });
+		if (moved && (before.host !== next.host || before.port !== next.port)) await forgetHostKey(this.#target(name, before)).catch(() => {});
 		if (changed) this.#close(name);
 		return { authorizedKey: this.authorizedKey(name), changed };
 	}
@@ -236,14 +241,19 @@ export class Machines {
 		return this.#options.bridge()?.threadOf(conversationId as never)?.threadId;
 	}
 
+	/** May `threadId` connect to `name` now: a grant, and a host key the user saw on the card? */
+	#approved(name: string, threadId: string | undefined): boolean {
+		return this.allowed(name, threadId) !== undefined && this.#knownHostLines(name).length > 0;
+	}
+
 	/**
-	 * The machine as the call's environment: approved (a grant, or the card), and connected. `doing` says what the call
-	 * would do there, for the card.
+	 * The machine as the call's environment: approved (a grant and a trusted host key, or the card), and connected.
+	 * `doing` says what the call would do there, for the card.
 	 */
 	async env(name: string, conversationId: number, doing: string, signal: AbortSignal | undefined): Promise<RemoteExecutionEnv> {
 		const machine = this.#machine(name);
 		const threadId = this.threadOf(conversationId);
-		if (this.allowed(name, threadId) === undefined) await this.#approve(name, machine, conversationId, threadId, doing, signal);
+		if (!this.#approved(name, threadId)) await this.#approve(name, machine, conversationId, threadId, doing, signal);
 		const { connection, home } = await this.#connection(name, machine);
 		return new RemoteExecutionEnv({ connection, id: `pi-env:${alias(name)}`, cwd: machine.cwd ?? home });
 	}
@@ -251,12 +261,18 @@ export class Machines {
 	/** Ask on the card, once per machine and thread at a time; trust the host key it showed when allowed. */
 	async #approve(name: string, machine: MachineConfig, conversationId: number, threadId: string | undefined, doing: string, signal: AbortSignal | undefined): Promise<void> {
 		const bridge = this.#options.bridge();
-		if (bridge === undefined || threadId === undefined) throw new MachineError(`Using ${name} needs the user's approval, which only a thread can ask for: ask the user to allow it with /machines allow ${name}.`);
+		if (bridge === undefined || threadId === undefined) {
+			throw new MachineError(
+				this.allowed(name, threadId) === undefined
+					? `Using ${name} needs the user's approval, which only a thread can ask for: ask the user to allow it with /machines allow ${name}.`
+					: `${name}'s host key is not trusted yet, and only a thread's approval card can show it to the user: connect to it from a thread first.`,
+			);
+		}
 		const key = `${name}\u0000${threadId}`;
 		const asking = this.#asking.get(key);
 		if (asking !== undefined) {
 			await asking;
-			if (this.allowed(name, threadId) === undefined) throw new MachineError(`The user did not allow ${name}.`);
+			if (!this.#approved(name, threadId)) throw new MachineError(`The user did not allow ${name}.`);
 			return;
 		}
 		const ask = this.#ask(bridge, name, machine, conversationId, threadId, doing, signal);
@@ -433,7 +449,7 @@ export function machinesCommand(machines: Machines): HostCommand {
 					how === "always" ? { machine: name, scope: "always" } : how === "thread" ? { machine: name, scope: "thread", threadId } : ms === undefined ? undefined : { machine: name, scope: "until", until: Date.now() + ms };
 				if (grant === undefined) return `Not a duration: \`${how}\`. Give one such as \`30m\`, \`8h\` or \`2d\`, or \`thread\`, or \`always\`.`;
 				machines.grant(grant);
-				return `${name}: ${machines.access(name, threadId)}. The host key is trusted at its first connection${machines.hostKeyFingerprint(name) === undefined ? ", without asking: compare it after with `/machines`" : ""}.`;
+				return `${name}: ${machines.access(name, threadId)}.${machines.hostKeyFingerprint(name) === undefined ? " Its host key is not trusted yet, so its first connection still asks on the card, showing the key to compare." : ""}`;
 			}
 			if (words[0] === "revoke") {
 				const name = words[1];
@@ -497,7 +513,7 @@ export function machineTools(machines: Machines): ToolRegistration[] {
 			}),
 			callers: ["tools"],
 			async execute(args: { name: string; host: string; user?: string; port?: number; cwd?: string }) {
-				const { authorizedKey, changed } = machines.add(args.name, {
+				const { authorizedKey, changed } = await machines.add(args.name, {
 					host: args.host,
 					...(args.user === undefined ? {} : { user: args.user }),
 					...(args.port === undefined ? {} : { port: args.port }),
