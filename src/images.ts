@@ -8,7 +8,7 @@
 // exits after 30 s without images, freeing Photon's memory. It loads Photon only at the first image; `imageProcessor`
 // prepares one pixel at start, so a build that cannot load it fails there rather than at the first image.
 //
-// The worker is given a standalone copy of the bytes. pi-durable (1.5.2 still) copies them with `bytes.slice()` and
+// The worker is given a standalone copy of the bytes. pi-durable (1.6.0 still) copies them with `bytes.slice()` and
 // transfers that copy's buffer, but a Node `Buffer`'s `slice()` is a view: a small Buffer lives in Node's shared pool,
 // which cannot be transferred ("DataCloneError: Cannot transfer object of unsupported type"), and a larger one would be
 // taken from the caller. The environment's `readBinaryFile` gives Buffers.

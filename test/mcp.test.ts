@@ -303,7 +303,7 @@ describe("the MCP manager", () => {
 		await manager.reload();
 		await until(() => (registry.snapshot().extension("mcp:docs")?.tools?.length ?? 0) > 0);
 		expect(registry.snapshot().extension("mcp:docs")?.tools?.map((tool) => tool.name)).toEqual(["mcp__docs__search"]);
-		expect(manager.namespaces().map((namespace) => namespace.name)).toEqual(["mcp__docs"]);
+		expect(registry.snapshot().extension("mcp:docs")?.namespace, "the server is its tools' codemode namespace").toEqual({ name: "mcp__docs", description: "" });
 
 		// A broken file, or a broken entry, is reported and leaves the running server alone.
 		await writeFile(path, "{ broken");
@@ -318,7 +318,6 @@ describe("the MCP manager", () => {
 		await writeFile(path, JSON.stringify({ mcpServers: {} }));
 		await manager.reload();
 		expect(registry.snapshot().extension("mcp:docs")).toBeUndefined();
-		expect(manager.namespaces()).toEqual([]);
 		await manager.close();
 	});
 

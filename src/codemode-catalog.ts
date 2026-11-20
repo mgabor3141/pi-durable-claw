@@ -11,15 +11,17 @@
  *
  * - Tools the model also calls directly (`read`, `write`, `edit`, `bash`): not repeated, since their definitions are
  *   in the request already; one sentence says scripts call them too, with the same arguments, and what each returns.
- * - Every other tool: `- <name>: <first sentence of its description>`, grouped by namespace as pi-durable groups them.
+ * - Every other tool: `- <name>: <first sentence of its description>`, grouped by the namespace its extension declares,
+ *   as pi-durable groups them. Only namespaces with a listed tool get a heading.
  * - Deferred tools (MCP servers') stay out, as in pi-durable: `searchTools()` finds them, and the `mcp-servers`
- *   section names the servers.
+ *   section names the servers. pi-durable's section names every declared namespace, also an MCP server's without
+ *   listed tools; here they are not repeated, since `mcp-servers` names them.
  *
  * The section is rendered once per thread, like the rest of the prompt (`fixed-prompt.ts`), so this extension must come
  * before `fixedPromptExtension` among the selected extensions: wraps apply in that order, the first innermost.
  */
-import { defineExtension, wrapSection, type Extension, type ToolRegistration, type Wrap } from "@earendil-works/pi-durable";
-import { CODEMODE_TOOL_NAME, type CodemodeNamespace } from "@earendil-works/pi-durable/codemode";
+import { defineExtension, wrapSection, type Extension, type ToolNamespace, type ToolRegistration, type Wrap } from "@earendil-works/pi-durable";
+import { CODEMODE_TOOL_NAME, namespacesOf } from "@earendil-works/pi-durable/codemode";
 import { toCodemodeIdentifier } from "@earendil-works/pi-codemode/declarations";
 
 /** What a script gets from each tool the model also calls directly, where it differs from what the model sees. */
@@ -64,24 +66,18 @@ function line(tool: ToolRegistration): string {
 	return `- ${id === tool.name ? id : `${id} (${tool.name})`}: ${summaryOf(tool.description)}`;
 }
 
-function namespaceOf(name: string, namespaces: readonly CodemodeNamespace[]): CodemodeNamespace | undefined {
-	let found: CodemodeNamespace | undefined;
-	for (const namespace of namespaces) {
-		if (name.startsWith(namespace.prefix) && (found === undefined || namespace.prefix.length > found.prefix.length)) found = namespace;
-	}
-	return found;
-}
-
-/** The section's text, for the tools scripts can call. `undefined` without any, as pi-durable's section. */
-export function catalogSection(callable: readonly ToolRegistration[], namespaces: readonly CodemodeNamespace[]): string | undefined {
+/** The section's text, for the tools scripts can call, grouped by the namespaces the selected `extensions` declare.
+ * `undefined` without any tool, as pi-durable's section without tools. */
+export function catalogSection(callable: readonly ToolRegistration[], extensions: readonly Extension[]): string | undefined {
 	const tools = callable.filter((tool) => !tool.name.startsWith(INTERNAL_PREFIX) && tool.deferred !== true);
 	if (tools.length === 0) return undefined;
+	const namespaces = namespacesOf(extensions);
 	const own = tools.filter(direct);
 	const rest = tools.filter((tool) => !direct(tool));
-	const loose = rest.filter((tool) => namespaceOf(tool.name, namespaces) === undefined);
-	const grouped = new Map<string, { namespace: CodemodeNamespace; tools: ToolRegistration[] }>();
+	const loose = rest.filter((tool) => !namespaces.has(tool.name));
+	const grouped = new Map<string, { namespace: ToolNamespace; tools: ToolRegistration[] }>();
 	for (const tool of rest) {
-		const namespace = namespaceOf(tool.name, namespaces);
+		const namespace = namespaces.get(tool.name);
 		if (namespace === undefined) continue;
 		const group = grouped.get(namespace.name) ?? { namespace, tools: [] };
 		group.tools.push(tool);
@@ -90,7 +86,7 @@ export function catalogSection(callable: readonly ToolRegistration[], namespaces
 	const parts = [[HEADER, directLine(own), MCP_LINE].filter((part) => part !== undefined).join(" ")];
 	if (loose.length > 0) parts.push(`### Other tools\n${loose.map(line).join("\n")}`);
 	for (const { namespace, tools: members } of [...grouped.values()].sort((a, b) => a.namespace.name.localeCompare(b.namespace.name))) {
-		const description = namespace.description?.trim();
+		const description = namespace.description.trim();
 		parts.push(`## ${namespace.name}${description ? `\n${description}` : ""}\n${members.map(line).join("\n")}`);
 	}
 	return parts.join("\n\n");
@@ -100,8 +96,7 @@ export function catalogSection(callable: readonly ToolRegistration[], namespaces
  * The catalog: wraps the `codemode` section (and the codemode tool's sentence about it). Select it before
  * `fixedPromptExtension`, so the fixed prompt keeps what this renders.
  */
-export function codemodeCatalogExtension(options: { readonly namespaces?: readonly CodemodeNamespace[] } = {}): Extension {
-	const namespaces = options.namespaces ?? [];
+export function codemodeCatalogExtension(): Extension {
 	const tool: Wrap = {
 		tool: CODEMODE_TOOL_NAME,
 		wrap: (codemode: ToolRegistration) => {
@@ -112,7 +107,7 @@ export function codemodeCatalogExtension(options: { readonly namespaces?: readon
 	return defineExtension({
 		name: "codemode-catalog",
 		wraps: [
-			wrapSection("codemode", (section) => ({ ...section, render: (input) => catalogSection(input.agent.callable, namespaces) })),
+			wrapSection("codemode", (section) => ({ ...section, render: (input) => catalogSection(input.agent.callable, input.agent.extensions) })),
 			tool,
 		],
 	});

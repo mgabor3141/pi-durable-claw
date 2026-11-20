@@ -18,7 +18,7 @@ import { Hindsight, harnessMemoryHost, hindsightConfig } from "./hindsight.ts";
 import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
 import type { Registry } from "@earendil-works/pi-durable";
 import { ModelRuntime } from "@earendil-works/pi-coding-agent";
-import { openHarness, RETRY_POLICY, type HarnessLate } from "./harness.ts";
+import { openHarness, RETRY_POLICY, threadToolExtensions, type HarnessLate } from "./harness.ts";
 import { listedModels } from "./listed-models.ts";
 import { cacheMissExtension } from "./cache-misses.ts";
 import { ConversationCacheRetention } from "./cache-retention.ts";
@@ -53,13 +53,6 @@ const MCP_CONFIG_PATH = join(WORKSPACE_HOME, ".mcp.json");
 const log = {
 	info: (message: string, fields?: Record<string, unknown>) => console.log(JSON.stringify({ t: new Date().toISOString(), level: "info", message, ...fields })),
 	warn: (message: string, fields?: Record<string, unknown>) => console.log(JSON.stringify({ t: new Date().toISOString(), level: "warn", message, ...fields })),
-};
-
-/** The thread tools, grouped in codemode's listing. */
-const THREAD_NAMESPACE = {
-	name: "thread",
-	prefix: "thread_",
-	description: "Other agents' threads: start a child or follow up (thread_prompt), wait for, read, search, list and stop threads",
 };
 
 /** Where an OAuth sign-in returns (a public route on T3's listener; its `state` is the check). */
@@ -175,7 +168,6 @@ async function main(): Promise<void> {
 		logger: log,
 		secrets,
 		oauth,
-		baseNamespaces: [THREAD_NAMESPACE],
 		wrapTool: (tool) => withSecrets(tool, secrets, log),
 	});
 	// Nothing waits on the reconnects: a rejection must not become an unhandled one, which ends the process.
@@ -215,7 +207,6 @@ async function main(): Promise<void> {
 		workspace,
 		// A script's `models.*` lists what T3's model picker lists; the bridge below keeps the whole catalog.
 		models: cacheRetention.models(listedModels(models, () => late.bridge?.hiddenModels() ?? NONE_HIDDEN)),
-		mcpNamespaces: mcp.namespaces(),
 		late,
 		machines,
 		secrets: { store: secrets, log },
@@ -302,10 +293,10 @@ async function main(): Promise<void> {
 
 	// The thread tools for scripts (`thread_prompt`, `thread_wait`, `thread_read`, `thread_search`, `thread_list`,
 	// `thread_cancel`): a conversation that is a thread's head acts as that thread. Installed once the bridge exists,
-	// before anything resumes.
+	// before anything resumes. The `thread_*` tools are codemode's `thread` namespace (`threadToolExtensions`).
 	// `schedule_task` takes a webhook's signing secret as `${NAME}`, so the value is not written into the conversation.
 	const threadTools = t3.threadTools({ callers: ["tools"] });
-	toolRegistry?.install({ ...threadTools, tools: (threadTools.tools ?? []).map((tool) => (tool.name === "schedule_task" ? withSigningSecret(tool, secrets, log) : tool)) });
+	for (const extension of threadToolExtensions({ ...threadTools, tools: (threadTools.tools ?? []).map((tool) => (tool.name === "schedule_task" ? withSigningSecret(tool, secrets, log) : tool)) })) toolRegistry?.install(extension);
 	// T3's inline HTML for scripts: `html_render` shows a page in the caller's thread, kept in /home/agent/attachments;
 	// `html_preview` (with the preview browser) renders one first.
 	toolRegistry?.install(t3.htmlTools({ callers: ["tools"] }));

@@ -11,7 +11,7 @@ import { NodeExecutionEnv } from "@earendil-works/pi-durable/env/node";
 import { openNodeSqliteStorage } from "@earendil-works/pi-durable/storage/sqlite/node";
 import { afterEach, describe, expect, it } from "vitest";
 import { catalogSection, summaryOf } from "../src/codemode-catalog.ts";
-import { harnessExtensions } from "../src/harness.ts";
+import { harnessExtensions, THREAD_NAMESPACE, threadToolExtensions } from "../src/harness.ts";
 import { object } from "../src/schema.ts";
 
 const dirs: string[] = [];
@@ -31,18 +31,22 @@ describe("summaryOf", () => {
 
 describe("catalogSection", () => {
 	it("names the model's own tools once, lists every other on one line by namespace, and leaves out deferred and internal tools", () => {
-		const section = catalogSection(
-			[
-				tool("ssh", "Run a command over SSH. Long details nobody needs up front."),
-				tool("bash", "Execute a bash command.", { callers: undefined }),
-				tool("read", "Read a file.", { callers: ["model", "tools"] }),
-				tool("thread_wait", "Wait for threads. Details."),
-				tool("mcp__docs__search", "An MCP tool.", { deferred: true }),
-				tool("pi.codemode.classify", "Internal."),
-				tool("my-tool", "A tool whose name is not an identifier."),
-			],
-			[{ name: "thread", prefix: "thread_", description: "Other agents' threads" }],
-		)!;
+		const extensions = [
+			defineExtension({
+				name: "own",
+				tools: [
+					tool("ssh", "Run a command over SSH. Long details nobody needs up front."),
+					tool("bash", "Execute a bash command.", { callers: undefined }),
+					tool("read", "Read a file.", { callers: ["model", "tools"] }),
+					tool("pi.codemode.classify", "Internal."),
+					tool("my-tool", "A tool whose name is not an identifier."),
+				],
+			}),
+			defineExtension({ name: "threads", namespace: { name: "thread", description: "Other agents' threads" }, tools: [tool("thread_wait", "Wait for threads. Details.")] }),
+			// An MCP server: its namespace has no listed tool, so no heading (the `mcp-servers` section names it).
+			defineExtension({ name: "mcp:docs", namespace: { name: "mcp__docs", description: "Docs" }, tools: [tool("mcp__docs__search", "An MCP tool.", { deferred: true })] }),
+		];
+		const section = catalogSection(extensions.flatMap((extension) => extension.tools ?? []), extensions)!;
 		expect(section).toContain("Your own tools `bash` and `read` are not listed: scripts call them too, with the same arguments. In a script, `bash` gives { output, exitCode, truncated, fullOutputPath? }");
 		expect(section).not.toContain("- bash:");
 		expect(section).not.toContain("Execute a bash command.");
@@ -51,18 +55,30 @@ describe("catalogSection", () => {
 		expect(section).not.toContain("Long details");
 		expect(section).toContain("## thread\nOther agents' threads\n- thread_wait: Wait for threads.");
 		expect(section).toContain("- my_tool (my-tool): A tool whose name is not an identifier.");
-		expect(section).not.toContain("mcp__docs__search");
+		expect(section).not.toContain("mcp__docs");
 		expect(section).not.toContain("pi.codemode");
 		expect(section.indexOf("Your own tools")).toBeLessThan(section.indexOf("- ssh:"));
 		expect(catalogSection([tool("mcp__docs__search", "x", { deferred: true })], [])).toBeUndefined();
 	});
+
+	it("groups the bridge's thread_* tools as the thread namespace and leaves its other tools among the others, in order", () => {
+		const bridge = defineExtension({
+			name: "thread-tools",
+			tools: [tool("thread_prompt", "Prompt a thread."), tool("schedule_task", "Create scheduled work."), tool("thread_wait", "Wait for threads."), tool("t3_queue", "Manage a queue.")],
+		});
+		const extensions = [defineExtension({ name: "own", tools: [tool("ssh", "Run a command over SSH.")] }), ...threadToolExtensions(bridge), defineExtension({ name: "html", tools: [tool("html_render", "Show a page.")] })];
+		const section = catalogSection(extensions.flatMap((extension) => extension.tools ?? []), extensions)!;
+		expect(section).toContain("### Other tools\n- ssh: Run a command over SSH.\n- schedule_task: Create scheduled work.\n- t3_queue: Manage a queue.\n- html_render: Show a page.");
+		expect(section).toContain(`## thread\n${THREAD_NAMESPACE.description}\n- thread_prompt: Prompt a thread.\n- thread_wait: Wait for threads.`);
+	});
 });
 
-it("the harness's prompt is the catalog, fixed for the thread, and describeTool() gives a listed tool's declaration", { timeout: 60_000 }, async () => {
+it("the harness's prompt is the catalog, fixed for the thread, describeTool() gives a listed tool's declaration, and describeNamespace() a declared namespace", { timeout: 60_000 }, async () => {
 	const dir = await mkdtemp(join(tmpdir(), "claw-catalog-"));
 	dirs.push(dir);
 	const registry = createRegistry();
 	for (const extension of harnessExtensions({ browser: true, web: { searxngUrl: "http://searxng:8080", readerUrl: "http://reader:8000" } })) registry.install(extension);
+	for (const extension of threadToolExtensions(defineExtension({ name: "thread-tools", tools: [tool("thread_wait", "Wait for threads."), tool("schedule_task", "Create scheduled work.")] }))) registry.install(extension);
 	const faux = fauxProvider({ provider: "faux" });
 	const models = createModels();
 	models.setProvider(faux.provider);
@@ -76,7 +92,7 @@ it("the harness's prompt is the catalog, fixed for the thread, and describeTool(
 		return reply;
 	};
 	faux.setResponses([
-		record(fauxAssistantMessage([fauxToolCall("codemode", { code: 'return await describeTool("ssh");' } as never, { id: "c1" })], { stopReason: "toolUse" })),
+		record(fauxAssistantMessage([fauxToolCall("codemode", { code: 'return [await describeTool("ssh"), JSON.stringify(await describeNamespace("thread"))].join("\\n");' } as never, { id: "c1" })], { stopReason: "toolUse" })),
 		record(fauxAssistantMessage("described")),
 	]);
 	const harness = await Harness.open(await openNodeSqliteStorage(join(dir, "durable.db")), { models, registry, env: () => new NodeExecutionEnv({ cwd: dir }) }, ctx);
@@ -101,6 +117,9 @@ it("the harness's prompt is the catalog, fixed for the thread, and describeTool(
 		const described = result.content.map((block) => block.text ?? "").join("\n");
 		expect(described).toContain("No terminal, no stdin");
 		expect(described).toContain("host: string");
+		expect(first).toContain("## thread");
+		expect(described, "describeNamespace() knows the namespace the extension declares").toContain('{"name":"thread","description":"Other agents\' threads');
+		expect(described).toContain('"tools":["thread_wait"]');
 	} finally {
 		await harness.close(ctx);
 	}

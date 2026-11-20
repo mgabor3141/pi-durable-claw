@@ -1,7 +1,7 @@
 import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
 import type { Context } from "@earendil-works/chord/context";
-import { createRegistry, defineExtension, Harness, type Extension, type HarnessOptions, type Registry, type ToolRegistration } from "@earendil-works/pi-durable";
-import { createCodemodeExtension, type CodemodeNamespace } from "@earendil-works/pi-durable/codemode";
+import { createRegistry, defineExtension, Harness, type Extension, type HarnessOptions, type Registry, type ToolNamespace, type ToolRegistration } from "@earendil-works/pi-durable";
+import { createCodemodeExtension } from "@earendil-works/pi-durable/codemode";
 import { openNodeSqliteStorage } from "@earendil-works/pi-durable/storage/sqlite/node";
 import type { ImageProcessor } from "@earendil-works/pi-durable/tools";
 import { CodemodeSandbox } from "@earendil-works/pi-codemode";
@@ -62,8 +62,6 @@ export interface HarnessExtensionOptions {
 	readonly extraTools?: readonly ToolRegistration[];
 	/** Extensions installed after the built-in tools, such as the MCP server section. */
 	readonly extraExtensions?: readonly Extension[];
-	/** Namespaces of MCP servers, for codemode's `describeNamespace()`. */
-	readonly mcpNamespaces?: readonly CodemodeNamespace[];
 	/** The web services: `web_search` and `web_fetch`, each only when configured. */
 	readonly web?: WebConfig;
 	/** Offer the `browser_*` tools: only when T3's preview browser is configured, since it is the only browser. */
@@ -123,10 +121,10 @@ export function harnessExtensions(options: HarnessExtensionOptions = {}): readon
 	const harnessTools = secrets === undefined ? tools : [...tools.map((tool) => withSecrets(tool, secrets.store, secrets.log)), secretsTool(secrets.store)];
 	return [
 		// Before the fixed prompt: wraps apply in this order, so the fixed prompt keeps the catalog it renders.
-		codemodeCatalogExtension({ namespaces: options.mcpNamespaces ?? [] }),
+		codemodeCatalogExtension(),
 		fixedPromptExtension(options.models === undefined ? {} : { models: options.models }),
 		preambleExtension(),
-		createCodemodeExtension({ sandbox: codemodeSandbox(), namespaces: options.mcpNamespaces ?? [], inlineBudget: Number.POSITIVE_INFINITY, globals: [timerGlobal()] }) as Extension,
+		createCodemodeExtension({ sandbox: codemodeSandbox(), inlineBudget: Number.POSITIVE_INFINITY, globals: [timerGlobal()] }) as Extension,
 		codemodeTimersExtension(),
 		defineExtension({ name: "harness-tools", tools: harnessTools }),
 		...(options.extraExtensions ?? []),
@@ -138,6 +136,26 @@ export function harnessExtensions(options: HarnessExtensionOptions = {}): readon
 		// Only images a provider can read reach the model: a broken one (a screenshot copied while still being written)
 		// becomes a text saying why, in the tool result and in every request, so it never stops the thread.
 		imageCheckExtension(),
+	];
+}
+
+/** The thread tools, grouped in codemode's listing. */
+export const THREAD_NAMESPACE: ToolNamespace = {
+	name: "thread",
+	description: "Other agents' threads: start a child or follow up (thread_prompt), wait for, read, search, list and stop threads",
+};
+
+/**
+ * The bridge's thread tools as two extensions: the `thread_*` tools, the `thread` namespace, and the rest (scheduled
+ * tasks, projects, a thread's title, pins and queue), which belong to none. A codemode namespace is the extension that
+ * brings the tools (`Extension.namespace`), and the bridge brings all of them in one.
+ */
+export function threadToolExtensions(threadTools: Extension): readonly Extension[] {
+	const tools = threadTools.tools ?? [];
+	const threads = (tool: ToolRegistration) => tool.name.startsWith("thread_");
+	return [
+		{ ...threadTools, namespace: THREAD_NAMESPACE, tools: tools.filter(threads) },
+		defineExtension({ name: `${threadTools.name}-t3`, tools: tools.filter((tool) => !threads(tool)) }),
 	];
 }
 

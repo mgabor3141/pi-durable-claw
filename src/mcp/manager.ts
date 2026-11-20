@@ -18,7 +18,6 @@ import {
 	type Registry,
 	type ToolRegistration,
 } from "@earendil-works/pi-durable";
-import type { CodemodeNamespace } from "@earendil-works/pi-durable/codemode";
 import { GenerationTask, hook } from "@earendil-works/pi-durable";
 import {
 	getMcpToolExposure,
@@ -59,8 +58,6 @@ export interface McpManagerOptions {
 	readonly connectTimeoutMs?: number;
 	/** Waits before each reconnect attempt of a failed or dropped server; the last repeats. */
 	readonly retryDelaysMs?: readonly number[];
-	/** Namespaces that are not MCP servers', always listed first (the harness's own tool groups, such as `thread_`). */
-	readonly baseNamespaces?: readonly CodemodeNamespace[];
 	/** Applied to every tool registration the manager installs (the harness resolves and scrubs secrets with it). */
 	readonly wrapTool?: (tool: ToolRegistration) => ToolRegistration;
 }
@@ -114,12 +111,9 @@ export class McpManager {
 	private version: string | undefined;
 	private configErrors: string[] = [];
 	private reloading: Promise<void> | undefined;
-	/** The namespaces codemode sees: one array, updated in place, since codemode reads it at each use. */
-	private readonly liveNamespaces: CodemodeNamespace[];
 
 	constructor(options: McpManagerOptions) {
 		this.options = options;
-		this.liveNamespaces = [...(options.baseNamespaces ?? [])];
 	}
 
 	/** Read the configuration. A broken file or entry is reported (log, prompt section), never thrown. */
@@ -263,7 +257,6 @@ export class McpManager {
 			this.install(state);
 			if (this.started && enabled(entry.config)) void this.connect(entry.name);
 		}
-		this.liveNamespaces.splice(0, this.liveNamespaces.length, ...(this.options.baseNamespaces ?? []), ...this.currentNamespaces());
 	}
 
 	/** A server that left the configuration: close it, stop retrying, uninstall its tools. */
@@ -276,23 +269,6 @@ export class McpManager {
 		if (client !== undefined) await client.close().catch(() => {});
 		if (state.extension !== undefined) this.registry?.uninstall(state.extension);
 		this.options.logger?.info("MCP server removed", { server: state.entry.name });
-	}
-
-	/** Namespaces for codemode's `describeNamespace()`: a live array, kept current as the configuration changes. */
-	namespaces(): CodemodeNamespace[] {
-		return this.liveNamespaces;
-	}
-
-	private currentNamespaces(): CodemodeNamespace[] {
-		return [...this.states.values()]
-			.filter((state) => enabled(state.entry.config))
-			.map((state) => ({
-				name: state.entry.namespace,
-				prefix: `${state.entry.namespace}__`,
-				...(state.entry.config.description === undefined
-					? {}
-					: { description: state.entry.config.description }),
-			}));
 	}
 
 	/** The `mcp-servers` prompt section (the configured servers), the `mcp` tool, and the hooks that notice an edit of the
@@ -310,7 +286,10 @@ export class McpManager {
 						await this.recheck();
 						return undefined;
 					},
-					afterTools: () => this.recheck(),
+					afterTools: async () => {
+						await this.recheck();
+						return undefined;
+					},
 				}),
 			],
 		});
@@ -560,7 +539,8 @@ export class McpManager {
 		}
 		state.registeredNames = names;
 		if (state.extension !== undefined) this.registry.uninstall(state.extension);
-		state.extension = defineExtension({ name: `mcp:${state.entry.name}`, tools });
+		// The server is its tools' namespace for codemode's `describeNamespace()` and `searchTools()`, also before it has any.
+		state.extension = defineExtension({ name: `mcp:${state.entry.name}`, namespace: { name: state.entry.namespace, description: state.entry.config.description ?? "" }, tools });
 		this.registry.install(state.extension);
 		this.options.logger?.info("MCP extension installed", {
 			server: state.entry.name,

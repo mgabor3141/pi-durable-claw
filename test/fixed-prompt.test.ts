@@ -63,7 +63,7 @@ describe("the fixed system prompt", () => {
 		for (const extension of [
 			fixedPromptExtension(),
 			preambleExtension(),
-			createCodemodeExtension({ sandbox: codemodeSandbox(), namespaces: mcp.namespaces(), inlineBudget: Number.POSITIVE_INFINITY }) as Extension,
+			createCodemodeExtension({ sandbox: codemodeSandbox(), inlineBudget: Number.POSITIVE_INFINITY }) as Extension,
 			defineExtension({ name: "first", tools: [scriptTool("first_tool")] }),
 			mcp.extension(),
 			// A clock far from the recorded start: a prompt rendered again must still name the start.
