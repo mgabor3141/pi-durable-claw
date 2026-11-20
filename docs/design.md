@@ -107,7 +107,10 @@ the interrupted nested call is not rerun, and the script completes.
 A machine of yours that the agent may use (the README's "Machines"): the agent names it with `machine_add`, which
 returns the harness's own public key for it, and `bash`, `read`, `write` and `edit` then take `machine`. The harness
 holds that key and the connection (pi-env over SSH, as for the workspace), so neither reaches the workspace. A
-thread's first use of a machine waits for your approval in T3, and a grant says how long it lasts.
+thread's first use of a machine waits for your approval in T3, and a grant says how long it lasts. The approval is a
+gate before the call (a `beforeTool` hook, not a wrapper of the tools: a wrapper cannot park), so the call parks on the
+card, holding no process and outliving a restart, and the gate decides from the card's answer and the grants each
+time it runs.
 
 ### The operator's computer
 

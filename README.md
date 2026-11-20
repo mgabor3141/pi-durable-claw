@@ -170,9 +170,10 @@ the sidebar. It says what the agent wants it for, and at the first connection th
 compare with the machine's own (`ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub` there); allowing trusts that key,
 and a key that changes later is refused. **Deny** tells the agent no, and so does a message you type instead, with its
 text. **Allow for 1 hour** (`CLAW_MACHINE_APPROVAL_HOURS`), **Allow in this thread** (its child threads and side chats
-too, not its forks) and **Always allow** each say how long. A card nobody answers ends after 30 minutes and the agent
-is told so; a scheduled task's thread waits the same way, so grant what it needs ahead, and connect to it once from a
-thread so its host key is trusted.
+too, not its forks) and **Always allow** each say how long. The call waits before it runs, parked: the run holds no
+process, the card has no time limit and is still there, the same card, after the harness restarts; Stop ends it. Calls
+in one thread that need the same machine share the card. A scheduled task's thread waits the same way, so grant what it
+needs ahead, and connect to it once from a thread so its host key is trusted.
 
 `/machines` lists the machines, their address, their access in the thread you send it in, whether a connection is open,
 and the trusted host key. `/machines allow <name> <30m|8h|2d|thread|always>` grants without a card (but a machine's
@@ -513,8 +514,8 @@ remote access on for the first time.
 The harness keeps named secrets in `data/harness/secrets.json` (owner-only, outside `durable.db`). The agent asks for
 one with `request_secret`: T3 shows a private card in the thread (with a link to the page the value comes from, when
 the agent gives one), the value you enter is saved under the name the agent chose (`GITHUB_TOKEN`), and it never
-enters the chat. Scripts can also `list`, `set` (a value the agent already has) and
-`delete` secrets with the `secrets` tool.
+enters the chat. The card waits as a question's does (Questions, below): with no time limit, and through a restart.
+Scripts can also `list`, `set` (a value the agent already has) and `delete` secrets with the `secrets` tool.
 
 The agent uses a secret by writing `${NAME}` where the value goes: tool arguments, MCP config, browser form
 fields. Only the names of saved secrets are replaced; any other `${...}` in a tool's arguments (a shell or compose
@@ -637,10 +638,11 @@ where you left off." with it; here that text is not written, not sent to the mod
 
 When the work is blocked on a decision only you can make, the agent asks with `ask_user`: T3 shows a card above the
 composer with one to four questions, each with options (you can also type your own answer) or open, and the sidebar
-says "Needs your input". The agent waits for the answer, 30 minutes unless it asks for longer, and goes on with it.
-Dismiss the card, or leave it, and the agent is told there was no answer: it goes on with its best judgement or ends
-its turn with the questions in its reply. A thread nobody watches (a scheduled task's, another agent's) waits the
-same way, so an agent is told to ask only what it cannot find out.
+says "Needs your input". The agent waits for the answer, however long it takes, and goes on with it: the call is
+parked meanwhile (the run holds no process, and the card is still there, the same card, after the harness restarts).
+Dismiss the card and the agent is told there was no answer: it goes on with its best judgement. Stop ends the wait
+with the run. A thread nobody watches (a scheduled task's, another agent's) waits the same way, so an agent is told
+to ask only what it cannot find out.
 
 ## When it feels slow
 

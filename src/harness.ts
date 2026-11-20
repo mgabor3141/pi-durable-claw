@@ -14,7 +14,7 @@ import { compactionExtension, type CompactionOptions } from "./compaction.ts";
 import { browserTools, type SharedBrowserProvider } from "./browser.ts";
 import { abortable, imageCheckExtension, type T3Attachment } from "@mgabor3141/pi-durable-t3";
 import { workspaceTools } from "./tools.ts";
-import { type Machines, machineTools, onMachine } from "./machines.ts";
+import { machineGate, type Machines, machineTools, onMachine } from "./machines.ts";
 import { imageFitExtension } from "./images.ts";
 import { directCallsExtension } from "./direct-calls.ts";
 import { webTools, type WebConfig } from "./web.ts";
@@ -91,10 +91,7 @@ const ON_MACHINE: Readonly<Record<string, (args: Record<string, unknown>) => str
 	edit: (args) => String(args["path"] ?? ""),
 };
 const clip = (text: string) => (text.length > 300 ? `${text.slice(0, 300)}…` : text);
-const machineAware = (tool: ToolRegistration, machines: Machines): ToolRegistration => {
-	const doing = ON_MACHINE[tool.name];
-	return doing === undefined ? tool : onMachine(tool, machines, doing);
-};
+const machineAware = (tool: ToolRegistration, machines: Machines): ToolRegistration => (ON_MACHINE[tool.name] === undefined ? tool : onMachine(tool, machines));
 
 /**
  * The extensions of the assistant conversation: the preamble, upstream's durable `codemode` extension, and the
@@ -127,6 +124,8 @@ export function harnessExtensions(options: HarnessExtensionOptions = {}): readon
 		createCodemodeExtension({ sandbox: codemodeSandbox(), inlineBudget: Number.POSITIVE_INFINITY, globals: [timerGlobal()] }) as Extension,
 		codemodeTimersExtension(),
 		defineExtension({ name: "harness-tools", tools: harnessTools }),
+		// A call that uses a machine waits, parked, for the user's approval before it runs.
+		...(machines === undefined ? [] : [machineGate(machines, ON_MACHINE)]),
 		...(options.extraExtensions ?? []),
 		workspaceContextExtension(),
 		compactionExtension(options.compaction),

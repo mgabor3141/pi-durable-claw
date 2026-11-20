@@ -5,10 +5,11 @@
  * `bash`, `read`, `write` and `edit` given `machine` run there as they run in the workspace.
  *
  * A connection needs the user's approval, asked on T3's approval card in the thread whose call needs it: for a while
- * (`CLAW_MACHINE_APPROVAL_HOURS`), for that thread (and the child threads and side chats under it), or always. `/machines`
- * lists the machines and their access, grants and revokes it. A revoke ends the connection, and with it what runs there.
- * The user approves an address and the host key it shows: until that key is trusted, the card asks even with a grant,
- * and a machine given another address loses its grants.
+ * (`CLAW_MACHINE_APPROVAL_HOURS`), for that thread (and the child threads and side chats under it), or always. It is
+ * asked before the call runs, by a gate (`machineGate`): the call parks until the user answers, holding no process,
+ * with no time limit and across a restart. `/machines` lists the machines and their access, grants and revokes it. A
+ * revoke ends the connection, and with it what runs there. The user approves an address and the host key it shows:
+ * until that key is trusted, the card asks even with a grant, and a machine given another address loses its grants.
  *
  * Kept in `<root>/machines/`: `machines.json` (the machines and their grants, read at each use, so an edit by hand
  * counts), a keypair per machine, and `known_hosts`, each host key under the machine's own alias. A machine is added
@@ -18,10 +19,10 @@ import { execFileSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import type { Context } from "@earendil-works/chord/context";
-import type { ToolRegistration } from "@earendil-works/pi-durable";
+import { defineExtension, type Extension, hook, type HookApi, type ToolHookCall, type ToolRegistration, ToolTask } from "@earendil-works/pi-durable";
 import type { ExecutionEnv } from "@earendil-works/pi-durable/env";
 import { acceptHostKey, connectSsh, forgetHostKey, HostKeyChangedError, HostKeyUnknownError, RemoteExecutionEnv, scanHostKey, type Connection, type SshTarget } from "@earendil-works/pi-env";
-import type { ApprovalOutcome, HostCommand, T3Attachment } from "@mgabor3141/pi-durable-t3";
+import type { HostCommand, T3Attachment } from "@mgabor3141/pi-durable-t3";
 import { int, opt, str } from "@earendil-works/pi-schema";
 import { type Env, setting } from "./env.ts";
 import { object } from "./schema.ts";
@@ -62,8 +63,11 @@ export interface MachinesOptions {
 
 const NAME = /^[a-z0-9][a-z0-9-]{0,62}$/;
 const EMPTY: MachinesFile = { machines: {}, grants: [] };
-/** How long an approval card waits. */
-const APPROVAL_TIMEOUT_MS = 30 * 60 * 1000;
+/** What the card's answer is until the user gave one: the sleep a gate returns to park its call. */
+type Park = Extract<Awaited<ReturnType<MachinesBridge["requestApproval"]>>, { readonly sleep: unknown }>;
+
+/** What a machine's host key was when a card first showed it: the lines to trust, and their fingerprints. */
+type HostKey = { readonly lines: string[]; readonly fingerprints: string[] };
 
 /** An error that tells the agent what went wrong with a machine, and what to do about it. */
 class MachineError extends Error {}
@@ -79,8 +83,6 @@ export class Machines {
 	/** Open connections, by machine; each with the address it was opened for, so a machine given another address connects
 	 * again. */
 	readonly #open = new Map<string, { readonly key: string; readonly connection: Promise<{ connection: Connection; home: string }> }>();
-	/** Approval cards waiting, by machine and thread: calls that need the same one wait for it together. */
-	readonly #asking = new Map<string, Promise<void>>();
 
 	constructor(options: MachinesOptions) {
 		this.#options = options;
@@ -248,94 +250,92 @@ export class Machines {
 		return this.allowed(name, threadId) !== undefined && this.#knownHostLines(name).length > 0;
 	}
 
-	/**
-	 * The machine as the call's environment: approved (a grant and a trusted host key, or the card), and connected.
-	 * `doing` says what the call would do there, for the card.
-	 */
-	async env(name: string, conversationId: number, doing: string, signal: AbortSignal | undefined): Promise<RemoteExecutionEnv> {
+	/** The machine as the call's environment, connected. The call's gate (`gate`) allowed it; access taken back or run
+	 * out since is refused. */
+	async env(name: string, conversationId: number): Promise<RemoteExecutionEnv> {
 		const machine = this.#machine(name);
-		const threadId = this.threadOf(conversationId);
-		if (!this.#approved(name, threadId)) await this.#approve(name, machine, conversationId, threadId, doing, signal);
+		if (!this.#approved(name, this.threadOf(conversationId))) throw new MachineError(`Using ${name} is not allowed here now: its access was taken back or ran out. Call again to ask the user.`);
 		const { connection, home } = await this.#connection(name, machine);
 		return new RemoteExecutionEnv({ connection, id: `pi-env:${alias(name)}`, cwd: machine.cwd ?? home });
 	}
 
-	/** Ask on the card, once per machine and thread at a time; trust the host key it showed when allowed. */
-	async #approve(name: string, machine: MachineConfig, conversationId: number, threadId: string | undefined, doing: string, signal: AbortSignal | undefined): Promise<void> {
-		const bridge = this.#options.bridge();
-		if (bridge === undefined || threadId === undefined) {
-			throw new MachineError(
-				this.allowed(name, threadId) === undefined
-					? `Using ${name} needs the user's approval, which only a thread can ask for: ask the user to allow it with /machines allow ${name}.`
-					: `${name}'s host key is not trusted yet, and only a thread's approval card can show it to the user: connect to it from a thread first.`,
-			);
+	/**
+	 * The gate before a call that uses machines (`uses`: each, and what the call does there, for the card). It passes once
+	 * each is allowed in the call's thread and its host key is trusted. Otherwise it asks on T3's card and returns the
+	 * sleep that parks the call until the user answers; on an allow it trusts the host key the card showed and grants
+	 * what the user chose, on a deny it blocks the call with what they said. It runs again on every wake (and after a
+	 * restart), so it decides from the grants and the card's answer, and each step is done once: the host key is read
+	 * once per call (a memo), trusted only while none is, and a grant replaces its like.
+	 */
+	async gate(uses: readonly { readonly machine: string; readonly doing: string }[], api: HookApi, context: Context): Promise<{ readonly block: string } | Park | undefined> {
+		const threadId = this.threadOf(api.conversationId);
+		for (const { machine: name, doing } of uses) {
+			let machine: MachineConfig;
+			try {
+				machine = this.#machine(name);
+			} catch (error) {
+				if (error instanceof MachineError) return { block: error.message };
+				throw error;
+			}
+			if (this.#approved(name, threadId)) continue;
+			const bridge = this.#options.bridge();
+			if (bridge === undefined || threadId === undefined) {
+				return {
+					block:
+						this.allowed(name, threadId) === undefined
+							? `Using ${name} needs the user's approval, which only a thread can ask for: ask the user to allow it with /machines allow ${name}.`
+							: `${name}'s host key is not trusted yet, and only a thread's approval card can show it to the user: connect to it from a thread first.`,
+				};
+			}
+			const target = this.#target(name, machine);
+			// The key the card shows, read once: allowing trusts the key the user saw.
+			let scanned = await api.memo<HostKey>(`machines.hostKey.${name}`, context);
+			if (scanned === undefined && this.#knownHostLines(name).length === 0) {
+				try {
+					scanned = await api.memo<HostKey>(`machines.hostKey.${name}`, await scanHostKey(target), context);
+				} catch (error) {
+					return { block: `Cannot reach ${name} (${target.host}): ${(error as Error).message.trim()}` };
+				}
+			}
+			const answer = await bridge.requestApproval(api, this.#card(name, machine, doing, scanned), context);
+			if ("sleep" in answer) return answer;
+			if (answer.decision === "decline" || answer.decision === "cancel") return { block: `The user did not allow ${name}${answer.feedback === undefined ? "." : `, and said: ${answer.feedback}`}` };
+			if (scanned !== undefined && this.#knownHostLines(name).length === 0) await acceptHostKey(target, scanned.lines);
+			const grant: MachineGrant =
+				answer.decision === "acceptAlways"
+					? { machine: name, scope: "always" }
+					: answer.decision === "acceptForSession"
+						? { machine: name, scope: "thread", threadId }
+						: { machine: name, scope: "until", until: this.#now() + this.#options.approvalMs };
+			this.grant(grant);
+			this.#options.log?.info("machine allowed", { machine: name, scope: grant.scope, threadId });
 		}
-		const key = `${name}\u0000${threadId}`;
-		const asking = this.#asking.get(key);
-		if (asking !== undefined) {
-			await asking;
-			if (!this.#approved(name, threadId)) throw new MachineError(`The user did not allow ${name}.`);
-			return;
-		}
-		const ask = this.#ask(bridge, name, machine, conversationId, threadId, doing, signal);
-		this.#asking.set(key, ask.then(() => undefined, () => undefined));
-		try {
-			await ask;
-		} finally {
-			this.#asking.delete(key);
-		}
+		return undefined;
 	}
 
-	async #ask(bridge: MachinesBridge, name: string, machine: MachineConfig, conversationId: number, threadId: string, doing: string, signal: AbortSignal | undefined): Promise<void> {
-		const target = this.#target(name, machine);
-		const scanned = await this.#unknownHostKey(name, target);
+	/** The card that asks for `name`, showing the host key it would trust when none is yet. Its key is the machine and
+	 * that host key: calls of a thread asking for the same share the card. */
+	#card(name: string, machine: MachineConfig, doing: string, scanned: HostKey | undefined): Parameters<MachinesBridge["requestApproval"]>[1] {
 		const hours = this.#options.approvalMs / 3_600_000;
 		const forAWhile = Number.isInteger(hours) ? `${hours} hour${hours === 1 ? "" : "s"}` : `${Math.round(this.#options.approvalMs / 60_000)} minutes`;
+		const fingerprints = scanned?.fingerprints.map(shortFingerprint).join(", ");
 		// One paragraph: T3 shows the reason as one.
 		const reason = [
 			`The agent wants to use ${name} (${address(machine)}): run commands and read and change files there, as its user. Wanted for: ${doing}.`,
-			...(scanned === undefined ? [] : [`First connection: ${name} shows the host key ${scanned.fingerprints.map(shortFingerprint).join(", ")}. Allowing trusts it; compare it with the machine's own first (ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub there).`]),
+			...(fingerprints === undefined ? [] : [`First connection: ${name} shows the host key ${fingerprints}. Allowing trusts it; compare it with the machine's own first (ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub there).`]),
 		].join(" ");
-		const outcome: ApprovalOutcome = await bridge.requestApproval(
-			{
-				conversationId,
-				prompt: `ssh ${address(machine)}`,
-				reason,
-				appName: name,
-				options: [
-					{ decision: "decline", label: "Deny" },
-					{ decision: "accept", label: `Allow for ${forAWhile}` },
-					{ decision: "acceptForSession", label: "Allow in this thread" },
-					{ decision: "acceptAlways", label: `Always allow ${name}` },
-				],
-				timeoutMs: APPROVAL_TIMEOUT_MS,
-			},
-			signal,
-		);
-		if (outcome.status === "timed_out") throw new MachineError(`Nobody answered the approval for ${name} in ${APPROVAL_TIMEOUT_MS / 60_000} minutes. Say in your reply what you needed it for.`);
-		if (outcome.status !== "decided") throw new MachineError(`The approval for ${name} ended unanswered (stopped).`);
-		if (outcome.decision === "decline" || outcome.decision === "cancel") {
-			throw new MachineError(`The user did not allow ${name}${outcome.feedback === undefined ? "." : `, and said: ${outcome.feedback}`}`);
-		}
-		if (scanned !== undefined) await acceptHostKey(target, scanned.lines);
-		const grant: MachineGrant =
-			outcome.decision === "acceptAlways"
-				? { machine: name, scope: "always" }
-				: outcome.decision === "acceptForSession"
-					? { machine: name, scope: "thread", threadId }
-					: { machine: name, scope: "until", until: this.#now() + this.#options.approvalMs };
-		this.grant(grant);
-		this.#options.log?.info("machine allowed", { machine: name, scope: grant.scope, threadId });
-	}
-
-	/** The host key the machine shows when none is trusted for it yet; `undefined` when one is. */
-	async #unknownHostKey(name: string, target: SshTarget): Promise<{ lines: string[]; fingerprints: string[] } | undefined> {
-		if (this.#knownHostLines(name).length > 0) return undefined;
-		try {
-			return await scanHostKey(target);
-		} catch (error) {
-			throw new MachineError(`Cannot reach ${name} (${target.host}): ${(error as Error).message.trim()}`);
-		}
+		return {
+			key: fingerprints === undefined ? `machine:${name}` : `machine:${name}:${fingerprints}`,
+			prompt: `ssh ${address(machine)}`,
+			reason,
+			appName: name,
+			options: [
+				{ decision: "decline", label: "Deny" },
+				{ decision: "accept", label: `Allow for ${forAWhile}` },
+				{ decision: "acceptForSession", label: "Allow in this thread" },
+				{ decision: "acceptAlways", label: `Always allow ${name}` },
+			],
+		};
 	}
 
 	async #connection(name: string, machine: MachineConfig): Promise<{ connection: Connection; home: string }> {
@@ -477,9 +477,9 @@ export function machinesCommand(machines: Machines): HostCommand {
 	};
 }
 
-/** `tool` with an optional `machine`: given, the call runs on that machine (approved and connected), as it would in
- * the workspace. `doing` says, for the approval card, what the call is about to do. */
-export function onMachine(tool: ToolRegistration, machines: Machines, doing: (args: Record<string, unknown>) => string): ToolRegistration {
+/** `tool` with an optional `machine`: given, the call runs on that machine (connected; the gate, `machineGate`, asked
+ * for it before the call ran), as it would in the workspace. */
+export function onMachine(tool: ToolRegistration, machines: Machines): ToolRegistration {
 	const parameters = tool.parameters as unknown as { properties: Record<string, unknown> };
 	return {
 		...tool,
@@ -491,10 +491,45 @@ export function onMachine(tool: ToolRegistration, machines: Machines, doing: (ar
 			const { machine, ...rest } = args as Record<string, unknown>;
 			if (machine === undefined || machine === null || machine === "") return tool.execute(rest as never, api, context);
 			if (typeof machine !== "string") throw new Error("machine: give a machine's name");
-			const env = await machines.env(machine, api.conversationId, `${tool.name} ${doing(rest)}`, context.abortSignal);
+			const env = await machines.env(machine, api.conversationId);
 			return tool.execute(rest as never, { ...api, env } as never, context);
 		},
 	} as ToolRegistration;
+}
+
+/** The machines a call uses, and what it does on each, for the card: `machine` on a tool in `doing` (`onMachine`'s), and
+ * the two sides of `copy_file`. */
+export function machineUses(call: Pick<ToolHookCall, "name" | "arguments">, doing: Readonly<Record<string, (args: Record<string, unknown>) => string>>): { machine: string; doing: string }[] {
+	const args = call.arguments as Record<string, unknown>;
+	const named = (value: unknown): value is string => typeof value === "string" && value !== "";
+	if (call.name === "copy_file") {
+		const sides = [["from", args["from"]], ["to", args["to"]]] as const;
+		return sides.flatMap(([side, value]) => {
+			const { path, machine } = (typeof value === "object" && value !== null ? value : {}) as { path?: unknown; machine?: unknown };
+			return named(machine) ? [{ machine, doing: `copy_file ${side} ${String(path ?? "")}` }] : [];
+		});
+	}
+	const describe = doing[call.name];
+	return describe !== undefined && named(args["machine"]) ? [{ machine: args["machine"], doing: `${call.name} ${describe(args)}` }] : [];
+}
+
+/**
+ * The machines' approval, as a gate before every call that uses one (pi-durable's gates): the call parks on T3's card
+ * until the user answers (`Machines.gate`). A gate, not a wrapper of the tools: a wrapper cannot park its call. `doing`
+ * says, per tool that takes `machine`, what a call is about to do there.
+ */
+export function machineGate(machines: Machines, doing: Readonly<Record<string, (args: Record<string, unknown>) => string>>): Extension {
+	return defineExtension({
+		name: "machine-approval",
+		hooks: [
+			hook(ToolTask, {
+				beforeTool: async (call, api, context) => {
+					const uses = machineUses(call, doing);
+					return uses.length === 0 ? undefined : machines.gate(uses, api, context);
+				},
+			}),
+		],
+	});
 }
 
 /** The tools that manage machines and move files between them: `machine_add`, `machine_remove`, `machines_list`,
@@ -561,10 +596,10 @@ export function machineTools(machines: Machines): ToolRegistration[] {
 			}),
 			callers: ["tools"],
 			async execute(args: { from: { path: string; machine?: string }; to: { path: string; machine?: string } }, api, context) {
-				const envOf = async (side: { path: string; machine?: string }, doing: string) =>
-					(side.machine === undefined || side.machine === "" ? api.env : await machines.env(side.machine, api.conversationId, doing, context.abortSignal)) as ExecutionEnv | undefined;
-				const source = await envOf(args.from, `copy_file from ${args.from.path}`);
-				const target = await envOf(args.to, `copy_file to ${args.to.path}`);
+				const envOf = async (side: { path: string; machine?: string }) =>
+					(side.machine === undefined || side.machine === "" ? api.env : await machines.env(side.machine, api.conversationId)) as ExecutionEnv | undefined;
+				const source = await envOf(args.from);
+				const target = await envOf(args.to);
 				if (source === undefined || target === undefined) throw new Error("No execution environment is configured");
 				const bytes = await copyFile(source, args.from.path, target, args.to.path, context);
 				return text(`Copied ${bytes} bytes.`);
