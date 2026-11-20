@@ -171,7 +171,9 @@ compare with the machine's own (`ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pu
 and a key that changes later is refused. **Deny** tells the agent no, and so does a message you type instead, with its
 text. **Allow for 1 hour** (`CLAW_MACHINE_APPROVAL_HOURS`), **Allow in this thread** (its child threads and side chats
 too, not its forks) and **Always allow** each say how long. The call waits before it runs, parked: the run holds no
-process, the card has no time limit and is still there, the same card, after the harness restarts; Stop ends it. Calls
+process, the card has no time limit and is still there, the same card, after the harness restarts; Stop ends it. A call
+a script makes (`copy_file` is only for scripts, and `bash`, `read`, `write` and `edit` are often called from one)
+parks the same way, but its script keeps waiting for it, holding its process, until the card is answered. Calls
 in one thread that need the same machine share the card. A scheduled task's thread waits the same way, so grant what it
 needs ahead, and connect to it once from a thread so its host key is trusted.
 

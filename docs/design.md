@@ -110,7 +110,8 @@ holds that key and the connection (pi-env over SSH, as for the workspace), so ne
 thread's first use of a machine waits for your approval in T3, and a grant says how long it lasts. The approval is a
 gate before the call (a `beforeTool` hook, not a wrapper of the tools: a wrapper cannot park), so the call parks on the
 card, holding no process and outliving a restart, and the gate decides from the card's answer and the grants each
-time it runs.
+time it runs. A call a script makes (any nested call; `copy_file` is scripts-only) parks too, but its `codemode` call
+keeps its process while it waits; after a restart the script finds the parked call again.
 
 ### The operator's computer
 
