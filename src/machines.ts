@@ -9,7 +9,8 @@
  * lists the machines and their access, grants and revokes it. A revoke ends the connection, and with it what runs there.
  *
  * Kept in `<root>/machines/`: `machines.json` (the machines and their grants, read at each use, so an edit by hand
- * counts), a keypair per machine, and `known_hosts`, each host key under the machine's own alias.
+ * counts), a keypair per machine, and `known_hosts`, each host key under the machine's own alias. A machine is added
+ * with `machine_add`, which makes its keypair; one added to the file by hand has none.
  */
 import { execFileSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
@@ -53,8 +54,6 @@ export interface MachinesOptions {
 	readonly approvalMs: number;
 	/** The bridge, once attached (read at each use). */
 	readonly bridge: () => MachinesBridge | undefined;
-	/** The `ssh` program; default `ssh`. */
-	readonly ssh?: string;
 	readonly now?: () => number;
 	readonly log?: { info(message: string, fields?: Record<string, unknown>): void; warn(message: string, fields?: Record<string, unknown>): void };
 }
@@ -64,8 +63,14 @@ const EMPTY: MachinesFile = { machines: {}, grants: [] };
 /** How long an approval card waits. */
 const APPROVAL_TIMEOUT_MS = 30 * 60 * 1000;
 
-/** A machine's name as the error messages say it, and the agent's guide to the ones there are. */
+/** An error that tells the agent what went wrong with a machine, and what to do about it. */
 class MachineError extends Error {}
+
+/** The alias a machine's host key is kept under in `known_hosts`, and its key's comment. */
+const alias = (name: string): string => `claw-machine-${name}`;
+
+/** `user@host:port`, leaving out what is not set. */
+const address = (machine: MachineConfig): string => `${machine.user === undefined ? "" : `${machine.user}@`}${machine.host}${machine.port === undefined ? "" : `:${machine.port}`}`;
 
 export class Machines {
 	readonly #options: MachinesOptions;
@@ -134,9 +139,14 @@ export class Machines {
 			...(machine.port === undefined ? {} : { port: machine.port }),
 			identityFile: this.#keyFile(name),
 			knownHostsFile: join(this.#options.dir, "known_hosts"),
-			hostKeyAlias: `claw-machine-${name}`,
-			...(this.#options.ssh === undefined ? {} : { ssh: this.#options.ssh }),
+			hostKeyAlias: alias(name),
 		};
+	}
+
+	/** The `known_hosts` lines trusted for a machine: none before its first approval. */
+	#knownHostLines(name: string): string[] {
+		const known = join(this.#options.dir, "known_hosts");
+		return existsSync(known) ? readFileSync(known, "utf8").split("\n").filter((line) => line.startsWith(`${alias(name)} `)) : [];
 	}
 
 	/** The line to put in the machine's `~/.ssh/authorized_keys`: the harness's key for it, with no forwarding of any kind. */
@@ -153,7 +163,7 @@ export class Machines {
 		const key = this.#keyFile(name);
 		if (!existsSync(key)) {
 			mkdirSync(join(this.#options.dir, name), { recursive: true, mode: 0o700 });
-			execFileSync("ssh-keygen", ["-q", "-t", "ed25519", "-N", "", "-C", `claw-machine-${name}`, "-f", key]);
+			execFileSync("ssh-keygen", ["-q", "-t", "ed25519", "-N", "", "-C", alias(name), "-f", key]);
 		}
 		const next: MachineConfig = {
 			host: machine.host,
@@ -221,21 +231,21 @@ export class Machines {
 		return undefined;
 	}
 
-	/**
-	 * The machine as the call's environment: approved (a grant, or the card), and connected. `doing` says what the call
-	 * would do there, for the card.
-	 */
 	/** The thread a conversation is the head of. */
 	threadOf(conversationId: number): string | undefined {
 		return this.#options.bridge()?.threadOf(conversationId as never)?.threadId;
 	}
 
+	/**
+	 * The machine as the call's environment: approved (a grant, or the card), and connected. `doing` says what the call
+	 * would do there, for the card.
+	 */
 	async env(name: string, conversationId: number, doing: string, signal: AbortSignal | undefined): Promise<RemoteExecutionEnv> {
 		const machine = this.#machine(name);
 		const threadId = this.threadOf(conversationId);
 		if (this.allowed(name, threadId) === undefined) await this.#approve(name, machine, conversationId, threadId, doing, signal);
 		const { connection, home } = await this.#connection(name, machine);
-		return new RemoteExecutionEnv({ connection, id: `pi-env:claw-machine-${name}`, cwd: machine.cwd ?? home });
+		return new RemoteExecutionEnv({ connection, id: `pi-env:${alias(name)}`, cwd: machine.cwd ?? home });
 	}
 
 	/** Ask on the card, once per machine and thread at a time; trust the host key it showed when allowed. */
@@ -263,16 +273,15 @@ export class Machines {
 		const scanned = await this.#unknownHostKey(name, target);
 		const hours = this.#options.approvalMs / 3_600_000;
 		const forAWhile = Number.isInteger(hours) ? `${hours} hour${hours === 1 ? "" : "s"}` : `${Math.round(this.#options.approvalMs / 60_000)} minutes`;
-		const address = `${machine.user === undefined ? "" : `${machine.user}@`}${machine.host}${machine.port === undefined ? "" : `:${machine.port}`}`;
 		// One paragraph: T3 shows the reason as one.
 		const reason = [
-			`The agent wants to use ${name} (${address}): run commands and read and change files there, as its user. Wanted for: ${doing}.`,
+			`The agent wants to use ${name} (${address(machine)}): run commands and read and change files there, as its user. Wanted for: ${doing}.`,
 			...(scanned === undefined ? [] : [`First connection: ${name} shows the host key ${scanned.fingerprints.map(shortFingerprint).join(", ")}. Allowing trusts it; compare it with the machine's own first (ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub there).`]),
 		].join(" ");
 		const outcome: ApprovalOutcome = await bridge.requestApproval(
 			{
 				conversationId,
-				prompt: `ssh ${address}`,
+				prompt: `ssh ${address(machine)}`,
 				reason,
 				appName: name,
 				options: [
@@ -303,8 +312,7 @@ export class Machines {
 
 	/** The host key the machine shows when none is trusted for it yet; `undefined` when one is. */
 	async #unknownHostKey(name: string, target: SshTarget): Promise<{ lines: string[]; fingerprints: string[] } | undefined> {
-		const known = join(this.#options.dir, "known_hosts");
-		if (existsSync(known) && readFileSync(known, "utf8").split("\n").some((line) => line.startsWith(`${target.hostKeyAlias} `))) return undefined;
+		if (this.#knownHostLines(name).length > 0) return undefined;
 		try {
 			return await scanHostKey(target);
 		} catch (error) {
@@ -347,9 +355,7 @@ export class Machines {
 
 	/** The host key trusted for a machine, as `ssh-keygen -l` prints it; `undefined` before the first approval. */
 	hostKeyFingerprint(name: string): string | undefined {
-		const known = join(this.#options.dir, "known_hosts");
-		if (!existsSync(known)) return undefined;
-		const lines = readFileSync(known, "utf8").split("\n").filter((line) => line.startsWith(`claw-machine-${name} `));
+		const lines = this.#knownHostLines(name);
 		if (lines.length === 0) return undefined;
 		try {
 			return execFileSync("ssh-keygen", ["-l", "-f", "-"], { input: lines.join("\n") + "\n" }).toString().trim().split("\n").map(shortFingerprint).join(", ");
@@ -439,9 +445,8 @@ export function machinesCommand(machines: Machines): HostCommand {
 			const all = Object.entries(machines.read().machines);
 			if (all.length === 0) return "No machines yet. The agent adds one with `machine_add`, and installs the key it gets there.";
 			const rows = all.map(([name, machine]) => {
-				const address = `${machine.user === undefined ? "" : `${machine.user}@`}${machine.host}${machine.port === undefined ? "" : `:${machine.port}`}`;
 				const fingerprint = machines.hostKeyFingerprint(name);
-				return `| ${name} | \`${address}\` | ${machines.access(name, threadId)} | ${machines.connected(name) ? "open" : "—"} | ${fingerprint === undefined ? "not trusted yet" : `\`${fingerprint}\``} |`;
+				return `| ${name} | \`${address(machine)}\` | ${machines.access(name, threadId)} | ${machines.connected(name) ? "open" : "—"} | ${fingerprint === undefined ? "not trusted yet" : `\`${fingerprint}\``} |`;
 			});
 			return [
 				"| Machine | Address | Access | Connection | Host key |",
@@ -454,14 +459,10 @@ export function machinesCommand(machines: Machines): HostCommand {
 	};
 }
 
-/** The machine a tool call names, as its environment; without one, the call's own (the workspace). */
-type EnvOf = (machine: string | undefined, api: { conversationId: number; env: unknown }, doing: string, signal: AbortSignal | undefined) => Promise<unknown>;
-
 /** `tool` with an optional `machine`: given, the call runs on that machine (approved and connected), as it would in
  * the workspace. `doing` says, for the approval card, what the call is about to do. */
 export function onMachine(tool: ToolRegistration, machines: Machines, doing: (args: Record<string, unknown>) => string): ToolRegistration {
 	const parameters = tool.parameters as unknown as { properties: Record<string, unknown> };
-	const envOf: EnvOf = async (machine, api, what, signal) => (machine === undefined ? api.env : machines.env(machine, api.conversationId, what, signal));
 	return {
 		...tool,
 		parameters: {
@@ -472,7 +473,7 @@ export function onMachine(tool: ToolRegistration, machines: Machines, doing: (ar
 			const { machine, ...rest } = args as Record<string, unknown>;
 			if (machine === undefined || machine === null || machine === "") return tool.execute(rest as never, api, context);
 			if (typeof machine !== "string") throw new Error("machine: give a machine's name");
-			const env = await envOf(machine, api as never, `${tool.name} ${doing(rest)}`, context.abortSignal);
+			const env = await machines.env(machine, api.conversationId, `${tool.name} ${doing(rest)}`, context.abortSignal);
 			return tool.execute(rest as never, { ...api, env } as never, context);
 		},
 	} as ToolRegistration;
