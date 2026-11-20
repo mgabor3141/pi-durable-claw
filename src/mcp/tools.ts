@@ -1,8 +1,9 @@
 /**
  * Adapt MCP tools to pi-durable tool registrations.
  *
- * A call has three channels. The model gets text and images, bounded to a manageable size; a
- * codemode script gets the complete `CallToolResult` without `_meta`; the UI gets details.
+ * Only codemode scripts call MCP tools, and a script gets the complete `CallToolResult` without `_meta` (the tool's
+ * structured output). The text and image `output` is made too, as every result has one, but neither the model nor T3
+ * reads a script's nested call's output, so it is not cut down or saved to a file here; pi-durable bounds what it keeps.
  */
 
 import { createHash } from "node:crypto";
@@ -13,21 +14,16 @@ import {
 	type Tool as McpTool,
 	toLlmContent,
 } from "@earendil-works/pi-mcp";
-import type { ToolExecutionApi, ToolExecutionResult, ToolRegistration } from "@earendil-works/pi-durable";
-import type { Context } from "@earendil-works/chord/context";
+import type { ToolExecutionResult, ToolRegistration } from "@earendil-works/pi-durable";
 import { abortable } from "@mgabor3141/pi-durable-t3";
 import { type Schema } from "@earendil-works/pi-schema";
 
 /** Provider tool names are limited to 64 characters of `[A-Za-z0-9_-]`. */
 const MAX_TOOL_NAME_LENGTH = 64;
-/** Model-facing text beyond this is cut in the middle. */
-export const MCP_OUTPUT_MAX_BYTES = 20 * 1024;
 
 export type McpToolDetails = {
 	readonly server: string;
 	readonly tool: string;
-	/** Workspace temp file with the complete text output, when the model copy was truncated. */
-	readonly fullOutputPath?: string;
 };
 
 /** `mcp__<server>__<tool>`, sanitized and shortened with a hash suffix when too long. */
@@ -124,41 +120,14 @@ function toParameters(schema: Record<string, unknown>): Schema {
 	} as unknown as Schema;
 }
 
-/** Cut text in the middle, byte-oriented, and return the model copy plus whether it was cut. */
-function truncateMiddle(text: string, maxBytes: number): { text: string; truncated: boolean } {
-	const bytes = Buffer.byteLength(text);
-	if (bytes <= maxBytes) return { text, truncated: false };
-	const half = Math.floor(maxBytes / 2);
-	const buffer = Buffer.from(text);
-	return {
-		text: `${buffer.subarray(0, half).toString("utf8")}\n\n… output truncated …\n\n${buffer.subarray(bytes - half).toString("utf8")}`,
-		truncated: true,
-	};
-}
-
 function isTextMimeType(mimeType: string | undefined): boolean {
 	if (!mimeType) return false;
 	const type = mimeType.split(";", 1)[0].trim().toLowerCase();
 	return type.startsWith("text/") || type === "application/json" || type.endsWith("+json") || type.endsWith("+xml");
 }
 
-/** Write the full text to the workspace temp dir when one is available, so codemode's `read` can reach it. */
-async function saveFullText(api: ToolExecutionApi, text: string, context: Context): Promise<string | undefined> {
-	if (api.env === undefined) return undefined;
-	const created = await api.env.createTempFile({ prefix: "claw-mcp-", suffix: ".txt" }, context);
-	if (!created.ok) return undefined;
-	const written = await api.env.writeFile(created.value, text, context);
-	return written.ok ? created.value : undefined;
-}
-
 /** Model-facing content and the complete structured result of one MCP call. */
-export async function convertMcpResult(
-	server: string,
-	tool: string,
-	result: CallToolResult,
-	api: ToolExecutionApi,
-	context: Context,
-): Promise<ToolExecutionResult<McpToolDetails>> {
+export function convertMcpResult(server: string, tool: string, result: CallToolResult): ToolExecutionResult<McpToolDetails> {
 	const converted: (TextContent | ImageContent)[] =
 		result.content.length > 0
 			? result.content.flatMap((block) => {
@@ -194,23 +163,11 @@ export async function convertMcpResult(
 		converted.push({ type: "text", text: `MCP tool ${server}/${tool} returned an error` });
 	}
 
-	const combined = textOf(converted);
-	const truncation = truncateMiddle(combined, MCP_OUTPUT_MAX_BYTES);
-	let content = converted;
-	let fullOutputPath: string | undefined;
-	if (truncation.truncated) {
-		fullOutputPath = await saveFullText(api, combined, context);
-		const where = fullOutputPath
-			? `[Full output: ${fullOutputPath}]`
-			: "[The full output could not be saved; call this tool from codemode for the complete result.]";
-		content = [{ type: "text", text: `Warning: truncated output\n\n${truncation.text}\n\n${where}` }, ...converted.filter((block) => block.type === "image")];
-	}
-
 	const { _meta: _ignored, ...scriptResult } = result;
 	return {
-		output: content,
+		output: converted,
 		structuredOutput: scriptResult as unknown as ToolExecutionResult<McpToolDetails>["structuredOutput"],
-		details: { server, tool, ...(fullOutputPath ? { fullOutputPath } : {}) },
+		details: { server, tool },
 		...(result.isError ? { isError: true } : {}),
 	};
 }
@@ -238,13 +195,13 @@ export function createMcpToolRegistration(options: McpToolOptions): ToolRegistra
 		callers: ["tools"],
 		deferred: true,
 		replay: "unsafe",
-		async execute(args, api, context) {
+		async execute(args, _api, context) {
 			const client = await options.getClient();
 			const result = await client.callTool(tool.name, (args ?? {}) as Record<string, unknown>, {
 				timeoutMs: options.timeoutMs,
 				signal: context.abortSignal,
 			});
-			return convertMcpResult(server, tool.name, result, api, context);
+			return convertMcpResult(server, tool.name, result);
 		},
 	});
 }
