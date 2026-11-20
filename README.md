@@ -399,7 +399,8 @@ How it works (`src/hindsight.ts`):
   thread or the scheduler; not a note or a child's report), is searched for, and the observations that come back are
   stored with the message as a hidden `<memories>` block, through the bridge's `messageContext`. Observations are what
   Hindsight consolidates from the facts it extracted: de-duplicated, each backed by its sources. Stored with the
-  message, not added to each request, so the prompt cache holds. Hindsight fills a 1,024-token budget with the best matches; claw then leaves out:
+  message, not added to each request, so the prompt cache holds. Hindsight fills a 1,024-token budget with the best
+  matches; claw then leaves out:
   - a match whose reranker score is below 0.01 (`RECALL_MIN_SCORE`): low on purpose, since the scores order well but
     are not absolute, so it only drops what has nothing to do with the message;
   - one recalled for an earlier message and still in the model's context;
