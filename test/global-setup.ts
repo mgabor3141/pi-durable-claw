@@ -25,12 +25,15 @@ export async function setup(): Promise<() => Promise<void>> {
 		input: readFileSync(join(pubDir, "id_ed25519.pub")),
 		stdio: ["pipe", "ignore", "inherit"],
 	});
+	// sshd is up when it greets: Docker's port proxy may accept a connection before anything listens in the container.
 	let open = false;
-	for (let i = 0; i < 100 && !open; i++) {
+	for (const deadline = Date.now() + 10_000; !open && Date.now() < deadline; ) {
 		open = await new Promise<boolean>((resolve) => {
 			const s = new Socket();
-			s.once("connect", () => { s.destroy(); resolve(true); });
-			s.once("error", () => resolve(false));
+			s.setTimeout(1_000, () => s.destroy());
+			s.once("data", (data) => { s.destroy(); resolve(data.toString("latin1").startsWith("SSH-")); });
+			s.once("close", () => resolve(false));
+			s.on("error", () => {});
 			s.connect(PORT, "127.0.0.1");
 		});
 		if (!open) await sleep(100);
@@ -38,7 +41,7 @@ export async function setup(): Promise<() => Promise<void>> {
 	// Without sshd every SSH test would fail later with a connection error, far from the cause: stop here with its logs.
 	if (!open) {
 		const logs = spawnSync("docker", ["logs", CONTAINER], { encoding: "utf8" });
-		throw new Error(`The workspace's sshd did not listen on 127.0.0.1:${PORT} within 10 seconds. docker logs ${CONTAINER}:\n${logs.stdout}${logs.stderr}`);
+		throw new Error(`The workspace's sshd did not answer on 127.0.0.1:${PORT} within 10 seconds. docker logs ${CONTAINER}:\n${logs.stdout}${logs.stderr}`);
 	}
 	return async () => {
 		docker(["rm", "-f", CONTAINER]);
