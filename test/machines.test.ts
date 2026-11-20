@@ -135,7 +135,7 @@ afterEach(() => {
 
 const make = (name: string, answer: Parameters<typeof fakeBridge>[0], now?: () => number) => {
 	const fake = fakeBridge(answer);
-	const machines = new Machines({ dir: join(dir, name), approvalMs: 3_600_000, bridge: () => fake.bridge as never, ...(now === undefined ? {} : { now }) });
+	const machines = new Machines({ dir: join(dir, name), approvalMs: 3_600_000, bridge: Promise.resolve(fake.bridge as never), ...(now === undefined ? {} : { now }) });
 	made.push(machines);
 	return { machines, asked: fake.asked };
 };
@@ -160,6 +160,24 @@ describe("machines", () => {
 		await expect(machines.add("ok", { host: "-oProxyCommand=x" })).rejects.toThrow("not a host");
 		await expect(machines.env("nope", 1)).rejects.toThrow('No machine named "nope". There are: nas.');
 		expect(await gate(machines, [{ machine: "nope", doing: "bash true" }], fakeApi(1))).toEqual({ block: 'No machine named "nope". There are: nas.', parks: 0 });
+	});
+
+	it("lets a gate that runs before the bridge is attached (one woken at startup) wait for it, and ask then", async () => {
+		if (sshd === undefined) return;
+		const fake = fakeBridge(() => ({ decision: "accept" }));
+		const attached = Promise.withResolvers<never>();
+		const machines = new Machines({ dir: join(dir, "early"), approvalMs: 3_600_000, bridge: attached.promise });
+		made.push(machines);
+		await machines.add("box", { host: "127.0.0.1", port: PORT, user });
+		let settled: unknown = "waiting";
+		const gated = machines.gate([{ machine: "box", doing: "bash true" }], fakeApi(1) as never, BACKGROUND_CONTEXT).then((result) => (settled = result));
+		await new Promise((resolve) => setTimeout(resolve, 50));
+		expect(settled, "no block while the bridge attaches").toBe("waiting");
+		attached.resolve(fake.bridge as never);
+		await gated;
+		// Attached: the card is asked, and the call parks on it.
+		expect(settled).toMatchObject({ sleep: {} });
+		expect(fake.asked).toHaveLength(1);
 	});
 
 	it("gates the calls that use a machine, by the tools that take one and copy_file's two sides", async () => {
@@ -395,7 +413,7 @@ describe("machines", () => {
 				return { sleep: { signals: [Decision.key(ask.key)] } };
 			},
 		};
-		const machines = new Machines({ dir: join(dir, "parked"), approvalMs: 3_600_000, bridge: () => bridge as never });
+		const machines = new Machines({ dir: join(dir, "parked"), approvalMs: 3_600_000, bridge: Promise.resolve(bridge as never) });
 		made.push(machines);
 		await machines.add("box", { host: "127.0.0.1", port: PORT, user });
 		await install(machines, "box");

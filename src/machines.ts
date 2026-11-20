@@ -55,8 +55,9 @@ export interface MachinesOptions {
 	readonly dir: string;
 	/** How long "Allow for …" lasts. */
 	readonly approvalMs: number;
-	/** The bridge, once attached (read at each use). */
-	readonly bridge: () => MachinesBridge | undefined;
+	/** The bridge, resolved once attached. A gate that runs before (one woken at startup, while the bridge attaches)
+	 * waits for it rather than losing its card. */
+	readonly bridge: Promise<MachinesBridge>;
 	readonly now?: () => number;
 	readonly log?: { info(message: string, fields?: Record<string, unknown>): void; warn(message: string, fields?: Record<string, unknown>): void };
 }
@@ -83,9 +84,12 @@ export class Machines {
 	/** Open connections, by machine; each with the address it was opened for, so a machine given another address connects
 	 * again. */
 	readonly #open = new Map<string, { readonly key: string; readonly connection: Promise<{ connection: Connection; home: string }> }>();
+	/** The bridge once attached, for what reads it at once (`/machines`, `machines_list`, a call's environment). */
+	#bridge: MachinesBridge | undefined;
 
 	constructor(options: MachinesOptions) {
 		this.#options = options;
+		void options.bridge.then((bridge) => (this.#bridge = bridge));
 		mkdirSync(options.dir, { recursive: true, mode: 0o700 });
 	}
 
@@ -227,7 +231,7 @@ export class Machines {
 		const grants = this.#live(this.read().grants).filter((grant) => grant.machine === name);
 		const standing = grants.find((grant) => grant.scope === "always") ?? grants.filter((grant) => grant.scope === "until").sort((a, b) => b.until - a.until)[0];
 		if (standing !== undefined || threadId === undefined) return standing;
-		const bridge = this.#options.bridge();
+		const bridge = this.#bridge;
 		const seen = new Set<string>();
 		for (let current: string | undefined = threadId; current !== undefined && !seen.has(current); ) {
 			seen.add(current);
@@ -242,7 +246,7 @@ export class Machines {
 
 	/** The thread a conversation is the head of. */
 	threadOf(conversationId: number): string | undefined {
-		return this.#options.bridge()?.threadOf(conversationId as never)?.threadId;
+		return this.#bridge?.threadOf(conversationId as never)?.threadId;
 	}
 
 	/** May `threadId` connect to `name` now: a grant, and a host key the user saw on the card? */
@@ -268,7 +272,8 @@ export class Machines {
 	 * once per call (a memo), trusted only while none is, and a grant replaces its like.
 	 */
 	async gate(uses: readonly { readonly machine: string; readonly doing: string }[], api: HookApi, context: Context): Promise<{ readonly block: string } | Park | undefined> {
-		const threadId = this.threadOf(api.conversationId);
+		const bridge = await this.#options.bridge;
+		const threadId = bridge.threadOf(api.conversationId)?.threadId;
 		for (const { machine: name, doing } of uses) {
 			let machine: MachineConfig;
 			try {
@@ -278,8 +283,7 @@ export class Machines {
 				throw error;
 			}
 			if (this.#approved(name, threadId)) continue;
-			const bridge = this.#options.bridge();
-			if (bridge === undefined || threadId === undefined) {
+			if (threadId === undefined) {
 				return {
 					block:
 						this.allowed(name, threadId) === undefined

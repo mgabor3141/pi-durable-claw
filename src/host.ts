@@ -34,7 +34,7 @@ import { webConfig } from "./web.ts";
 import { deviceName, readRemoteEnabled, readStatusFile, statusFile, Tailnet, tailnetUrl, writeRemoteEnabled, type TailnetStatus } from "./tailnet.ts";
 import { attachT3, mintPairingCode } from "@mgabor3141/pi-durable-t3";
 import { installShutdown } from "./shutdown.ts";
-import { machineApprovalMs, Machines, machinesCommand } from "./machines.ts";
+import { machineApprovalMs, Machines, type MachinesBridge, machinesCommand } from "./machines.ts";
 import { titleThread } from "./title.ts";
 
 // An empty setting is an unset one (an `.env` line left blank).
@@ -193,7 +193,9 @@ async function main(): Promise<void> {
 	// Filled in once the bridge is attached (below); the harness's own tools read it at each call.
 	const late: HarnessLate = {};
 	// Other machines the agent adds and the user approves; their keys and host keys stay here (`machines.ts`).
-	const machines = new Machines({ dir: join(root, "machines"), approvalMs: machineApprovalMs(process.env), bridge: () => late.bridge, log });
+	// A machine's gate woken at startup, before the bridge is attached, waits for it (`machines.ts`).
+	const bridgeAttached = Promise.withResolvers<MachinesBridge>();
+	const machines = new Machines({ dir: join(root, "machines"), approvalMs: machineApprovalMs(process.env), bridge: bridgeAttached.promise, log });
 	const updates = launcherUpdates(process.env, log);
 	const NONE_HIDDEN: ReadonlySet<string> = new Set();
 	// The threads a person started keep their prompt cache for an hour, so a pause does not cost the whole context
@@ -328,6 +330,7 @@ async function main(): Promise<void> {
 	// lists), whose a thread is (cache retention, machines) and the approval card (machines). Agent `browser_open` pages
 	// are T3's preview tabs, the ones the user sees; there is no other browser.
 	late.bridge = t3;
+	bridgeAttached.resolve(t3);
 	const previewBrowser = t3.previewBrowser;
 	if (previewBrowser !== undefined) late.previewBrowser = (conversationId, url) => previewBrowser.open(conversationId, url);
 
