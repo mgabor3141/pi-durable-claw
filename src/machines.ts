@@ -508,7 +508,7 @@ export function machineTools(machines: Machines): ToolRegistration[] {
 			parameters: object({
 				name: str({ description: "Lowercase letters, digits and dashes: nas, pi, gpu-box" }),
 				host: str({ description: "Host name or address" }),
-				user: opt(str({ description: "The user to log in as; default the harness's own (root)" })),
+				user: opt(str({ description: "The user to log in as; default the harness's own, node" })),
 				port: opt(int({ minimum: 1, maximum: 65535, description: "SSH port; default 22" })),
 				cwd: opt(str({ description: "Where commands start and relative paths resolve; default that user's home" })),
 			}),
