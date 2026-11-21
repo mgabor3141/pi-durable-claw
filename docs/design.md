@@ -165,8 +165,9 @@ code. Verified in T3's web app (playwright + chromium, screenshots in `.memory/`
   are separate containers, so page-driven code never runs beside the keys. Results carry caps and are wrapped as untrusted data. The workspace still has no direct route to
   the LAN.
 - **Orchestration**: the agent's thread tools (`thread_prompt`, `thread_wait`, `thread_read`, `thread_search`,
-  `thread_list`, `thread_cancel`) start and drive child threads; outside MCP clients get T3's orchestrator toolkit on
-  `/mcp`. Agents will be able to prompt dev-project agents (they hold no keys); none can reach a host conversation.
+  `thread_list`, `thread_cancel`) start and drive child threads, and a child's question is its parent's to answer
+  (T3's `t3_pending_request`); outside MCP clients get T3's orchestrator toolkit on `/mcp`. Agents will be able to
+  prompt dev-project agents (they hold no keys); none can reach a host conversation.
 - **Schedules** replicate T3's scheduled tasks: interval, fixed time and webhook (each request runs the task, with the
   request in its prompt; a task can check a signature: the README's "Webhooks").
 - An MCP tool that is rarely needed and destructive can be hidden per tool (`toolExposure: { "delete_*": "hidden" }`).

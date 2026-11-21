@@ -546,6 +546,16 @@ conversation belongs to, so a message it sends shows in the other thread as comi
 A child nests under its parent in T3: the parent's run shows it as a subagent card, and the child is a full thread
 you can open and write to. Children nest at most 3 deep, and at most 10 children of one thread work at once.
 
+What a child asks with `ask_user` is its parent's to answer, as in T3: you are not told of a child's question, and
+the child is blocked until its card is answered. A parent that waits for the child gets the question as its wait's
+answer (the wait ends at once, with an `active` report that names the request); a parent that does not wait gets a
+message about it, in its running turn or as its next. It answers with T3's `t3_pending_request` when the answer
+follows from the task or from what you asked for, and otherwise asks you in its own thread first, where you are told
+as for any question. You can also answer the card in the child's thread yourself. A parent is told once per question:
+one whose wait answered with the question gets the message too if its turn ends with the question still open. This
+holds whoever wrote to the child, you included: when you write to a child and it asks, its parent is told too, and
+the message is taken back if you answer before the parent has read it.
+
 Scripts also have T3's scheduled-task tools: `schedule_task` (a prompt on an interval or at a time of day, posted
 into the calling thread by default, or into a new thread per run with `bindToCurrentThread: false`; with a
 `scheduledTaskId` it changes or pauses a task), `list_scheduled_tasks` and `delete_scheduled_task`. The tasks are the
@@ -643,8 +653,9 @@ composer with one to four questions, each with options (you can also type your o
 says "Needs your input". The agent waits for the answer, however long it takes, and goes on with it: the call is
 parked meanwhile (the run holds no process, and the card is still there, the same card, after the harness restarts).
 Dismiss the card and the agent is told there was no answer: it goes on with its best judgement. Stop ends the wait
-with the run. A thread nobody watches (a scheduled task's, another agent's) waits the same way, so an agent is told
-to ask only what it cannot find out.
+with the run. A thread nobody watches (a scheduled task's) waits the same way, so an agent is told to ask only what
+it cannot find out. A thread another agent started asks that agent
+([Threads that drive each other](#threads-that-drive-each-other)).
 
 ## Notifications
 
@@ -652,7 +663,8 @@ When a thread needs you (an approval, a question, a secret), fails or finishes w
 harness tells your phone through [ntfy](https://ntfy.sh), a notification server you run. Set `NTFY_URL` in `.env` to
 a topic's address (`https://ntfy.example.com/claw`), and `NTFY_TOKEN` when the topic needs an access token; subscribe
 to the topic in ntfy's app. Without `NTFY_URL` nobody is told, and the log says so. The title is the thread's, the
-text says what happened ("Agent finished: claw"), and a tap opens the thread in T3's phone app.
+text says what happened ("Agent finished: claw"; "Usage limit reached: claw" when a provider's limit ended the run),
+and a tap opens the thread in T3's phone app.
 
 You are told once per question and once per run, and only when no T3 app showed you:
 
@@ -666,8 +678,9 @@ You are told once per question and once per run, and only when no T3 app showed 
   the place of. A run that a scheduled task starts in the thread and ends `SILENT` (below) takes no place: what
   finished before it is still told.
 
-Quiet, as in T3: threads an agent started (what one of them asks of you is told for the thread you started), side
-chats, archived threads, a finished run in a thread you snoozed, threads hidden by a tag, and runs you stopped.
+Quiet, as in T3: threads an agent started (an approval or a secret one of them needs is told for the thread you
+started; a question it asks goes to the agent that started it), side chats, archived threads, a finished run in a
+thread you snoozed, threads hidden by a tag, and runs you stopped.
 
 T3's apps can notify by themselves too, each alone and each off until you turn it on (Settings → General →
 Notifications, per device). Turn "In-app notifications" on, so that a T3 window in front shows a toast for a thread
