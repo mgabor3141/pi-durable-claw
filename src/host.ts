@@ -34,6 +34,7 @@ import { webConfig } from "./web.ts";
 import { deviceName, readRemoteEnabled, readStatusFile, statusFile, Tailnet, tailnetUrl, writeRemoteEnabled, type TailnetStatus } from "./tailnet.ts";
 import { attachT3, mintPairingCode } from "@mgabor3141/pi-durable-t3";
 import { installShutdown } from "./shutdown.ts";
+import { ntfyCheck, ntfyConfig, ntfySender } from "./ntfy.ts";
 import { machineApprovalMs, Machines, type MachinesBridge, machinesCommand } from "./machines.ts";
 import { titleThread } from "./title.ts";
 
@@ -190,6 +191,11 @@ async function main(): Promise<void> {
 	const memory = memoryConfig === undefined ? undefined : new Hindsight(memoryConfig, log);
 	if (memory === undefined) log.info("memory off: HINDSIGHT_URL is not set");
 	else await memory.check();
+	// Notifications on your phone are ntfy, which you run yourself too (`ntfy.ts`): the bridge decides when a user who
+	// is not looking at T3 is told, and this sends it. Without NTFY_URL nobody is told.
+	const ntfy = ntfyConfig(process.env);
+	if (ntfy === undefined) log.info("notifications off: NTFY_URL is not set");
+	else await ntfyCheck(ntfy, log);
 	// Filled in once the bridge is attached (below); the harness's own tools read it at each call.
 	const late: HarnessLate = {};
 	// Other machines the agent adds and the user approves; their keys and host keys stay here (`machines.ts`).
@@ -284,6 +290,7 @@ async function main(): Promise<void> {
 			...(browserlessUrl === undefined
 				? {}
 				: { preview: { cdpUrl: browserlessUrl, ...(browserlessToken === undefined ? {} : { token: browserlessToken }) } }),
+			...(ntfy === undefined ? {} : { notifyUser: ntfySender(ntfy) }),
 			log,
 		});
 	} catch (error) {
@@ -340,6 +347,9 @@ async function main(): Promise<void> {
 	let stopping = false;
 	const shutdown = async () => {
 		stopping = true;
+		// First: the notifications that wait for the user to come back are sent now, while the rest closes. Nothing is
+		// kept of them, and the bridge, which sends them as it closes too, is closed late.
+		void t3.flushNotifications();
 		memory?.close();
 		machines.close();
 		await tailnet.close();

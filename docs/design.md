@@ -4,8 +4,9 @@ Status: `docker compose up` runs the harness and a workspace (the README has the
 workspace, web search and page fetch, the browser through T3's preview, MCP servers over HTTP (with OAuth and the
 harness's secrets), the thread tools, scheduled tasks (webhook triggers included), other machines (asked for first),
 updates from T3 or `claw update` (undone when a version does not come up) and a system prompt fixed per thread.
-Memory is Hindsight, deployed by you and connected by `HINDSIGHT_URL`. Not built: spending caps, notifications,
-self-update, devcontainers, host conversations. Sections marked **unverified** are assumptions a spike must confirm.
+Memory is Hindsight, deployed by you and connected by `HINDSIGHT_URL`; notifications go through ntfy, which you run
+too (`NTFY_URL`). Not built: spending caps, self-update, devcontainers, host conversations. Sections marked
+**unverified** are assumptions a spike must confirm.
 
 ## Goal
 
@@ -223,7 +224,8 @@ usage per conversation; the check runs before each model request.
 
 ## Notifications
 
-ntfy, added to the bridge. No push for a thread a T3 client is currently watching; other threads still notify.
+Built (README "Notifications"). The bridge decides when a user who is not looking at T3 is told, from what T3's own
+clients report of themselves; the harness sends it through ntfy. Nothing is stored for it.
 
 ## Households
 
@@ -252,7 +254,7 @@ custom app on T3's client runtime. **To check:** the pi mobile UI mentioned on t
 4. Done: MCP servers over HTTP, one container each for key-bearing ones, configured by the agent in `~/.mcp.json`,
    with OAuth and the harness's secrets; tools are called from codemode. stdio servers are refused.
 5. Done: orchestration (the thread tools, and T3's orchestrator toolkit on `/mcp`). Not done: dev-project devcontainers.
-6. Done: memory (Hindsight, as an integration point). Not done: spending caps; ntfy.
+6. Done: memory (Hindsight, as an integration point); notifications (ntfy). Not done: spending caps.
 7. Done: the release flow (a copy of the data before each update, undo of a version that does not come up,
    `claw rollback`). Not done: self-update.
 8. Host conversations.

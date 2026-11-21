@@ -646,6 +646,47 @@ Dismiss the card and the agent is told there was no answer: it goes on with its 
 with the run. A thread nobody watches (a scheduled task's, another agent's) waits the same way, so an agent is told
 to ask only what it cannot find out.
 
+## Notifications
+
+When a thread needs you (an approval, a question, a secret), fails or finishes while you are not looking at T3, the
+harness tells your phone through [ntfy](https://ntfy.sh), a notification server you run. Set `NTFY_URL` in `.env` to
+a topic's address (`https://ntfy.example.com/claw`), and `NTFY_TOKEN` when the topic needs an access token; subscribe
+to the topic in ntfy's app. Without `NTFY_URL` nobody is told, and the log says so. The title is the thread's, the
+text says what happened ("Agent finished: claw"), and a tap opens the thread in T3's phone app.
+
+You are told once per question and once per run, and only when no T3 app showed you:
+
+- With no T3 app in front and nothing touched in the last two minutes, at once (a finished run after 5 seconds).
+- Otherwise the notification waits 90 seconds, and is not sent when you turn out to be there. In a T3 window that is
+  in front, that is when you open a thread or keep using the window: what you touch counts once T3 has reported it
+  some 50 seconds after the event, or at once when you had not touched the window for a while. In T3's phone app it
+  is the thread on the app's screen: the app shows no alert of its own, so anything else that happens is sent. And
+  when you write in a thread, you have seen where it stood.
+- Not at all for a question you answered, nor for a run that the thread's next question or next finished run takes
+  the place of. A run that a scheduled task starts in the thread and ends `SILENT` (below) takes no place: what
+  finished before it is still told.
+
+Quiet, as in T3: threads an agent started (what one of them asks of you is told for the thread you started), side
+chats, archived threads, a finished run in a thread you snoozed, threads hidden by a tag, and runs you stopped.
+
+T3's apps can notify by themselves too, each alone and each off until you turn it on (Settings → General →
+Notifications, per device). Turn "In-app notifications" on, so that a T3 window in front shows a toast for a thread
+other than the one you have open, and leave "Thread notifications" off or on "Sound only": then everything else
+reaches you through ntfy, and nothing reaches you twice.
+
+A scheduled task need not tell you every time it ran. The agent that answers one is told that a reply whose last line
+is the single word `SILENT` ends the run without notifying you: nothing is sent, T3 shows no toast and plays no sound,
+and the thread does not turn unread. So "check the queue every hour, and tell me only when something is new" is all a
+task's prompt needs to say. A question or a failure still reaches you.
+
+What it cannot know: someone who watches a thread in a window without touching anything for 90 seconds looks like
+someone who left, and is told. A notification that was sent stays on the phone until you dismiss it: ntfy's iPhone app
+cannot take one back. A self-hosted ntfy reaches an iPhone at once only with `upstream-base-url` set in ntfy's own
+configuration (its documentation, "iOS instant notifications"); otherwise it can take hours. Nothing is stored: a
+notification that waits when the harness is shut down is sent then, if ntfy takes it within the second and a half a
+shutdown has, and one that waits when the harness is killed is lost. The log names each one (`user notified`, `user
+notification held`, `user notification not needed`, `a user notification was not sent`).
+
 ## When it feels slow
 
 The harness logs two things for it. `a slow call` names a call from T3 that took over half a second (`method`, `ms`).
