@@ -473,9 +473,16 @@ rendered (see [A fixed system prompt](#a-fixed-system-prompt)). Scripts find the
 that fails to connect, or drops later, is logged and reconnected in the background (after 5 s, 15 s, 1 min, then
 every 5 min); its tools appear once it is back.
 
+Over HTTP a server that went away is not noticed until it is asked: it counts as connected from its `initialize` on.
+A server that restarted no longer knows the session it gave (it answers 404, and had not run the call). The call
+that finds out connects again, which lists the tools the server has now, and is made once more, as the MCP spec asks
+of a client. A script sees only its result.
+
 `mcp({ action: "status" })` answers what is live: the configuration read afresh, its problems, and each server's
-connection, error and tool count, once a connection in progress has settled. The agent calls it after editing
-`~/.mcp.json`.
+connection, error and tool count, once a connection in progress has settled. Each connected server is asked for a
+sign of life (a `ping`, waited for 5 s). One that restarted is connected again, so its tools are the current ones
+with no call made. One that does not answer is listed as `unreachable` with the error, and is left as it is for the
+call that reaches it. The agent calls it after editing `~/.mcp.json`.
 
 ### OAuth
 
@@ -493,6 +500,17 @@ refresh on their own, shortly before they expire and after a 401. A server that 
 (`insufficient_scope`) needs a sign-in again, and its link asks for that scope. Tokens are kept with the secrets in
 `secrets.json` and appear in tool output only as
 `[<server> OAuth credential]`. `mcp({ action: "logout", server })` forgets a sign-in.
+
+A sign-in ends when the server no longer accepts its token and nothing renews it: it expired and the server gave no
+refresh token, or you revoked it there. The call that finds out fails with what to do (`it needs a sign-in: call
+mcp({ action: "login", … })`), and the status says the same from then on. Calls the server had accepted before are
+still answered.
+
+Where the sign-in had no refresh token, the one that follows starts from nothing, with discovery and registration
+done again. Nothing has told the harness whether the server still knows the client it registered (a refused refresh
+would have), and a server that does not know it says so only to you, on its sign-in page. T3's sign-in has no
+refresh token, nor has another claw harness's (its `/mcp`:
+[Threads that drive each other](#threads-that-drive-each-other)).
 
 Claude Code's `oauth` block is read:
 
@@ -579,6 +597,17 @@ T3's own thread tools are served to outside MCP clients at `<CLAW_PUBLIC_URL>/mc
 it opens T3's approval page, where you choose its access and approve with a pairing code (`claw pair`) or in one click
 from a signed-in browser. It then appears under Settings → Sharing & access, where it can be revoked. Every thread
 here runs at full access, so a client approved below that can only read.
+
+What such a client can count on is T3's:
+
+- **The sign-in** is one token for 30 days, with no refresh token: after that the client signs in again, and you
+  approve it again. It is stored, so a restart of the harness does not end it.
+- **The sign-in page** is at the address the client reaches the harness by, so a client is given the address your
+  browser reaches too (`CLAW_PUBLIC_URL`), not a container's name. A link that reaches another harness is refused
+  there as naming an unknown app: a client is known by an id this harness signed.
+- **A session** (MCP 2025-06-18) lives in the harness's memory, so a restart ends it: its id is answered 404, and the
+  client begins a new one with `initialize`, as the MCP spec says. Another claw harness does (see
+  [MCP servers](#mcp-servers)). A client that speaks MCP 2026-07-28 has no session to lose.
 
 ## The models an agent is listed
 

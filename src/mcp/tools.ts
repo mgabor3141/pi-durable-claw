@@ -177,7 +177,8 @@ export interface McpToolOptions {
 	readonly tool: McpTool;
 	readonly name: string;
 	readonly timeoutMs: number;
-	readonly getClient: () => Promise<{ callTool(name: string, args?: Record<string, unknown>, options?: McpRequestOptions): Promise<CallToolResult> }>;
+	/** Call the tool on its server (`McpManager.callTool`, which connects when needed). */
+	readonly call: (args: Record<string, unknown>, options: McpRequestOptions) => Promise<CallToolResult>;
 }
 
 /** One MCP tool as a pi-durable registration, called from scripts. */
@@ -196,11 +197,7 @@ export function createMcpToolRegistration(options: McpToolOptions): ToolRegistra
 		deferred: true,
 		replay: "unsafe",
 		async execute(args, _api, context) {
-			const client = await options.getClient();
-			const result = await client.callTool(tool.name, (args ?? {}) as Record<string, unknown>, {
-				timeoutMs: options.timeoutMs,
-				signal: context.abortSignal,
-			});
+			const result = await options.call((args ?? {}) as Record<string, unknown>, { timeoutMs: options.timeoutMs, signal: context.abortSignal });
 			return convertMcpResult(server, tool.name, result);
 		},
 	});

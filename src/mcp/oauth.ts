@@ -85,8 +85,23 @@ export class McpOAuth {
 		});
 	}
 
-	/** Start a sign-in: the link to give the user, or `undefined` when the stored sign-in could be renewed without one. */
-	async login(server: string, url: string, config: McpServerConfig): Promise<string | undefined> {
+	/** Whether `server` last answered that the sign-in lacks a scope: the sign-in itself still works, for what it covers. */
+	wantsScope(server: string): boolean {
+		return this.#challenges.get(server)?.error === "insufficient_scope";
+	}
+
+	/**
+	 * Start a sign-in: the link to give the user, or `undefined` when the stored sign-in could be renewed without one.
+	 *
+	 * `refused`: the server no longer accepts the stored sign-in. A refresh token would be tried, and its refusal would say
+	 * whether the server still knows the client it registered for us. Without one nothing says so: a server that forgot
+	 * the client (or is another one at the same address) tells the user on its sign-in page, and we never hear of it.
+	 * So such a sign-in starts from nothing, with discovery and registration done again. One that only lacks a scope
+	 * keeps what it has: the new one asks for that scope on top.
+	 */
+	async login(server: string, url: string, config: McpServerConfig, refused = false): Promise<string | undefined> {
+		const tokens = this.#store.oauthState(server)?.tokens;
+		if (refused && !this.wantsScope(server) && tokens !== undefined && tokens.refresh_token === undefined) await this.#store.saveOAuthState(server, undefined);
 		const started = await startMcpSignIn(this.#signIn(server, url, config));
 		if (started.kind === "authorized") return undefined;
 		// A server has one sign-in at a time: pi-mcp keeps one `state` and verifier per server, so an older link is dead.

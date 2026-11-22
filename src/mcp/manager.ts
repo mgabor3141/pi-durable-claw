@@ -7,10 +7,14 @@
  * call would wait forever). A server that drops is reconnected the same way. Scripts call the tools, which codemode's
  * listing leaves out: `searchTools()` finds them. The system prompt names the configured servers; the `mcp` tool says
  * which are connected and what is wrong.
+ *
+ * Over HTTP a server that went away is not noticed until it is asked: it is connected from its `initialize` on, and what
+ * it forgot since shows in its next answer. A server that restarted no longer knows the session, and one whose sign-in
+ * ended no longer accepts it: the call (or the `mcp` tool's status) that finds out connects again (`refusedBy`).
  */
 
 import type { CallToolResult, McpRequestOptions, McpTransport, Tool as McpTool } from "@earendil-works/pi-mcp";
-import { McpClient, StreamableHttpTransport } from "@earendil-works/pi-mcp";
+import { McpClient, McpError, McpSessionExpiredError, StreamableHttpTransport } from "@earendil-works/pi-mcp";
 import {
 	defineExtension,
 	section,
@@ -82,6 +86,8 @@ type McpState = {
 };
 
 const DEFAULT_CONNECT_TIMEOUT_MS = 10_000;
+/** How long `mcp`'s status waits for a connected server's sign of life. */
+const PING_TIMEOUT_MS = 5_000;
 const DEFAULT_RETRY_DELAYS_MS = [5_000, 15_000, 60_000, 300_000];
 const CLIENT_VERSION = "1.0.0";
 
@@ -219,7 +225,7 @@ export class McpManager {
 				}
 				const connection = resolveConnection(state.entry.config, this.options.secrets);
 				if ("missing" in connection) throw new Error(`${state.entry.name}: ${mcpNeedsSecrets(connection.missing)}`);
-				const link = await oauth.login(state.entry.name, connection.url, state.entry.config);
+				const link = await oauth.login(state.entry.name, connection.url, state.entry.config, state.needsSignIn === true);
 				if (link === undefined) {
 					// The stored sign-in was renewed (its refresh token still works): there is nothing for the user to do.
 					this.options.logger?.info("MCP sign-in renewed", { server: state.entry.name });
@@ -301,21 +307,57 @@ export class McpManager {
 		return state === undefined ? undefined : { status: state.status, ...(state.error === undefined ? {} : { error: state.error }) };
 	}
 
-	/** `mcp`'s status: the config read afresh, and each server once its connection attempt settled. */
+	/** `mcp`'s status: the config read afresh, and each server once its connection attempt settled and, if it is
+	 * connected, it was asked for a sign of life. */
 	private async report() {
 		await this.recheck();
-		await Promise.all([...this.states.values()].map((state) => state.connecting?.catch(() => {})));
+		// What a connected server that gave no sign of life answered instead.
+		const silent = new Map<McpState, string>();
+		await Promise.all(
+			[...this.states.values()].map(async (state) => {
+				await state.connecting?.catch(() => {});
+				const error = await this.silence(state);
+				if (error !== undefined) silent.set(state, error);
+			}),
+		);
 		return {
 			config: this.options.source.describe,
-			problems: this.problems(),
-			servers: [...this.states.values()].map((state) => ({
-				name: state.entry.name,
-				namespace: state.entry.namespace,
-				...(enabled(state.entry.config) ? { status: state.status } : { status: "disabled" }),
-				...(state.error === undefined ? {} : { error: state.error }),
-				tools: state.registeredNames.length,
-			})),
+			problems: [...this.problems(), ...[...silent].map(([state, error]) => `server "${state.entry.name}" does not answer: ${error}`)],
+			servers: [...this.states.values()].map((state) => {
+				const error = silent.get(state) ?? state.error;
+				return {
+					name: state.entry.name,
+					namespace: state.entry.namespace,
+					status: !enabled(state.entry.config) ? "disabled" : silent.has(state) ? "unreachable" : state.status,
+					...(error === undefined ? {} : { error }),
+					tools: state.registeredNames.length,
+				};
+			}),
 		};
+	}
+
+	/**
+	 * Ask a connected server for a sign of life, and answer why there was none. Over HTTP a server is "connected" from its
+	 * last `initialize` on, whatever became of it since: nothing tells the harness that it went away. One that no longer
+	 * knows the session or the sign-in is connected again (`refusedBy`), which also lists the tools it has now. Any other
+	 * silence changes nothing: the server may only be slow, and calls may be in flight on the connection.
+	 */
+	private async silence(state: McpState): Promise<string | undefined> {
+		const client = state.client;
+		if (client === undefined || client.connectionState !== "connected") return undefined;
+		try {
+			await client.ping({ timeoutMs: PING_TIMEOUT_MS });
+			return undefined;
+		} catch (error) {
+			// Any answer is a sign of life, also the refusal of a server that knows no ping.
+			if (error instanceof McpError) return undefined;
+			if (this.refusedBy(state, client, error)) {
+				await this.connect(state.entry.name);
+				return undefined;
+			}
+			// The connection may have been made again meanwhile, which is then what the status tells.
+			return state.client === client ? (error instanceof Error ? error.message : String(error)) : undefined;
+		}
 	}
 
 	/** What the agent should know is wrong: config errors, and servers that failed to connect. */
@@ -359,7 +401,7 @@ export class McpManager {
 	}
 
 	/** A callable client, reconnecting first when the server dropped. */
-	async clientFor(server: string): Promise<McpClient> {
+	private async clientFor(server: string): Promise<McpClient> {
 		const state = this.states.get(server);
 		if (state === undefined) throw new Error(`unknown MCP server "${server}"`);
 		if (!enabled(state.entry.config)) throw new Error(`MCP server "${server}" is disabled`);
@@ -373,15 +415,61 @@ export class McpManager {
 		return connected;
 	}
 
-	/** Call one tool through its server, reconnecting if necessary. */
+	/**
+	 * Call one tool through its server, connecting first when it is not connected. A server that refused the call before
+	 * running it, for a reason a new connection answers (`refusedBy`), is connected again and called once more. A
+	 * `timeoutMs` in `options` is at most the entry's `timeout`: a connection that was given up is closed after that long.
+	 */
 	async callTool(
 		server: string,
 		tool: string,
 		args: Record<string, unknown>,
 		options?: McpRequestOptions,
 	): Promise<CallToolResult> {
-		const client = await this.clientFor(server);
-		return client.callTool(tool, args, options);
+		for (let attempt = 1; ; attempt++) {
+			const client = await this.clientFor(server);
+			try {
+				return await client.callTool(tool, args, options);
+			} catch (error) {
+				const state = this.states.get(server);
+				if (state === undefined) throw error;
+				// The connection is good, and this call needs a sign-in: the server asks for more scope for the tool, or it
+				// refused the call again on a connection it had just accepted.
+				if (this.asksSignIn(state.entry.config, error) && (attempt > 1 || this.options.oauth?.wantsScope(server) === true)) {
+					throw new Error(`MCP server "${server}" refused the call: ${mcpNeedsSignIn(server)}`, { cause: error });
+				}
+				if (attempt > 1 || !this.refusedBy(state, client, error)) throw error;
+			}
+		}
+	}
+
+	/**
+	 * Whether `error` is the server's refusal of a request it did not run, for a reason a new connection answers. If so,
+	 * the connection the request was made on is given up, and the caller makes it again.
+	 * - The server no longer knows the session: it restarted, and a session lives in the server's memory. The MCP spec has
+	 *   the client begin a new one.
+	 * - It no longer accepts the sign-in: the new connection is refused for that, which is the server's state from then on
+	 *   (`connect`), with how to sign in.
+	 */
+	private refusedBy(state: McpState, client: McpClient, error: unknown): boolean {
+		const session = error instanceof McpSessionExpiredError;
+		if (!session && !this.asksSignIn(state.entry.config, error)) return false;
+		// Unless another request's refusal has given it up meanwhile.
+		if (state.client !== client) return true;
+		// The client is given up, and closed only once every request on it can have settled (each is bounded by the
+		// entry's `timeout`). Closing it now would fail the others in flight on it: those the server refuses as it did this
+		// one come here too, and those it accepted before (a sign-in can end while a call runs) are being run, and their
+		// answers still arrive. Never closed, it would keep a stream the server gave it, and take that up again with the
+		// next sign-in's token.
+		state.client = undefined;
+		setTimeout(() => void client.close().catch(() => {}), state.entry.config.timeout ?? 60_000).unref?.();
+		if (session) this.options.logger?.info("MCP server no longer knows the session", { server: state.entry.name });
+		return true;
+	}
+
+	/** Whether `error` is a server asking for a sign-in, which a server of this `config` does by OAuth. */
+	private asksSignIn(config: McpServerConfig, error: unknown): boolean {
+		return this.options.oauth !== undefined && usesOAuth(config) && needsSignIn(error);
 	}
 
 	/** The configured servers scripts can call, as ~/.mcp.json describes them (connected or not). */
@@ -462,7 +550,7 @@ export class McpManager {
 				await this.refresh(state, client);
 			} catch (error) {
 				state.status = "failed";
-				state.needsSignIn = this.options.oauth !== undefined && usesOAuth(config) && needsSignIn(error);
+				state.needsSignIn = this.asksSignIn(config, error);
 				state.error = state.needsSignIn ? mcpNeedsSignIn(server) : error instanceof Error ? error.message : String(error);
 				state.client = undefined;
 				if (client !== undefined) await client.close().catch(() => {});
@@ -533,7 +621,7 @@ export class McpManager {
 					tool,
 					name,
 					timeoutMs: state.entry.config.timeout ?? 60_000,
-					getClient: () => this.clientFor(state.entry.name),
+					call: (args, options) => this.callTool(state.entry.name, tool.name, args, options),
 				})),
 			);
 		}
