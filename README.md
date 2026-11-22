@@ -427,8 +427,8 @@ How it works (`src/hindsight.ts`):
   vLLM), so each call mostly reads the new turn. A conversation larger than that model's context window is cut from
   its oldest turns; a turn that alone does not fit is not stored.
 - **Undo** does not reach memory: the notes of turns that were taken back stay ("Undo and redo" below).
-- **Tools** for scripts: `memory_recall` (observations, as the recall that opens a context), `memory_retain` (for
-  what is learned outside the conversation) and `memory_reflect`, listed in the codemode catalog.
+- **Tools** for scripts: `memory_recall` (observations, as the recall that opens a context), `memory_reflect` and the
+  `memory_pages_*` page tools, listed in the codemode catalog.
 
 What Hindsight does with it (the model it calls to extract facts, the embedding model, its database) is your
 deployment's configuration. Choose the embedding model before storing anything: changing it later re-embeds every

@@ -14,7 +14,7 @@
  *   The notes, or nothing, are stored as the turn's document, with the turn's entry range, which is how recall knows
  *   where a memory came from. One turn at a time, off the run: a turn not yet written when the harness stops is lost.
  * - An undo does not reach memory: the notes of turns that were taken back stay, as a record of what happened.
- * - Tools for scripts: `memory_recall`, `memory_retain`, `memory_reflect`.
+ * - Tools for scripts: `memory_recall`, `memory_reflect` and the page tools.
  *
  * Memory never stops a turn: a failed recall says so in the block, a failed retain is logged.
  */
@@ -24,7 +24,7 @@ import { defineExtension, defineTool, GenerationTask, hook, type ContextView, ty
 import { HindsightClient } from "@vectorize-io/hindsight-client";
 import { messageContextData, type MessageContextAnswer, type MessageContextRequest, type TextGenerationModel } from "@mgabor3141/pi-durable-t3";
 import { arr, int, opt, str } from "@earendil-works/pi-schema";
-import { MEMORY_NOTES_CONTEXT, MEMORY_NOTES_NO_TOOLS, MEMORY_PAGES_CREATE_DESCRIPTION, MEMORY_PAGES_CREATE_FOLDER_DESCRIPTION, MEMORY_PAGES_DELETE_DESCRIPTION, MEMORY_PAGES_LIST_DESCRIPTION, MEMORY_PAGES_READ_DESCRIPTION, MEMORY_PAGES_SEARCH_DESCRIPTION, MEMORY_PAGES_UPDATE_DESCRIPTION, MEMORY_RECALL_DESCRIPTION, MEMORY_REFLECT_DESCRIPTION, MEMORY_RETAIN_DESCRIPTION, memoriesBlock, memoriesUnavailable, memoryNotesPrompt } from "./prompts.ts";
+import { MEMORY_NOTES_CONTEXT, MEMORY_NOTES_NO_TOOLS, MEMORY_PAGES_CREATE_DESCRIPTION, MEMORY_PAGES_CREATE_FOLDER_DESCRIPTION, MEMORY_PAGES_DELETE_DESCRIPTION, MEMORY_PAGES_LIST_DESCRIPTION, MEMORY_PAGES_READ_DESCRIPTION, MEMORY_PAGES_SEARCH_DESCRIPTION, MEMORY_PAGES_UPDATE_DESCRIPTION, MEMORY_RECALL_DESCRIPTION, MEMORY_REFLECT_DESCRIPTION, memoriesBlock, memoriesUnavailable, memoryNotesPrompt } from "./prompts.ts";
 import { object } from "./schema.ts";
 import { setting, type Env } from "./env.ts";
 
@@ -414,7 +414,7 @@ export class Hindsight {
 		});
 	}
 
-	/** `memory_recall`, `memory_retain`, `memory_reflect`, for scripts. */
+	/** `memory_recall`, `memory_reflect` and the page tools, for scripts. */
 	tools(): ToolRegistration[] {
 		const bank = this.config.bank;
 		const client = this.#client;
@@ -432,19 +432,6 @@ export class Hindsight {
 					const response = await client.recall(bank, args.query, { types: ["observation"], maxTokens: args.maxTokens ?? 2_048, budget: "mid", ...(context.abortSignal === undefined ? {} : { signal: context.abortSignal }) });
 					const memories = (response.results ?? []) as Recalled[];
 					return { output: [{ type: "text" as const, text: memories.length === 0 ? "No memories found." : memories.map(memoryLine).join("\n") }] };
-				},
-			}),
-			defineTool({
-				name: "memory_retain",
-				description: MEMORY_RETAIN_DESCRIPTION,
-				parameters: object({
-					content: str({ minLength: 1, maxLength: 50_000, description: "What to remember, as plain statements." }),
-					context: opt(str({ maxLength: 2_000, description: "Where it comes from, such as the file or tool it was learned from." })),
-				}),
-				callers: ["tools"],
-				async execute(args, _api, context) {
-					await client.retain(bank, args.content, { ...(args.context === undefined ? {} : { context: args.context }), async: true, ...(context.abortSignal === undefined ? {} : { signal: context.abortSignal }) });
-					return { output: [{ type: "text" as const, text: "Saved to long-term memory." }] };
 				},
 			}),
 			defineTool({

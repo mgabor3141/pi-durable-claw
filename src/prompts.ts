@@ -426,7 +426,5 @@ export const MEMORY_PAGES_DELETE_DESCRIPTION =
 
 export const MEMORY_RECALL_DESCRIPTION =
 	"Search long-term memory for what is known from earlier conversations: facts about the user, their preferences, decisions and past work. Memories arrive automatically with a thread's first message and with the first message after a compaction (<memories>); other messages do not get them, so search when you need something from earlier. Returns the memories, newest knowledge first, each with the date it was learned.";
-export const MEMORY_RETAIN_DESCRIPTION =
-	"Save something to long-term memory for future conversations: a fact, preference or decision worth keeping. Every finished turn is saved automatically; use this for what should be remembered on its own, such as something learned from a file or a tool rather than said in the conversation.";
 export const MEMORY_REFLECT_DESCRIPTION =
 	"Ask long-term memory a question that needs reasoning over everything it holds, such as what the user would likely want or how something changed over time. Slower than memory_recall; returns an answer, not the memories.";

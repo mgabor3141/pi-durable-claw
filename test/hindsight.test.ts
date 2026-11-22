@@ -273,7 +273,7 @@ it("the page tools list, search, read and create pages", async () => {
 	]);
 });
 
-it("the tools recall, save and reflect in the configured bank", async () => {
+it("the tools recall and reflect in the configured bank", async () => {
 	const server = await fakeHindsight({
 		"/memories/recall": () => ({ json: { results: [{ id: "1", text: "Likes tea.", mentioned_at: "2026-11-01T00:00:00Z" }] } }),
 		"/memories": () => ({ json: { success: true, bank_id: "b", items_count: 1, async: true } }),
@@ -283,10 +283,9 @@ it("the tools recall, save and reflect in the configured bank", async () => {
 	const tool = (name: string) => memory.tools().find((candidate) => candidate.name === name)!;
 	const run = async (name: string, args: unknown) => ((await tool(name).execute(args as never, {} as never, ctx)) as { output: { text: string }[] }).output[0]!.text;
 	expect(await run("memory_recall", { query: "drinks" })).toBe("- [2026-11-01] Likes tea.");
-	expect(await run("memory_retain", { content: "Likes tea.", context: "from a note" })).toBe("Saved to long-term memory.");
 	expect(await run("memory_reflect", { query: "What would they drink?" })).toBe("Probably tea.");
-	expect(server.seen.map((request) => request.path)).toEqual(["/v1/default/banks/b/memories/recall", "/v1/default/banks/b/memories", "/v1/default/banks/b/reflect"]);
+	expect(server.seen.map((request) => request.path)).toEqual(["/v1/default/banks/b/memories/recall", "/v1/default/banks/b/reflect"]);
 	// The tool searches observations only, as the recall for each message does.
 	expect((server.seen[0]!.body as { types?: string[] }).types).toEqual(["observation"]);
-	expect(memory.tools().map((candidate) => candidate.callers)).toEqual(Array.from({ length: 10 }, () => ["tools"]));
+	expect(memory.tools().map((candidate) => candidate.callers)).toEqual(Array.from({ length: 9 }, () => ["tools"]));
 });
