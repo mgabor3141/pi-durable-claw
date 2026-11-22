@@ -23,16 +23,19 @@ export const answeredOf = (messages: readonly Message[]): AssistantMessage[] =>
  * lifetime the newest write asked for, since a read renews an entry for the lifetime it was written with (Anthropic
  * counts its one-hour tokens apart; the lifetimes are the model's catalog values, else Anthropic's).
  */
-export function cacheHolds(answered: readonly AssistantMessage[], model: CachedModel, now: number): { readonly holds: true; readonly last: AssistantMessage; readonly lifetimeMs: number } | { readonly holds: false; readonly why: string; readonly known: boolean } {
+export function cacheHolds(answered: readonly AssistantMessage[], model: CachedModel, now: number):
+	| { readonly holds: true; readonly last: AssistantMessage; readonly lifetimeMs: number; readonly lifetimeKnown: boolean }
+	| { readonly holds: false; readonly why: string; readonly known: boolean; readonly expired: boolean; readonly lifetimeKnown: boolean } {
 	// `known`: the cache is known not to hold. Not known: nothing says whether the provider caches at all.
+	// `lifetimeKnown`: some request wrote the cache, so its lifetime comes from that write rather than a fallback.
 	const last = answered.at(-1);
-	if (last === undefined) return { holds: false, known: false, why: "no request of this context was answered yet, so no cache holds it" };
-	if (last.provider !== model.provider || last.model !== model.id) return { holds: false, known: true, why: "the last request went to another model, whose cache this model does not read" };
-	if (last.usage.cacheRead + last.usage.cacheWrite <= 0) return { holds: false, known: false, why: "the last request used no prompt cache" };
+	if (last === undefined) return { holds: false, known: false, expired: false, lifetimeKnown: false, why: "no request of this context was answered yet, so no cache holds it" };
+	if (last.provider !== model.provider || last.model !== model.id) return { holds: false, known: true, expired: false, lifetimeKnown: false, why: "the last request went to another model, whose cache this model does not read" };
+	if (last.usage.cacheRead + last.usage.cacheWrite <= 0) return { holds: false, known: false, expired: false, lifetimeKnown: false, why: "the last request used no prompt cache" };
 	const wrote = answered.findLast((answer) => answer.usage.cacheWrite > 0);
 	const tier = ((wrote?.usage as { cacheWrite1h?: number } | undefined)?.cacheWrite1h ?? 0) > 0 ? "long" : "short";
 	const lifetimeMs = (model.promptCache?.[tier] ?? CACHE_SECONDS[tier]) * 1000;
 	const age = now - last.timestamp;
-	if (age > lifetimeMs - CACHE_MARGIN_MS) return { holds: false, known: true, why: `the prompt cache has expired: ${Math.round(age / 60_000)} min since the last request, kept for ${Math.round(lifetimeMs / 60_000)}` };
-	return { holds: true, last, lifetimeMs };
+	if (age > lifetimeMs - CACHE_MARGIN_MS) return { holds: false, known: true, expired: true, lifetimeKnown: wrote !== undefined, why: `the prompt cache has expired: ${Math.round(age / 60_000)} min since the last request, kept for ${Math.round(lifetimeMs / 60_000)}` };
+	return { holds: true, last, lifetimeMs, lifetimeKnown: wrote !== undefined };
 }

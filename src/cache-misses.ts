@@ -34,7 +34,19 @@ export type CacheMiss = {
 	readonly cacheWrite: number;
 	readonly input: number;
 	readonly sinceLastRequestS: number;
-	readonly lifetimeS: number;
+	/** The lifetime the cache was written with; null when the provider reports reads but no writes. */
+	readonly lifetimeS: number | null;
+	/** Whether that lifetime is the provider's own write tier or the fallback assumption. */
+	readonly lifetimeKnown: boolean;
+};
+
+/** A request whose start changed enough that the provider cannot read the prompt cache it had written. */
+export type PromptStartRewrite = {
+	readonly conversationId: ConversationId;
+	readonly model: string;
+	readonly entryId: string;
+	readonly toolsAdded: number;
+	readonly toolsRemoved: number;
 };
 
 /**
@@ -54,8 +66,11 @@ export function cacheMissOf(response: AssistantMessage, before: readonly EntryRe
 		answered.unshift(...answeredOf(entry.model ?? []).filter((answer) => answer.timestamp !== response.timestamp));
 	}
 	const cache = cacheHolds(answered, model, response.timestamp);
-	if (!cache.holds) return undefined;
-	const expected = sentOf(cache.last.usage);
+	// A provider that reports reads but no writes has no lifetime to check against: a low read after the fallback
+	// lifetime is still a miss (its cache is evicted by usage, not by the clock).
+	const last = cache.holds ? cache.last : cache.expired && !cache.lifetimeKnown ? answered.at(-1) : undefined;
+	if (last === undefined) return undefined;
+	const expected = sentOf(last.usage);
 	if (response.usage.cacheRead >= expected * MISSED_BELOW) return undefined;
 	return {
 		conversationId,
@@ -64,8 +79,9 @@ export function cacheMissOf(response: AssistantMessage, before: readonly EntryRe
 		cacheRead: response.usage.cacheRead,
 		cacheWrite: response.usage.cacheWrite,
 		input: response.usage.input,
-		sinceLastRequestS: Math.round((response.timestamp - cache.last.timestamp) / 1000),
-		lifetimeS: Math.round(cache.lifetimeMs / 1000),
+		sinceLastRequestS: Math.round((response.timestamp - last.timestamp) / 1000),
+		lifetimeS: cache.holds ? Math.round(cache.lifetimeMs / 1000) : null,
+		lifetimeKnown: cache.holds ? cache.lifetimeKnown : false,
 	};
 }
 
@@ -74,8 +90,12 @@ export function cacheMissOf(response: AssistantMessage, before: readonly EntryRe
  * written by the request before, to the same model, within its lifetime, and nothing rewrote the start of the
  * request since. Such a miss costs the whole context at the write price, and says that something changed the request's
  * start (a tool's description, a block inserted before the end) or that the provider dropped the entry.
+ *
+ * `rewritten`, when given, is told once of a system entry that added or removed tools at a start a model cannot keep
+ * (a removal, or an addition the model cannot take in place). That is the invalidation itself, not a later response.
  */
-export function cacheMissExtension(missed: (miss: CacheMiss) => void): Extension {
+export function cacheMissExtension(missed: (miss: CacheMiss) => void, rewritten?: (rewrite: PromptStartRewrite) => void): Extension {
+	const reported = new Set<string>();
 	return defineExtension({
 		name: "cache-misses",
 		hooks: [
@@ -87,6 +107,19 @@ export function cacheMissExtension(missed: (miss: CacheMiss) => void): Extension
 					const page = await api.entries({ order: "descending" }, LOOK_BACK, undefined, context);
 					const miss = cacheMissOf(message, page.items, model, api.conversationId);
 					if (miss !== undefined) missed(miss);
+					if (rewritten === undefined) return;
+					for (const entry of page.items) {
+						if (entry.kind === "pi.compaction") break;
+						if (entry.kind !== "pi.system" || appended(entry, model)) continue;
+						const change = entry.model?.[0] as { toolsAdded?: readonly unknown[]; toolsRemoved?: readonly unknown[] } | undefined;
+						const toolsAdded = change?.toolsAdded?.length ?? 0;
+						const toolsRemoved = change?.toolsRemoved?.length ?? 0;
+						if (toolsAdded + toolsRemoved === 0) continue;
+						if (reported.has(String(entry.id))) break;
+						reported.add(String(entry.id));
+						rewritten({ conversationId: api.conversationId, model: `${model.provider}/${model.id}`, entryId: String(entry.id), toolsAdded, toolsRemoved });
+						break;
+					}
 				},
 			}),
 		],

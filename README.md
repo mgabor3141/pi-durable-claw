@@ -290,6 +290,12 @@ this one read (`cacheRead`) and wrote, and the seconds between them. A miss mean
 again: something changed the request's start (a tool's description, text inserted before the end, the thinking
 level), or the provider dropped the entry. `docker compose logs harness | grep "a prompt cache miss"`.
 
+A tool change a model cannot take in place rewrites the start too, and a provider that reports reads but no writes
+has no lifetime to expire against (its cache is evicted by usage): both cases are logged. The former says
+`a prompt start was rewritten, invalidating the prompt cache` with the entry and how many tools were added or removed;
+the latter is still a cache miss, with `lifetimeS: null` and `lifetimeKnown: false`. The local models report cache
+reads but no writes, so their misses are not hidden by a guessed lifetime.
+
 pi-durable has one retention setting for the whole Harness, so `src/cache-retention.ts` chooses per conversation: a
 request hook remembers each conversation's provider session with the retention its thread gets (the bridge's
 `threadOf` says who started it), and a wrapper around the model calls sends a request of that session with it. This

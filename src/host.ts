@@ -230,7 +230,10 @@ async function main(): Promise<void> {
 			...(memory === undefined ? [] : [memory.extension()]),
 			cacheRetention.extension(),
 			// A request that should have read the prompt cache and did not: it paid for the whole context again.
-			cacheMissExtension((miss) => log.warn("a prompt cache miss", { ...miss })),
+			cacheMissExtension(
+				(miss) => log.warn("a prompt cache miss", { ...miss }),
+				(rewrite) => log.warn("a prompt start was rewritten, invalidating the prompt cache", { ...rewrite }),
+			),
 		],
 		onRegistry: (registry) => {
 			mcp.attach(registry);

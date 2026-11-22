@@ -43,6 +43,7 @@ it("a miss is a request that read little of what the one before it sent, while t
 		input: 10,
 		sinceLastRequestS: 600,
 		lifetimeS: 3600,
+		lifetimeKnown: true,
 	} satisfies CacheMiss);
 	// Only the system prompt and tools read (the messages changed): a miss too.
 	expect(of(answer(T0 + min, { cacheRead: 12_000, cacheWrite: 90_000 }), before(first, tool))?.cacheRead).toBe(12_000);
@@ -65,6 +66,10 @@ it("a miss is a request that read little of what the one before it sent, while t
 	const tools = entry("pi.system", { role: "system", content: "", toolsAdded: [{ name: "t" }], timestamp: T0 + 2 } as unknown as Message);
 	expect(of(answer(T0 + min, { cacheWrite: 100_000 }), before(first, tools), takes), "the tools the request starts with changed").toBeUndefined();
 	expect(of(answer(T0 + min, { cacheWrite: 100_000 }), before(first, tools), { ...model, compat: { supportsMidConvoSystemMessages: true, supportsMidConvoToolChanges: true } })?.expected).toBe(100_010);
+	// A provider that reports reads but no writes has no lifetime to expire against: a low read ten minutes later is
+	// still a miss (evicted by usage), and says the lifetime was not known.
+	const noWrites = entry("pi.assistant", answer(T0, { cacheRead: 100_000, cacheWrite: 0 }));
+	expect(of(answer(T0 + 10 * min, { cacheRead: 0, cacheWrite: 100_000 }), before(noWrites))).toMatchObject({ expected: 100_010, lifetimeS: null, lifetimeKnown: false });
 	// Not a miss: the first request of a conversation, and a request that failed (nothing was counted).
 	expect(of(answer(T0, { cacheWrite: 100_000 }), [])).toBeUndefined();
 	expect(of(answer(T0 + min, { input: 0, output: 0 }, { stopReason: "error" }), before(first))).toBeUndefined();
