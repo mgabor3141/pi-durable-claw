@@ -216,7 +216,8 @@ differ. A prompt rendered again the same shows nothing. A file that cannot be re
 (the workspace does not answer) leaves its section as the thread shows it.
 
 The codemode section is a catalog (`src/codemode-catalog.ts`): `read`, `write`, `edit` and `bash`, whose definitions the
-request carries as the model's own tools, are named once with what each gives a script; every other harness tool has
+request carries as the model's own tools, are named once with what each gives a script, said of the call a script
+makes (`tools.read`; a plain `read(...)` is not defined there); every other harness tool has
 one line (its description's first sentence), and a script reads a tool's declaration with `describeTool(name)` before
 first using it, as tool search works in Claude Code and Codex. Declaring every tool in full made the prompt about
 7,000 tokens. MCP tools are left out
@@ -509,7 +510,7 @@ refresh on their own, shortly before they expire and after a 401. A server that 
 
 A sign-in ends when the server no longer accepts its token and nothing renews it: it expired and the server gave no
 refresh token, or you revoked it there. The call that finds out fails with what to do (`it needs a sign-in: call
-mcp({ action: "login", … })`), and the status says the same from then on. Calls the server had accepted before are
+tools.mcp({ action: "login", … })`), and the status says the same from then on. Calls the server had accepted before are
 still answered.
 
 Where the sign-in had no refresh token, the one that follows starts from nothing, with discovery and registration

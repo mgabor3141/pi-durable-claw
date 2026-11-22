@@ -166,8 +166,9 @@ export const SSH_TOOL_DESCRIPTION =
 export const MCP_TOOL_DESCRIPTION =
 	"Check and sign in to your MCP servers, which you configure in ~/.mcp.json (Claude Code's format, HTTP servers only); scripts find their tools with searchTools(). status: each server's connection and tool count, and what is wrong with the configuration or a server; call it after editing ~/.mcp.json. login: sign the harness in to a server that uses OAuth (one without an Authorization header); answers a sign-in link; give it to the user (or open it in the browser panel). It answers signedIn instead when the stored sign-in could be renewed without one. When they approve, the browser returns to this harness and the server connects by itself. If their browser cannot reach the harness, ask them to paste the URL it ended on, and pass it as complete's redirectUrl. logout: forget the server's sign-in. Tokens are kept and refreshed by the harness, never shown.";
 
+/** The call as a script makes it, `tools.mcp(...)`: `mcp` is a tool only scripts call. */
 export function mcpNeedsSignIn(server: string): string {
-	return `it needs a sign-in: call mcp({ action: "login", server: "${server}" }) and give the user the link`;
+	return `it needs a sign-in: call tools.mcp({ action: "login", server: "${server}" }) and give the user the link`;
 }
 
 export const MCP_SERVERS_INTRO =

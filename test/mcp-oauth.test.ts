@@ -41,7 +41,7 @@ it("signs in through mcp, connects, refreshes by itself, and keeps tokens out of
 	await manager.start();
 
 	expect(manager.status("docs")).toMatchObject({ status: "failed" });
-	expect(manager.problems()).toEqual([expect.stringContaining('call mcp({ action: "login", server: "docs" })')]);
+	expect(manager.problems()).toEqual([expect.stringContaining('call tools.mcp({ action: "login", server: "docs" })')]);
 
 	const tool = manager.extension().tools!.find((candidate) => candidate.name === "mcp")!;
 	const run = async (args: unknown) => JSON.parse(((await tool.execute(args as never, {} as never, {} as never)) as { output: { text: string }[] }).output[0]!.text);

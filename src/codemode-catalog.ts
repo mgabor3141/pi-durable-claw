@@ -11,6 +11,8 @@
  *
  * - Tools the model also calls directly (`read`, `write`, `edit`, `bash`): not repeated, since their definitions are
  *   in the request already; one sentence says scripts call them too, with the same arguments, and what each returns.
+ *   What each returns is said of the call a script makes, `tools.read`: said of the plain name, it reads as if a
+ *   script could call `read(...)`, which fails ("read is not defined").
  * - Every other tool: `- <name>: <first sentence of its description>`, grouped by the namespace its extension declares,
  *   as pi-durable groups them. Only namespaces with a listed tool get a heading.
  * - Deferred tools (MCP servers') stay out, as in pi-durable: `searchTools()` finds them, and the `mcp-servers`
@@ -46,7 +48,7 @@ function directLine(tools: readonly ToolRegistration[]): string | undefined {
 	if (tools.length === 0) return undefined;
 	const names = tools.map((tool) => `\`${toCodemodeIdentifier(tool.name)}\``);
 	const list = names.length === 1 ? names[0] : `${names.slice(0, -1).join(", ")} and ${names.at(-1)}`;
-	const results = tools.flatMap((tool) => (SCRIPT_RESULTS[tool.name] === undefined ? [] : [`\`${toCodemodeIdentifier(tool.name)}\` gives ${SCRIPT_RESULTS[tool.name]}`]));
+	const results = tools.flatMap((tool) => (SCRIPT_RESULTS[tool.name] === undefined ? [] : [`\`tools.${toCodemodeIdentifier(tool.name)}\` gives ${SCRIPT_RESULTS[tool.name]}`]));
 	return `Your own tools ${list} are not listed: scripts call them too, with the same arguments.${results.length === 0 ? "" : ` In a script, ${results.join("; ")}.`}`;
 }
 

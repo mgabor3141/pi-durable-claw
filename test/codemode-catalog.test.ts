@@ -47,7 +47,9 @@ describe("catalogSection", () => {
 			defineExtension({ name: "mcp:docs", namespace: { name: "mcp__docs", description: "Docs" }, tools: [tool("mcp__docs__search", "An MCP tool.", { deferred: true })] }),
 		];
 		const section = catalogSection(extensions.flatMap((extension) => extension.tools ?? []), extensions)!;
-		expect(section).toContain("Your own tools `bash` and `read` are not listed: scripts call them too, with the same arguments. In a script, `bash` gives { output, exitCode, truncated, fullOutputPath? }");
+		// What a script gets is said of the call it makes: a plain `bash(...)` is not defined in a script.
+		expect(section).toContain("Your own tools `bash` and `read` are not listed: scripts call them too, with the same arguments. In a script, `tools.bash` gives { output, exitCode, truncated, fullOutputPath? } (a nonzero exit resolves too: check exitCode); `tools.read` gives { type: \"text\", text } or an image block (show it with image()).");
+		expect(section).not.toMatch(/`(?:bash|read)` gives/u);
 		expect(section).not.toContain("- bash:");
 		expect(section).not.toContain("Execute a bash command.");
 		expect(section).not.toContain("```ts");

@@ -179,7 +179,7 @@ it("mcp's status takes any answer for a sign of life, and tells of the connectio
 	expect(manager.status("docs")).toEqual({ status: "connected" });
 });
 
-const NEEDS_SIGN_IN = 'it needs a sign-in: call mcp({ action: "login", server: "docs" }) and give the user the link';
+const NEEDS_SIGN_IN = 'it needs a sign-in: call tools.mcp({ action: "login", server: "docs" }) and give the user the link';
 
 /** A manager with OAuth and the fake, where a sign-in is an access token alone (no refresh token) unless asked, as
  * T3's is. `timeout` is the server's in the config: how long a request may take. */
