@@ -20,15 +20,18 @@ import {
 import {
 	CompactionTask,
 	GenerationTask,
+	LiveDoc,
 	ProviderDoc,
 	UsageDoc,
 	defineExtension,
 	hook,
 	type CompactionHooks,
+	type CompactionResult,
 	type ContextView,
 	type ConversationId,
 	type EntryId,
 	type EntryRecord,
+	type TaskId,
 	type Extension,
 	type HookApi,
 } from "@earendil-works/pi-durable";
@@ -54,6 +57,7 @@ import {
 
 /** A compaction hook's `api` is its task's runtime; these are the parts of it used here. */
 type CompactionRuntime = HookApi & {
+	readonly taskId: TaskId<CompactionResult>;
 	readonly signal?: AbortSignal;
 	readonly settings: { readonly stream: SimpleStreamOptions & { readonly deferred?: unknown } };
 	agent(context: Context): Promise<{
@@ -75,6 +79,21 @@ export type CompactionOptions = {
 	/** Told why a summary on the conversation was given up for one from a transcript. */
 	readonly gaveUp?: (conversationId: ConversationId, why: string) => void;
 };
+
+/**
+ * A summary request the provider refused with a wait longer than pi waits inside a request (`PROVIDER_RETRY` in
+ * `harness.ts`): an exhausted plan, whose `retry-after` can be days. pi-durable's own summarizer would send the
+ * request again on its retry policy, which knows nothing of that wait: every try fails, for hours, while the thread
+ * shows only "Compacting". The hook declines the compaction instead, at the first such answer, and records it as pi
+ * records a compaction that failed (`pi.live`'s `compactionFailure`, the provider's words), for the thread to show.
+ */
+class ProviderWaitError extends Error {}
+
+/** The provider's error, when it is one that states a wait (pi-ai: "Server requested 314936s retry delay (max: 60s). …"). */
+function statedWait(response: AssistantMessage): ProviderWaitError | undefined {
+	const error = response.stopReason === "error" ? response.errorMessage : undefined;
+	return error !== undefined && /Server requested \d+s retry delay/u.test(error) ? new ProviderWaitError(error) : undefined;
+}
 
 /** A summary may take this many requests: the model is asked again after a tool call it made instead. */
 const SUMMARY_REQUESTS = 3;
@@ -202,6 +221,8 @@ async function complete(request: SummaryRequest, prompt: string): Promise<string
 		},
 		options,
 	);
+	const wait = statedWait(response);
+	if (wait !== undefined) throw wait;
 	const text = textOf(response);
 	if (text !== undefined) await recordUsage(request, response);
 	return text;
@@ -387,6 +408,8 @@ async function summarizeOnConversation(
 	const total: { usage?: Usage } = {};
 	for (let attempt = 1; attempt <= SUMMARY_REQUESTS; attempt++) {
 		const response = await runtime.models.completeSimple(model, { messages: [...messages] }, request);
+		const wait = statedWait(response);
+		if (wait !== undefined) throw wait;
 		if (response.stopReason === "error" || response.stopReason === "aborted") return gaveUp(`the request failed: ${response.errorMessage ?? response.stopReason}`);
 		await recordUsage({ api: runtime, context, model }, response);
 		if (total.usage === undefined) total.usage = JSON.parse(JSON.stringify(response.usage)) as Usage;
@@ -410,16 +433,25 @@ export function compactionExtension(options: CompactionOptions = {}): Extension 
 		hooks: [
 			hook(CompactionTask, {
 				beforeCompact: async (compaction, api, context) => {
+					const runtime = api as CompactionRuntime;
+					const declined = async (wait: ProviderWaitError) => {
+						await runtime.commit(async (tx) => {
+							(await tx.doc(LiveDoc, runtime.conversationId)).compactionFailure = { taskId: runtime.taskId, trigger: compaction.reason, error: wait.message };
+						}, context);
+						return { decline: true } as const;
+					};
 					try {
-						const summary = await summarizeOnConversation(compaction, api as CompactionRuntime, context, options);
+						const summary = await summarizeOnConversation(compaction, runtime, context, options);
 						if (summary !== undefined) return { summary };
 					} catch (error) {
 						if (context.abortSignal?.aborted === true) throw error;
+						if (error instanceof ProviderWaitError) return declined(error);
 						options.gaveUp?.(api.conversationId, error instanceof Error ? error.message : String(error));
 					}
 					try {
 						return await summarize(compaction, api, context);
-					} catch {
+					} catch (error) {
+						if (error instanceof ProviderWaitError) return declined(error);
 						// A failed custom summary falls back to the durable task's own summarizer.
 						return undefined;
 					}

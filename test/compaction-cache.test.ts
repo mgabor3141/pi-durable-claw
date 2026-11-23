@@ -7,7 +7,7 @@ import { join } from "node:path";
 import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
 import { createModels, fauxAssistantMessage, fauxProvider, fauxToolCall, type AssistantMessage, type Message, type SimpleStreamOptions } from "@earendil-works/pi-ai";
 import type { TranscriptContext } from "@earendil-works/pi-ai/utils/transcript";
-import { createRegistry, defineExtension, defineTool, Harness, type Extension } from "@earendil-works/pi-durable";
+import { createRegistry, defineExtension, defineTool, Harness, LiveDoc, type Extension } from "@earendil-works/pi-durable";
 import { NodeExecutionEnv } from "@earendil-works/pi-durable/env/node";
 import { openNodeSqliteStorage } from "@earendil-works/pi-durable/storage/sqlite/node";
 import { afterEach, expect, it } from "vitest";
@@ -228,4 +228,44 @@ it("asks on the conversation only while its cache holds, and only when that is t
 	expect(cheaperFromTranscript([user("a"), answer({ input: 150_000 })], summarized, model, T0 + min)).toBe("the last request used no prompt cache");
 	// Almost nothing to summarize: its transcript costs less than a tenth of the whole context.
 	expect(cheaperFromTranscript(hour, [user("a few words")], model, T0 + min)).toMatch(/^the part to summarize is small/);
+});
+
+// An exhausted plan answers 429 with a `retry-after` of days, which pi refuses to wait inside the request
+// (`PROVIDER_RETRY`). pi-durable's own summarizer would send it again on the retry policy for hours; the compaction is
+// declined at once instead, recorded as failed with the provider's words, and the next compaction is free to try again.
+it("gives a compaction up at once when the provider states a wait longer than pi waits", { timeout: 60_000 }, async () => {
+	const t = await setup();
+	try {
+		await t.turn("one" + long, fauxAssistantMessage("first" + long));
+		await t.turn("two", fauxAssistantMessage("second" + long));
+		const limit = "Server requested 314936s retry delay (max: 60s). 429 rate_limit_error: This request would exceed your account's rate limit. Please try again later.";
+		t.answers.push(() => fauxAssistantMessage("", { stopReason: "error", errorMessage: limit }));
+		const sentBefore = t.sent.length;
+		const task = await t.conversation.compact(undefined, ctx);
+		await t.harness.waitForTask(task, ctx);
+		await t.conversation.waitForIdle(ctx);
+		// One request: the summary on the conversation. Neither the transcript summary nor pi's own was tried.
+		expect(t.sent.length - sentBefore).toBe(1);
+		expect((await t.entries()).filter((entry) => entry.kind === "pi.compaction")).toHaveLength(0);
+		const live = await t.harness.snapshot(LiveDoc, t.conversation.id, ctx);
+		expect(live?.compactions ?? []).toEqual([]);
+		expect(live?.compactionFailure).toEqual({ taskId: task, trigger: "manual", error: limit });
+
+		// The transcript summary's request is refused the same way: one request, then given up.
+		t.answers.push(() => fauxAssistantMessage([fauxToolCall("nothing", {})], { stopReason: "toolUse" }), () => fauxAssistantMessage([fauxToolCall("nothing", {})], { stopReason: "toolUse" }), () => fauxAssistantMessage([fauxToolCall("nothing", {})], { stopReason: "toolUse" }));
+		t.replies.push(fauxAssistantMessage("", { stopReason: "error", errorMessage: limit }));
+		const again = await t.conversation.compact(undefined, ctx);
+		await t.harness.waitForTask(again, ctx);
+		expect((await t.harness.snapshot(LiveDoc, t.conversation.id, ctx))?.compactionFailure).toEqual({ taskId: again, trigger: "manual", error: limit });
+		expect(t.answers, "the summary on the conversation was asked for three times").toEqual([]);
+		expect(t.replies, "the transcript summary was asked for once").toEqual([]);
+		expect((await t.entries()).filter((entry) => entry.kind === "pi.compaction")).toHaveLength(0);
+
+		// A compaction once the limit has reset writes its summary, and pi clears the failure.
+		await t.harness.waitForTask(await t.conversation.compact(undefined, ctx), ctx);
+		expect((await t.entries()).filter((entry) => entry.kind === "pi.compaction")).toHaveLength(1);
+		expect((await t.harness.snapshot(LiveDoc, t.conversation.id, ctx))?.compactionFailure).toBeUndefined();
+	} finally {
+		await t.harness.close(ctx);
+	}
 });
