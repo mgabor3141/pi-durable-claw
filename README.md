@@ -145,6 +145,33 @@ tool's, a data URL), but only one the model could not take as it is: a type prov
 4.5 MB of base64, or wider or taller than 2000 pixels by its header. That one is fitted, followed by a note with the
 scale, and codemode's saved file stays the original. Every other image reaches the model exactly as the script gave it.
 
+What a result says besides its output reaches the model as pi coding agent writes it: the output, then a plain line
+for each thing to know. pi-durable would put them in a `<harness>` block with a severity; the bridge's `plainResults`
+(installed last in `src/host.ts`) writes them out:
+
+- `Command exited with code 3`, `Command timed out after 60 seconds`, and `(no output)` for a command that printed
+  nothing.
+- `[Showing the last 1998 lines. Full output: <file>]` for a command that printed more than the model is shown
+  (`[Showing the last 1996 lines; earlier output is not shown.]` for one that was cut off, whose file is not known),
+  and `[Showing lines 1-1998 of 5000. Use offset=1999 to continue.]` for a file too long to show: `read` gives a file
+  whole, so a script gets all of it, and what the model is shown is cut where pi-durable's bound is.
+- A call that was cut off says by what: `Command interrupted by the user; it may have partially run`, `... by another
+  agent (<its reason>)` for a thread another agent stopped, `... by a restart of the harness`. A stopped script says
+  which calls it had made. A call that did not run says so: `Not run: The user did not allow nas`.
+- The first message after a stop tells the model `[The user stopped your previous turn before it finished.]`, in a
+  line T3 does not show: when you stop the agent while it writes, nothing else in its context says so (the unfinished
+  answer is not sent again). `/continue` and T3's Resume go on in the stopped turn and say nothing. Who stopped it is
+  remembered, not stored: after a restart of the harness the line says only that the turn was stopped.
+
+Two results keep pi-durable's form. A call that had not started when you pressed Stop gets its result from the run,
+not from a tool, where no extension can change it: `Tool bash was aborted`, in the block. And a text that would be cut
+inside a line (a minified file, one line longer than the bound) is cut by pi-durable, which says how many bytes it
+dropped. One thing is lost: what a stopped script had printed, since pi-durable formats a script's output only once
+the script ends.
+
+In T3 a command's row shows the exit code itself (a red `exit 3` under the output), so the line that says it is left
+out there.
+
 `ssh` runs one command on another machine from the workspace, with the workspace's `~/.ssh` keys and config.
 `ssh({ host, command, timeout? })` passes the remote command to the remote shell exactly as written, so a script needs
 no second layer of quoting. It is `bash` running `ssh -n -o BatchMode=yes -o StrictHostKeyChecking=accept-new --
@@ -162,7 +189,9 @@ public key for it, as an `authorized_keys` line (`restrict`: no forwarding of an
 with access it has, or asks you to; the private key never leaves `./data/harness/machines/`. From then on `bash`,
 `read`, `write` and `edit` take `machine: "<name>"` and run there as they run in the workspace (pi-env's daemon over
 SSH, as the workspace itself is reached: the same results, Stop and timeouts, and a secret in a command as in the
-workspace). `copy_file({ from: { path, machine? }, to: { path, machine? } })` moves a file of any size or kind between
+workspace). T3's row for such a command starts with `# on <name>`, so it does not read as one that ran in the
+workspace, and a long output's full file is said to be on that machine (`Full output on <name>: <file>`).
+`copy_file({ from: { path, machine? }, to: { path, machine? } })` moves a file of any size or kind between
 the workspace and a machine, or between machines. `machines_list()` and `machine_remove({ name })` do what they say.
 
 The first use of a machine in a thread waits for your approval: T3's approval card in the run, and "Needs approval" in

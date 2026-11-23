@@ -335,6 +335,11 @@ async function main(): Promise<void> {
 		);
 	}
 
+	// What a tool result says besides its output (an exit code, a timeout, who stopped it) reaches the model as plain
+	// lines after the output, as pi coding agent writes them, instead of pi-durable's `<harness>` block. Last: after
+	// every extension that changes a result (a broken image's text, the answer to a direct call of a script's tool).
+	if (toolRegistry !== undefined) toolRegistry.install(t3.plainResults(toolRegistry));
+
 	// What the harness's own parts read from the bridge, at each use: T3's text-generation model (`summarize` and memory
 	// notes, when it names one of ours; titles get it per request), the models hidden from its picker (a script's model
 	// lists), whose a thread is (cache retention, machines) and the approval card (machines). Agent `browser_open` pages

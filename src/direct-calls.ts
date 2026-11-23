@@ -33,7 +33,8 @@ export function directCallsExtension(registry: RegistryReader): Extension {
 					const tool = registry.snapshot().tools().find((entry) => entry.tool.name === call.name)?.tool;
 					const scriptTool = tool !== undefined && (tool.callers === undefined || tool.callers.includes("tools"));
 					// pi-durable shows its diagnostic after the output ("<harness>[error] Tool bash is not available"); say the same
-					// thing the answer does, so the two do not read as a contradiction.
+					// thing the answer does, so the two do not read as a contradiction. The host's plain results (`host.ts`) leave
+					// it out: the answer says it.
 					const diagnostics = (result.diagnostics ?? []).map((diagnostic) =>
 						diagnostic.code === UNAVAILABLE && scriptTool ? { ...diagnostic, message: `Tool ${call.name} is called from codemode scripts, not directly` } : diagnostic,
 					);
