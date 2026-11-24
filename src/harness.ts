@@ -1,6 +1,6 @@
 import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
 import type { Context } from "@earendil-works/chord/context";
-import { createRegistry, defineExtension, Harness, type Extension, type HarnessOptions, type Registry, type ToolNamespace, type ToolRegistration } from "@earendil-works/pi-durable";
+import { createRegistry, defineExtension, Harness, type Extension, type HarnessOptions, type HarnessSettings, type Registry, type ToolNamespace, type ToolRegistration } from "@earendil-works/pi-durable";
 import { createCodemodeExtension } from "@earendil-works/pi-durable/codemode";
 import { openNodeSqliteStorage } from "@earendil-works/pi-durable/storage/sqlite/node";
 import type { ImageProcessor } from "@earendil-works/pi-durable/tools";
@@ -191,6 +191,13 @@ export const RETRY_POLICY = { enabled: true, maxRetries: 64, baseDelayMs: 2_000,
 export const PROVIDER_RETRY = { maxRetries: 3, maxRetryDelayMs: 60_000 } as const;
 
 /**
+ * The harness's run policy. Tools run one at a time; failed requests are retried as above; and every steer that waits
+ * reaches the model at the run's next boundary, together (pi-durable's default places one a boundary), as T3's
+ * providers take the messages a person sends while the agent works.
+ */
+export const HARNESS_SETTINGS = { toolExecution: "sequential", retry: RETRY_POLICY, stream: PROVIDER_RETRY, steeringMode: "all" } as const satisfies HarnessSettings;
+
+/**
  * A pi-durable Harness whose model calls `codemode` and the workspace's `read`/`write`/`edit`/`bash`, whose environment
  * is the workspace over SSH (pi-env), and whose scripts reach the harness's tools as nested calls.
  */
@@ -212,7 +219,7 @@ export async function openHarness(
 			// Every tool call's environment is the workspace container over SSH, starting where this conversation
 			// says it works: a project's root, a Scratch thread's own folder, or the home fallback.
 			env: (target) => workspaceEnv(options.workspace.connection, target.cwd ?? WORKSPACE_HOME),
-			settings: { toolExecution: "sequential", retry: RETRY_POLICY, stream: PROVIDER_RETRY },
+			settings: HARNESS_SETTINGS,
 			conversationCreated: recordConversationStart(),
 		},
 		context,
