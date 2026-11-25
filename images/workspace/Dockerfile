@@ -4,7 +4,7 @@
 FROM debian:bookworm-slim
 
 RUN apt-get update \
-	&& apt-get install -y --no-install-recommends openssh-server openssh-client python3 git curl ca-certificates jq imagemagick unzip \
+	&& apt-get install -y --no-install-recommends openssh-server openssh-client python3 python3-pip python3-venv git curl ca-certificates jq imagemagick unzip file poppler-utils ffmpeg tesseract-ocr tesseract-ocr-hun \
 	&& rm -rf /var/lib/apt/lists/* \
 	&& mkdir -p /run/sshd /etc/ssh/host \
 	&& useradd -m -u 1000 -s /bin/bash -p '*' agent \
