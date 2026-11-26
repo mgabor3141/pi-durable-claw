@@ -2,6 +2,7 @@ import type { Context } from "@earendil-works/chord/context";
 import type { AssistantMessage, Message, ModelThinkingLevel, SimpleStreamOptions, ToolResultMessage, Usage } from "@earendil-works/pi-ai";
 import { estimateMessageTokens } from "@earendil-works/pi-ai/utils/estimate";
 import { serializeConversation } from "@earendil-works/pi-coding-agent";
+import { askMessage, requestMessages, requestPayload } from "./on-conversation.ts";
 import { answeredOf, cacheHolds, sentOf } from "./prompt-cache.ts";
 import {
 	COMPACTION_INLINE_PROMPT,
@@ -19,7 +20,6 @@ import {
 } from "./prompts.ts";
 import {
 	CompactionTask,
-	GenerationTask,
 	LiveDoc,
 	ProviderDoc,
 	UsageDoc,
@@ -40,8 +40,8 @@ import {
  * The summary of a compaction, written two ways.
  *
  * On the conversation (`summarizeOnConversation`): the request the agent itself would send next (its system prompt,
- * tools and history, through the same request hooks and with the same options) with one more user message that asks
- * for the summary. A provider's prompt cache matches a request's start byte for byte, so this request reads the whole
+ * tools and history, through the same request hooks and with the same options) with one more message that asks for
+ * the summary (`on-conversation.ts`: a system message where the model takes one there). A provider's prompt cache matches a request's start byte for byte, so this request reads the whole
  * conversation from the cache the agent's own requests wrote, at a tenth of the input price on Anthropic, where a
  * request of its own (another system prompt, the conversation as text) pays for every token again. Claude Code,
  * opencode and Codex summarize this way. pi 1.5 carries the prompt and the tools in the transcript's system messages,
@@ -299,36 +299,6 @@ function askableEnd(view: ContextView): EntryId | undefined | null {
 	return first === 0 ? null : view.entries[first - 1]!.id;
 }
 
-/** The messages as the agent's own request would send them: through every `beforeRequest` hook of its extensions. */
-async function requestMessages(runtime: CompactionRuntime, extensions: readonly Extension[], messages: readonly Message[], context: Context): Promise<readonly Message[]> {
-	let current = messages;
-	for (const extension of extensions) {
-		for (const installed of extension.hooks ?? []) {
-			if (installed.task !== GenerationTask.definition.name) continue;
-			const handlers = installed.handlers as { beforeRequest?: (request: { messages: readonly Message[] }, api: HookApi, context: Context) => unknown };
-			if (typeof handlers.beforeRequest !== "function") continue;
-			const replaced = (await handlers.beforeRequest({ messages: current }, runtime, context)) as { messages: readonly Message[] } | undefined;
-			if (replaced !== undefined) current = replaced.messages;
-		}
-	}
-	return current;
-}
-
-/** The provider request body through every `beforeProviderRequest` hook, as the agent's own request's is. */
-async function requestPayload(runtime: CompactionRuntime, extensions: readonly Extension[], model: SummaryRequest["model"], payload: unknown, context: Context): Promise<unknown> {
-	let current = payload;
-	for (const extension of extensions) {
-		for (const installed of extension.hooks ?? []) {
-			if (installed.task !== GenerationTask.definition.name) continue;
-			const handlers = installed.handlers as { beforeProviderRequest?: (request: { model: unknown; payload: unknown }, api: HookApi, context: Context) => unknown };
-			if (typeof handlers.beforeProviderRequest !== "function") continue;
-			const replaced = (await handlers.beforeProviderRequest({ model, payload: current }, runtime, context)) as { payload: unknown } | undefined;
-			if (replaced !== undefined) current = replaced.payload;
-		}
-	}
-	return current;
-}
-
 /** A cached token's price against an uncached one's when the model has no prices: Anthropic's. */
 const CACHE_READ_RATE = 0.1;
 
@@ -393,7 +363,7 @@ async function summarizeOnConversation(
 
 	const extensions = agent.extensions ?? [];
 	const prompt = withCompactionFocus(COMPACTION_INLINE_PROMPT, compaction.instructions);
-	const messages: Message[] = [...(await requestMessages(runtime, extensions, view.messages, context)), { role: "user", content: [{ type: "text", text: prompt }], timestamp: Date.now() }];
+	const messages: Message[] = [...(await requestMessages(runtime, extensions, view.messages, context)), askMessage(model, prompt)];
 	// The agent's own request options (pi-durable's generation task): another retention, thinking level or session
 	// would be another cache entry. Not `deferred`: a summary is waited for.
 	const { deferred: _deferred, ...stream } = runtime.settings.stream;

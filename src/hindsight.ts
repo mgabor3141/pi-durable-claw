@@ -9,22 +9,30 @@
  *   below `RECALL_MIN_SCORE`, those recalled earlier and still in the model's context, and those drawn only from turns
  *   still in it; after a compaction they can come back. T3 shows the block as a `memory_recall` row, with what was left
  *   out and why below a display-only rule.
- * - Retain: after each finished turn, a copy of the conversation (its model context as the turn ended, nothing written
- *   to it) gets one more message asking what in the turn is worth remembering, answered by T3's text-generation model.
- *   The notes, or nothing, are stored as the turn's document, with the turn's entry range, which is how recall knows
- *   where a memory came from. One turn at a time, off the run: a turn not yet written when the harness stops is lost.
+ * - Retain: the moment a run has answered, its thread is asked what in the turn is worth remembering: the request the
+ *   agent would send next, to the same model with the same thinking level and options, with one more message that asks
+ *   (`on-conversation.ts`). Nothing is written to the thread. That request starts as the turn's last one did, so the
+ *   provider's prompt cache answers all of it but the ask; a request of its own (another model, another thinking level,
+ *   history cut to fit) would read the whole thread again, which on a local engine takes minutes. The notes, or
+ *   nothing, are stored as the turn's document, with its entry range, which is how recall knows where a memory came
+ *   from. Off the run, one step a thread, beside other threads' steps.
+ * - A step the thread overtakes (its next request), or that fails, leaves its turns to the next answer's step, which
+ *   asks about them all and stores them as one document under the same name. So a turn is asked about again only right
+ *   after an answer, while the cache holds the thread; never later. Turns not yet written when the harness stops are lost.
  * - An undo does not reach memory: the notes of turns that were taken back stay, as a record of what happened.
  * - Tools for scripts: `memory_recall`, `memory_reflect` and the page tools.
  *
  * Memory never stops a turn: a failed recall says so in the block, a failed retain is logged.
  */
-import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
-import type { AssistantMessage, Message, Model, Models, ToolResultMessage } from "@earendil-works/pi-ai";
-import { defineExtension, defineTool, GenerationTask, hook, type ContextView, type ConversationId, type EntryId, type EntryRecord, type Extension, type Harness, type ModelRef, type ToolRegistration } from "@earendil-works/pi-durable";
+import { BACKGROUND_CONTEXT, type Context } from "@earendil-works/chord/context";
+import type { AssistantMessage, Message, Model, SimpleStreamOptions, ToolResultMessage } from "@earendil-works/pi-ai";
+import { defineExtension, defineTool, GenerationTask, hook, ProviderDoc, type ContextView, type ConversationId, type EntryId, type EntryRecord, type Extension, type Harness, type HookApi, type RunSummary, type ToolRegistration } from "@earendil-works/pi-durable";
 import { HindsightClient } from "@vectorize-io/hindsight-client";
-import { messageContextData, type MessageContextAnswer, type MessageContextRequest, type TextGenerationModel } from "@mgabor3141/pi-durable-t3";
+import { messageContextData, type MessageContextAnswer, type MessageContextRequest } from "@mgabor3141/pi-durable-t3";
 import { arr, int, opt, str } from "@earendil-works/pi-schema";
 import { MEMORY_NOTES_CONTEXT, MEMORY_NOTES_NO_TOOLS, MEMORY_PAGES_CREATE_DESCRIPTION, MEMORY_PAGES_CREATE_FOLDER_DESCRIPTION, MEMORY_PAGES_DELETE_DESCRIPTION, MEMORY_PAGES_LIST_DESCRIPTION, MEMORY_PAGES_READ_DESCRIPTION, MEMORY_PAGES_SEARCH_DESCRIPTION, MEMORY_PAGES_UPDATE_DESCRIPTION, MEMORY_RECALL_DESCRIPTION, MEMORY_REFLECT_DESCRIPTION, memoriesBlock, memoriesUnavailable, memoryNotesPrompt } from "./prompts.ts";
+import { askMessage, requestMessages, requestPayload } from "./on-conversation.ts";
+import { answeredOf, cacheHolds } from "./prompt-cache.ts";
 import { object } from "./schema.ts";
 import { setting, type Env } from "./env.ts";
 
@@ -48,16 +56,12 @@ const RECALL_MAX_TOKENS = 1_024;
  * absolute, so this only stops what plainly has nothing to do with the message.
  */
 export const RECALL_MIN_SCORE = 0.01;
-/** The longest a memory step may write. */
-const NOTES_MAX_TOKENS = 2_048;
 /** Tool calls the memory step may answer before it gives up on the turn. */
 const NOTES_MAX_TOOL_ROUNDS = 2;
-/** How long one memory step may take, writing and storing. */
+/** How long one memory step may take to write its notes, waiting for the provider included. */
 const NOTES_TIMEOUT_MS = 10 * 60_000;
 /** How long storing the notes may take. */
 const RETAIN_TIMEOUT_MS = 30_000;
-/** Of the model's context window, what the copy may fill (the rest is the prompt, the answer and estimate error). */
-const NOTES_WINDOW_SHARE = 0.85;
 
 /** The configuration from the environment; `undefined` without `HINDSIGHT_URL`. A malformed value fails loudly. */
 export function hindsightConfig(env: Env): HindsightConfig | undefined {
@@ -76,30 +80,19 @@ export function hindsightConfig(env: Env): HindsightConfig | undefined {
 	return { url: url.replace(/\/+$/u, ""), bank, ...(apiKey === undefined ? {} : { apiKey }) };
 }
 
-/** What memory needs from the harness once it is open. */
+/** What recall needs from the harness once it is open. */
 export interface MemoryHost {
-	/** A conversation's committed model context, as of the visible entry `at` when given (`Conversation.context`). */
-	context(conversationId: ConversationId, at?: EntryId): Promise<ContextView | undefined>;
-	/** The model the memory step writes with: T3's text-generation model when it names one, else the conversation's. */
-	notesModel(conversationId: ConversationId): Promise<(ModelRef & { readonly thinkingLevel?: string }) | undefined>;
-	/** The catalog a memory step resolves its model in when no run hands it one (a turn a redo brought back). */
-	readonly models: Models;
+	/** A conversation's committed model context (`Conversation.context`). */
+	context(conversationId: ConversationId): Promise<ContextView | undefined>;
 }
 
-/** The `MemoryHost` of a harness; `textGenerationModel` is the bridge's (it exists once the bridge is attached). */
-export function harnessMemoryHost(harness: Harness, textGenerationModel: () => TextGenerationModel | undefined, models: Models): MemoryHost {
+/** The `MemoryHost` of a harness. */
+export function harnessMemoryHost(harness: Harness): MemoryHost {
 	const ctx = BACKGROUND_CONTEXT;
 	return {
-		models,
-		async context(conversationId, at) {
+		async context(conversationId) {
 			const conversation = await harness.conversation(conversationId, ctx);
-			return conversation === undefined ? undefined : conversation.context(ctx, at === undefined ? {} : { at });
-		},
-		async notesModel(conversationId) {
-			const configured = textGenerationModel();
-			if (configured !== undefined) return configured;
-			const conversation = await harness.conversation(conversationId, ctx);
-			return conversation === undefined ? undefined : (await conversation.agent(ctx)).model;
+			return conversation === undefined ? undefined : conversation.context(ctx);
 		},
 	};
 }
@@ -192,44 +185,33 @@ function turnStart(entries: readonly EntryRecord[]): { text: string; at?: number
 	return undefined;
 }
 
-/** A rough token count: JSON characters over four, as pi's own estimate does for what it has no usage for. */
-const estimateTokens = (message: Message): number => Math.ceil(JSON.stringify(message).length / 4);
-
-/** `content` without images, for a model that takes none: each image becomes a line saying one was there. */
-function withoutImages(message: Message): Message {
-	if (message.role === "system" || typeof message.content === "string") return message;
-	if (!(message.content as { type: string }[]).some((block) => block.type === "image")) return message;
-	return { ...message, content: (message.content as { type: string }[]).map((block) => (block.type === "image" ? { type: "text", text: "[an image]" } : block)) } as Message;
-}
-
-/**
- * The conversation for the memory step: the model context as the turn ended, fitted to the model. System messages
- * (the prompt and tools) stay; older messages go first, and the copy then starts at a user message, so no tool result
- * lacks its call. `undefined` when even the latest turn does not fit.
- */
-export function notesConversation(messages: readonly Message[], model: Pick<Model<never>, "contextWindow" | "input">, turnStartIndex: number): Message[] | undefined {
-	const prepared = model.input.includes("image") ? [...messages] : messages.map(withoutImages);
-	const budget = Math.floor(model.contextWindow * NOTES_WINDOW_SHARE) - NOTES_MAX_TOKENS;
-	const sizes = prepared.map(estimateTokens);
-	let total = sizes.reduce((sum, size) => sum + size, 0);
-	let start = 0;
-	while (total > budget) {
-		// Drop the oldest non-system message, then up to the next user message.
-		const next = prepared.findIndex((message, index) => index >= start && message.role !== "system");
-		if (next === -1 || next >= turnStartIndex) return undefined;
-		let cut = next + 1;
-		while (cut < turnStartIndex && prepared[cut]!.role !== "user") cut++;
-		for (let index = next; index < cut; index++) if (prepared[index]!.role !== "system") total -= sizes[index]!;
-		start = cut;
-	}
-	return prepared.filter((message, index) => index >= start || message.role === "system");
-}
-
 function signalWithin(ms: number, signal?: AbortSignal): AbortSignal {
 	return signal === undefined ? AbortSignal.timeout(ms) : AbortSignal.any([AbortSignal.timeout(ms), signal]);
 }
 
-type NotesJob = { readonly conversationId: ConversationId; readonly first: EntryId; readonly last: EntryId; readonly models: Models };
+/** The turns a thread's next memory step asks about: from `first`, the oldest not yet stored, `turns` runs. */
+type Pending = { readonly first: EntryId; readonly turns: number };
+
+/** The parts of the generation task's runtime (an `afterRun` hook's api) a memory step reads, as compaction does. */
+type RunRuntime = HookApi & {
+	readonly settings: { readonly stream: SimpleStreamOptions & { readonly deferred?: unknown } };
+	agent(context: Context): Promise<{ readonly thinkingLevel?: string; readonly extensions?: readonly Extension[] }>;
+	context(conversationId: ConversationId, context: Context, options?: { readonly at?: EntryId }): Promise<ContextView>;
+};
+
+/** A memory step ready to send: the thread's own next request, with the ask after it. */
+type Step = {
+	readonly conversationId: ConversationId;
+	readonly pending: Pending;
+	/** The turns' first entry with a message, and the run's last entry: the document's range. */
+	readonly first: EntryId;
+	readonly last: EntryId;
+	readonly startedAt?: number;
+	readonly model: Model<never>;
+	readonly messages: readonly Message[];
+	readonly options: SimpleStreamOptions;
+	readonly api: HookApi;
+};
 
 /** A turn's document: named by the conversation it ran in and its first entry. */
 const documentOf = (conversationId: number, first: number): string => `conversation-${conversationId}-entry-${first}`;
@@ -239,8 +221,10 @@ export class Hindsight {
 	readonly #client: HindsightClient;
 	readonly #log: Log;
 	#host: MemoryHost | undefined;
-	readonly #jobs: NotesJob[] = [];
-	#draining: Promise<void> | undefined;
+	/** Per thread, the turns whose notes are not stored yet. */
+	readonly #pending = new Map<ConversationId, Pending>();
+	/** Per thread, the memory step in flight; the thread's next request stops it. */
+	readonly #steps = new Map<ConversationId, { readonly stop: AbortController; readonly done: Promise<void> }>();
 	readonly #closed = new AbortController();
 
 	constructor(config: HindsightConfig, log: Log, client?: HindsightClient) {
@@ -249,7 +233,7 @@ export class Hindsight {
 		this.#client = client ?? new HindsightClient({ baseUrl: config.url, userAgent: "pi-durable-claw", ...(config.apiKey === undefined ? {} : { apiKey: config.apiKey }) });
 	}
 
-	/** Once the harness is open: what recall and the memory step read through. */
+	/** Once the harness is open: what recall reads through. */
 	attach(host: MemoryHost): void {
 		this.#host = host;
 	}
@@ -322,61 +306,109 @@ export class Hindsight {
 		};
 	}
 
-	/** Queue the memory step for a finished turn; it runs off the run, one turn at a time. */
-	#enqueue(job: NotesJob): void {
-		if (this.#closed.signal.aborted) return;
-		this.#jobs.push(job);
-		this.#draining ??= (async () => {
-			for (let next = this.#jobs.shift(); next !== undefined && !this.#closed.signal.aborted; next = this.#jobs.shift()) {
-				try {
-					await this.notesFor(next);
-				} catch (error) {
-					this.#log.warn("memory: a turn was not stored", { conversationId: next.conversationId, first: next.first, error: (error as Error).message });
-				}
-			}
-			this.#draining = undefined;
-		})();
-	}
-
-	/** Wait for the queued turns to be written (tests). */
+	/** Wait for the memory steps in flight (tests). */
 	async settled(): Promise<void> {
-		while (this.#draining !== undefined) await this.#draining;
+		while (this.#steps.size > 0) await Promise.all([...this.#steps.values()].map((step) => step.done));
 	}
 
-	/** Stop writing: a turn in progress is abandoned, queued ones are dropped. */
+	/** Stop writing: steps in flight are abandoned, and turns not yet stored are dropped. */
 	close(): void {
 		this.#closed.abort();
-		this.#jobs.length = 0;
+		this.#pending.clear();
 	}
 
-	/** The memory step for one turn: what in it is worth remembering, stored as the turn's document. */
-	async notesFor(job: NotesJob): Promise<void> {
-		const host = this.#host;
-		if (host === undefined) throw new Error("memory is not attached to the harness");
-		const view = await host.context(job.conversationId, job.last);
-		if (view === undefined) return;
+	/**
+	 * After a run answered: its thread's memory step, at once, before anything else is sent on the thread. What is
+	 * read from the run is read here, while its runtime is live; the request itself runs off the run.
+	 */
+	async #afterRun(run: RunSummary, api: RunRuntime, context: Context): Promise<void> {
+		if (this.#closed.signal.aborted) return;
+		const conversationId = api.conversationId;
+		this.#steps.get(conversationId)?.stop.abort();
+		const before = this.#pending.get(conversationId);
+		const pending: Pending = { first: before?.first ?? run.first, turns: (before?.turns ?? 0) + 1 };
+		this.#pending.set(conversationId, pending);
+		let step: Step | undefined;
+		try {
+			step = await this.#prepare(run, pending, api, context);
+		} catch (error) {
+			this.#log.warn("memory: a turn was not looked at; the next answer's memory step asks about it", { conversationId, first: pending.first, error: (error as Error).message });
+			return;
+		}
+		if (step !== undefined) this.#start(step);
+	}
+
+	/** The thread's next request with the ask after it, or `undefined` when there is nothing to ask now. */
+	async #prepare(run: RunSummary, pending: Pending, api: RunRuntime, context: Context): Promise<Step | undefined> {
+		const conversationId = api.conversationId;
+		// The model and thinking level the run's answer was written with: the request whose cache this one reads.
+		const answer = (await api.entry(run.answer, context))?.model?.findLast((message): message is AssistantMessage => message.role === "assistant");
+		if (answer === undefined) throw new Error("the run's answer has no message");
+		const model = api.models.getModel(answer.provider, answer.model) as Model<never> | undefined;
+		if (model === undefined) throw new Error(`cannot resolve ${answer.provider}/${answer.model}`);
+		const view = await api.context(conversationId, context, { at: run.last });
+		// Right after an answer the provider's cache holds the thread, unless it keeps none; a request that would read the
+		// whole thread again is not sent, and its turns wait for an answer that writes the cache. An expiry counts only
+		// when the lifetime is the provider's (its cache writes, `promptCache`): an engine that reports reads alone keeps
+		// a conversation until it needs the room, and a long answer would pass Anthropic's five minutes it is guessed by.
+		const cache = cacheHolds(answeredOf(view.messages), model, api.now());
+		const guessedExpiry = !cache.holds && cache.expired && !cache.lifetimeKnown && (model as { promptCache?: unknown }).promptCache === undefined;
+		if (!cache.holds && cache.known && !guessedExpiry) {
+			this.#log.info("memory: the prompt cache does not hold the thread, so its turns wait for the next answer", { conversationId, first: pending.first, why: cache.why });
+			return undefined;
+		}
 		// A run continued without a message (`/continue` after an undone step) starts at the agent's answer: its turn
 		// starts at the message that answer is to, the last one before it.
-		const within = (from: number) => view.entries.filter((entry) => entry.id >= from && entry.id <= job.last);
-		const first = turnStart(within(job.first)) !== undefined ? job.first : view.entries.findLast((entry) => entry.id < job.first && turnStart([entry]) !== undefined)?.id;
-		if (first === undefined) return;
-		const start = turnStart(within(first));
-		if (start === undefined) return;
-		const ref = await host.notesModel(job.conversationId);
-		if (ref === undefined) throw new Error("no model to write memory notes with");
-		const model = job.models.getModel(ref.provider, ref.modelId);
-		if (model === undefined) throw new Error(`cannot resolve ${ref.provider}/${ref.modelId}`);
-		// Where the turn starts in the model context: the first message of its first entry.
-		const firstOfTurn = view.entries.findIndex((entry) => entry.id >= first);
-		const turnStartIndex = view.contributions.slice(0, firstOfTurn).reduce((sum, messages) => sum + messages.length, 0);
-		const copy = notesConversation(view.messages, model as Model<never>, Math.min(turnStartIndex, view.messages.length));
-		if (copy === undefined) throw new Error(`the turn does not fit ${ref.provider}/${ref.modelId}'s context window`);
-		const stop = this.#closed.signal;
-		const signal = signalWithin(NOTES_TIMEOUT_MS, stop);
-		const messages: Message[] = [...copy, { role: "user", content: [{ type: "text", text: memoryNotesPrompt(start.text) }], timestamp: Date.now() }];
+		const within = (from: number) => view.entries.filter((entry) => entry.id >= from && entry.id <= run.last);
+		const first = turnStart(within(pending.first)) !== undefined ? pending.first : view.entries.findLast((entry) => entry.id < pending.first && turnStart([entry]) !== undefined)?.id;
+		const start = first === undefined ? undefined : turnStart(within(first));
+		if (first === undefined || start === undefined) {
+			this.#pending.delete(conversationId);
+			return undefined;
+		}
+		const agent = await api.agent(context);
+		const extensions = agent.extensions ?? [];
+		const messages = [...(await requestMessages(api, extensions, view.messages, context)), askMessage(model, memoryNotesPrompt(start.text, pending.turns))];
+		const session = await api.snapshot(ProviderDoc, conversationId, context);
+		const thinkingLevel = (answer as { thinkingLevel?: string }).thinkingLevel ?? agent.thinkingLevel;
+		// The agent's own request options (pi-durable's generation task); not `deferred`: the notes are waited for.
+		const { deferred: _deferred, ...stream } = api.settings.stream;
+		const options: SimpleStreamOptions = {
+			...stream,
+			...(session === undefined ? {} : { sessionId: session.sessionId }),
+			...(thinkingLevel === undefined || thinkingLevel === "off" ? {} : { reasoning: thinkingLevel as never }),
+			// Sent after the run has ended: a payload hook gets the run's api, for what it reads (t3-priority, the
+			// conversation id); one that wrote through it would fail the step, which leaves its turns to the next.
+			onPayload: (payload: unknown) => requestPayload(api, extensions, model, payload, BACKGROUND_CONTEXT),
+		} as SimpleStreamOptions;
+		return { conversationId, pending, first, last: run.last, ...(start.at === undefined ? {} : { startedAt: start.at }), model, messages, options, api };
+	}
+
+	/** Send a step off the run. Stored, or nothing worth storing: its turns are done. Otherwise they wait. */
+	#start(step: Step): void {
+		const stop = new AbortController();
+		const signal = AbortSignal.any([stop.signal, this.#closed.signal, AbortSignal.timeout(NOTES_TIMEOUT_MS)]);
+		const done = (async () => {
+			try {
+				await this.#write(step, signal);
+				if (this.#pending.get(step.conversationId) === step.pending) this.#pending.delete(step.conversationId);
+			} catch (error) {
+				if (this.#closed.signal.aborted) return;
+				if (stop.signal.aborted) this.#log.info("memory: the thread went on before its turn was written; the next answer's memory step asks about it", { conversationId: step.conversationId, first: step.first });
+				else this.#log.warn("memory: a turn was not stored; the next answer's memory step asks about it", { conversationId: step.conversationId, first: step.first, error: (error as Error).message });
+			} finally {
+				if (this.#steps.get(step.conversationId)?.stop === stop) this.#steps.delete(step.conversationId);
+			}
+		})();
+		this.#steps.set(step.conversationId, { stop, done });
+	}
+
+	/** Ask, answer the model's tool calls with a refusal, and store the notes as the turns' document. */
+	async #write(step: Step, signal: AbortSignal): Promise<void> {
+		const messages = [...step.messages];
 		let reply: AssistantMessage | undefined;
 		for (let round = 0; round <= NOTES_MAX_TOOL_ROUNDS; round++) {
-			reply = await job.models.completeSimple(model, { messages }, { signal, maxTokens: NOTES_MAX_TOKENS, ...(ref.thinkingLevel === undefined || ref.thinkingLevel === "off" ? {} : { reasoning: ref.thinkingLevel as never }) });
+			reply = await step.api.models.completeSimple(step.model, { messages }, { ...step.options, signal });
 			if (reply.stopReason === "error" || reply.stopReason === "aborted") throw new Error(reply.errorMessage ?? reply.stopReason);
 			const calls = reply.content.filter((block) => block.type === "toolCall");
 			if (calls.length === 0) break;
@@ -385,28 +417,33 @@ export class Hindsight {
 		}
 		const notes = reply!.content.flatMap((block) => (block.type === "text" ? [block.text] : [])).join("").trim();
 		if (notes === "" || /^NOTHING\.?$/iu.test(notes)) {
-			this.#log.info("memory: nothing to remember from a turn", { conversationId: job.conversationId, first });
+			this.#log.info("memory: nothing to remember from a turn", { conversationId: step.conversationId, first: step.first });
 			return;
 		}
-		if (stop.aborted) throw new Error("abandoned");
+		signal.throwIfAborted();
+		// Storing is not the provider's work: the thread going on does not stop it.
 		await this.#client.retain(this.config.bank, notes, {
-			documentId: documentOf(job.conversationId, first),
+			documentId: documentOf(step.conversationId, step.first),
 			context: MEMORY_NOTES_CONTEXT,
-			metadata: { conversationId: String(job.conversationId), firstEntry: String(first), lastEntry: String(job.last) },
-			...(start.at === undefined ? {} : { timestamp: new Date(start.at) }),
+			metadata: { conversationId: String(step.conversationId), firstEntry: String(step.first), lastEntry: String(step.last) },
+			...(step.startedAt === undefined ? {} : { timestamp: new Date(step.startedAt) }),
 			async: true,
-			signal: signalWithin(RETAIN_TIMEOUT_MS, stop),
+			signal: signalWithin(RETAIN_TIMEOUT_MS, this.#closed.signal),
 		});
 	}
 
-	/** Queues the memory step for each finished turn. */
+	/** The memory step after each run that answered; the thread's next request stops one still in flight. */
 	extension(): Extension {
 		return defineExtension({
 			name: "hindsight",
 			hooks: [
 				hook(GenerationTask, {
-					afterRun: async (run, api) => {
-						this.#enqueue({ conversationId: api.conversationId, first: run.first, last: run.last, models: api.models });
+					beforeRequest: async (_request, api) => {
+						this.#steps.get(api.conversationId)?.stop.abort();
+						return undefined;
+					},
+					afterRun: async (run, api, context) => {
+						await this.#afterRun(run, api as RunRuntime, context);
 						return undefined;
 					},
 				}),

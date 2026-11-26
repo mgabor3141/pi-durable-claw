@@ -207,8 +207,8 @@ an integration point, like Browserless: you deploy Hindsight, `HINDSIGHT_URL` co
 memory. The harness recalls observations for the message that opens a context, a thread's first or the first after a
 compaction (stored with it, hidden, so the prompt cache holds; later, the agent calls `memory_recall` when it needs to),
 leaving out what the model's context already holds, which it knows from the entry range each stored turn records and
-the ids each recall stores with its block. After each turn, a copy of the conversation is asked what is worth
-remembering, on T3's text-generation model; only that answer is stored, so Hindsight extracts from notes rather than
+the ids each recall stores with its block. After each turn, the thread itself is asked what is worth
+remembering (its own next request, with one more message, so the prompt cache answers it); only that answer is stored, so Hindsight extracts from notes rather than
 from transcripts full of passing detail. Scripts get `memory_recall`, `memory_reflect` and the
 page tools (the README's "Memory"). Left to the deployment: the model Hindsight calls, its embedding model,
 where it runs and whether agents share it (one bank each, `HINDSIGHT_BANK`; separate keys need Hindsight's tenant

@@ -450,18 +450,21 @@ How it works (`src/hindsight.ts`):
   `memory_recall` row (no tool ran): the query, exactly what the model was given, and below a "shown here only, not
   sent to the model" line each memory's score and sources and what was left out and why. The bridge
   waits at most 5 seconds; a failed search becomes a line in the block saying memory could not be searched.
-- **Remembering.** After each finished turn, a copy of the conversation (as the model saw it when the turn ended;
-  nothing is written to the thread) gets one more message: what in the latest turn is worth remembering weeks from
-  now, one self-contained statement per line, or `NOTHING`, which is the usual answer. A tool call there is turned
-  down. The notes are stored as the turn's document (the conversation and its entry range, which is how recall knows
-  where a memory came from); `NOTHING` stores nothing. Turns are written one at a time, off the run; one not written
-  yet when the harness stops is lost. A failure is logged, never fatal.
+- **Remembering.** The moment a run has answered, its thread is asked what in the latest turn is worth remembering
+  weeks from now, one self-contained statement per line, or `NOTHING`, which is the usual answer. The ask is the
+  request the agent would send next, to the same model with the same thinking level, session and options, with one
+  more message: a system message where the model takes one mid-conversation (`compat.supportsMidConvoSystemMessages`),
+  else a user message. Nothing is written to the thread, and a tool call there is turned down. The notes are stored as
+  the turn's document (the conversation and its entry range, which is how recall knows where a memory came from);
+  `NOTHING` stores nothing. A failure is logged, never fatal.
 
-  **This sends the whole conversation to T3's text-generation model (Settings → Models) after every turn**, of every
-  thread, scheduled tasks and child threads included, falling back to the thread's own model when that setting names
-  none of ours. Use a model you can afford to call that much: a local one, ideally with prompt caching (llama.cpp,
-  vLLM), so each call mostly reads the new turn. A conversation larger than that model's context window is cut from
-  its oldest turns; a turn that alone does not fit is not stored.
+  **This asks every thread's own model once more after every turn**, scheduled tasks and child threads included. The
+  request starts exactly as the turn's last one did, so a provider's prompt cache (Anthropic's, llama.cpp's, vLLM's)
+  answers all of it but the ask; no history is cut or rewritten. A step still running when the thread sends its next
+  request is stopped, and one that fails is logged: either way its turns are asked about by the next answer's step,
+  stored as one document. A step is sent only right after an answer, and not when the provider's cache is known not
+  to hold the thread (`promptCache` in `models.json`; Anthropic's lifetimes otherwise), so memory never reads a whole
+  thread again. Turns not yet written when the harness stops are lost.
 - **Undo** does not reach memory: the notes of turns that were taken back stay ("Undo and redo" below).
 - **Tools** for scripts: `memory_recall` (observations, as the recall that opens a context), `memory_reflect` and the
   `memory_pages_*` page tools, listed in the codemode catalog.

@@ -240,9 +240,8 @@ async function main(): Promise<void> {
 			toolRegistry = registry;
 		},
 	});
-	// Memory reads conversations' model context (what a recall leaves out, what the memory step reads) and writes its
-	// notes with T3's text-generation model once the bridge is attached.
-	memory?.attach(harnessMemoryHost(harness, () => late.bridge?.textGenerationModel(), models));
+	// Recall reads a conversation's model context: what is in it is not recalled again.
+	memory?.attach(harnessMemoryHost(harness));
 	// Connect MCP servers before the T3 bridge accepts input, so the first prompt sees their tools.
 	await mcp.start();
 
@@ -344,8 +343,8 @@ async function main(): Promise<void> {
 	// every extension that changes a result (a broken image's text, the answer to a direct call of a script's tool).
 	if (toolRegistry !== undefined) toolRegistry.install(t3.plainResults(toolRegistry));
 
-	// What the harness's own parts read from the bridge, at each use: T3's text-generation model (`summarize` and memory
-	// notes, when it names one of ours; titles get it per request), the models hidden from its picker (a script's model
+	// What the harness's own parts read from the bridge, at each use: T3's text-generation model (`summarize`, when it
+	// names one of ours; titles get it per request), the models hidden from its picker (a script's model
 	// lists), whose a thread is (cache retention, machines) and the approval card (machines). Agent `browser_open` pages
 	// are T3's preview tabs, the ones the user sees; there is no other browser.
 	late.bridge = t3;

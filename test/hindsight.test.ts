@@ -1,6 +1,7 @@
 // Long-term memory through Hindsight (`hindsight.ts`), against a fake Hindsight server that answers the endpoints the
 // real client calls: recall for each message (what the context does not hold yet), the memory step after each turn
-// (notes from a copy of the conversation, stored as the turn's document), and the tools.
+// (notes the thread's own model writes, stored as the turn's document), and the tools. What the memory step sends a
+// prefix-caching engine is in memory-prefix.test.ts.
 import { createServer, type IncomingMessage, type Server } from "node:http";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -11,7 +12,7 @@ import { createRegistry, defineExtension, defineTool, Harness } from "@earendil-
 import { NodeExecutionEnv } from "@earendil-works/pi-durable/env/node";
 import { openNodeSqliteStorage } from "@earendil-works/pi-durable/storage/sqlite/node";
 import { afterEach, describe, expect, it } from "vitest";
-import { Hindsight, harnessMemoryHost, hindsightConfig, notesConversation, opensContext, RECALL_MIN_SCORE } from "../src/hindsight.ts";
+import { Hindsight, harnessMemoryHost, hindsightConfig, opensContext, RECALL_MIN_SCORE } from "../src/hindsight.ts";
 import { MEMORY_NOTES_CONTEXT, MEMORY_NOTES_NO_TOOLS } from "../src/prompts.ts";
 import { object } from "../src/schema.ts";
 
@@ -89,7 +90,7 @@ describe("recall for a message", () => {
 			{ id: 12, conversationId: 1, kind: "pi.compaction" },
 		],
 	};
-	const host = { context: async () => view as never, notesModel: async () => undefined, models: createModels() };
+	const host = { context: async () => view as never };
 	const fact = (lastEntry: number) => ({ id: `f${lastEntry}`, text: "a fact", metadata: { lastEntry: String(lastEntry) } });
 
 	it("is the observations the context does not hold yet, scored at least RECALL_MIN_SCORE, with why the others were left out", async () => {
@@ -148,32 +149,7 @@ describe("recall for a message", () => {
 	});
 });
 
-describe("the memory step's copy of the conversation", () => {
-	const system = { role: "system", content: "You are an agent.", timestamp: 0 } as Message;
-	const user = (text: string) => ({ role: "user", content: [{ type: "text", text }], timestamp: 0 }) as Message;
-	const said = (text: string) => ({ role: "assistant", content: [{ type: "text", text }], timestamp: 0 }) as unknown as Message;
-	const result = (text: string) => ({ role: "toolResult", toolCallId: "c", toolName: "t", content: [{ type: "text", text }], isError: false, timestamp: 0 }) as Message;
-	const big = "x".repeat(4_000);
-
-	it("keeps the prompt, drops the oldest turns to fit, and starts at a user message", () => {
-		const messages = [system, user(`old ${big}`), said("ok"), result(big), user("middle"), said("fine"), user("latest"), said("done")];
-		const sizes = messages.map((message) => Math.ceil(JSON.stringify(message).length / 4));
-		// A window the newest turns fit but the oldest does not: 0.85 of it, less the answer's 2,048, is the budget.
-		const window = Math.ceil((sizes.reduce((sum, size) => sum + size, 0) - sizes[1]! + 2_048) / 0.85) + 10;
-		expect(notesConversation(messages, { contextWindow: window, input: ["text"] }, 6)).toEqual([system, user("middle"), said("fine"), user("latest"), said("done")]);
-		expect(notesConversation(messages, { contextWindow: 1_000_000, input: ["text"] }, 6)).toEqual(messages);
-		// Too small for even the latest turn and the answer.
-		expect(notesConversation(messages, { contextWindow: 2_000, input: ["text"] }, 6)).toBeUndefined();
-	});
-
-	it("tells a model that reads no images that there was one", () => {
-		const withImage = { role: "user", content: [{ type: "text", text: "look" }, { type: "image", data: "AAAA", mimeType: "image/png" }], timestamp: 0 } as Message;
-		expect(notesConversation([withImage], { contextWindow: 1_000_000, input: ["text"] }, 0)).toEqual([{ ...withImage, content: [{ type: "text", text: "look" }, { type: "text", text: "[an image]" }] }]);
-		expect(notesConversation([withImage], { contextWindow: 1_000_000, input: ["text", "image"] }, 0)).toEqual([withImage]);
-	});
-});
-
-it("after each turn, a copy of the conversation is asked what to remember; the notes, or nothing, are stored as the turn's document", { timeout: 60_000 }, async () => {
+it("after each turn, the thread is asked what to remember, nothing written to it; the notes, or nothing, are stored as the turn's document", { timeout: 60_000 }, async () => {
 	let status = 200;
 	const server = await fakeHindsight({ "/memories": () => ({ status, json: status === 200 ? { success: true, bank_id: "b", items_count: 1, async: true } : { detail: "full" } }) });
 	const { log: logger, warnings } = log();
@@ -188,7 +164,7 @@ it("after each turn, a copy of the conversation is asked what to remember; the n
 	models.setProvider(faux.provider);
 	const harness = await Harness.open(await openNodeSqliteStorage(join(dir, "durable.db")), { models, registry, env: () => new NodeExecutionEnv({ cwd: dir }) }, ctx);
 	cleanups.push(() => harness.close(ctx));
-	memory.attach(harnessMemoryHost(harness, () => undefined, models));
+	memory.attach(harnessMemoryHost(harness));
 	const conversation = await harness.root(ctx, { agent: { model: { provider: "faux", modelId: faux.models[0]!.id } } });
 	const asked: Message[][] = [];
 	const notes = (text: string) => (context: { messages: readonly Message[] }) => {
@@ -248,7 +224,7 @@ it("after each turn, a copy of the conversation is asked what to remember; the n
 	await conversation.waitForIdle(ctx);
 	await memory.settled();
 	expect(retains()).toHaveLength(3);
-	expect(warnings).toEqual(["memory: a turn was not stored"]);
+	expect(warnings).toEqual(["memory: a turn was not stored; the next answer's memory step asks about it"]);
 });
 
 it("the page tools list, search, read and create pages", async () => {

@@ -371,22 +371,23 @@ export function memoriesUnavailable(reason: string): string {
 }
 
 /**
- * The memory step after a turn: one more user message on a copy of the conversation (nothing is written to it), answered
- * by the text-generation model. `turnStart` is the start of the turn's first message, so the model knows where the
- * latest turn begins.
+ * The memory step after a run: one more message after the conversation (nothing is written to it), answered by the
+ * thread's own model. `turnStart` is the start of the first message of the turns asked about, so the model knows where
+ * they begin; `turns` how many there are (more than one when the thread went on before an earlier step was done).
  */
-export function memoryNotesPrompt(turnStart: string): string {
+export function memoryNotesPrompt(turnStart: string, turns = 1): string {
+	const latest = turns === 1 ? "the latest turn" : `the latest ${turns} turns`;
 	return [
 		"Memory step. This message is not from the user, and your answer is not shown to anyone: it is saved to your long-term memory.",
 		"",
-		`Look at the latest turn of the conversation above, from the message that begins "${turnStart}" to the end. Write down what in it is worth remembering in a conversation weeks from now:`,
+		`Look at ${latest} of the conversation above, from the message that begins "${turnStart}" to the end. Write down what in ${turns === 1 ? "it" : "them"} is worth remembering in a conversation weeks from now:`,
 		"- facts about the user and the people, places and things in their life;",
 		"- their preferences, decisions, accepted plans and commitments, with the reasons;",
 		"- what was agreed or settled, and lessons learned.",
 		"",
 		"Leave out:",
 		"- what is in a <memories> block: it is already saved;",
-		"- what earlier turns already said: use them only to understand the latest one;",
+		`- what earlier turns already said: use them only to understand ${turns === 1 ? "the latest one" : "the latest ones"};`,
 		"- progress, status and results that only mattered while the work went on (test runs, commit ids, step-by-step reports);",
 		"- questions, requests, permission asks or decisions still waiting for an answer;",
 		"- the agent's own recommendations, proposals, intentions or next steps that the user has not accepted;",

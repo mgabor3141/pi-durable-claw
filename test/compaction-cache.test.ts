@@ -26,11 +26,11 @@ type Sent = { readonly messages: readonly Message[]; readonly options: SimpleStr
 
 const textOf = (message: Message | undefined): string =>
 	message === undefined || message.role === "assistant" ? "" : typeof message.content === "string" ? message.content : message.content.flatMap((block) => ("text" in block ? [block.text] : [])).join("");
-const asksForSummary = (messages: readonly Message[]) => messages.some((message) => message.role === "user" && textOf(message).startsWith(COMPACTION_INLINE_PROMPT));
+const asksForSummary = (messages: readonly Message[]) => messages.some((message) => (message.role === "user" || message.role === "system") && textOf(message).startsWith(COMPACTION_INLINE_PROMPT));
 /** What decides a cache entry besides the messages: the options a request is sent with. */
 const cacheKeyOf = (options: SimpleStreamOptions | undefined) => ({ sessionId: options?.sessionId, cacheRetention: options?.cacheRetention, reasoning: (options as { reasoning?: unknown } | undefined)?.reasoning });
 
-async function setup(extra: readonly Extension[] = []) {
+async function setup(extra: readonly Extension[] = [], compat?: Record<string, unknown>) {
 	const dir = await mkdtemp(join(tmpdir(), "claw-compaction-cache-"));
 	dirs.push(dir);
 	const summaries: SummaryUsage[] = [];
@@ -38,6 +38,7 @@ async function setup(extra: readonly Extension[] = []) {
 	const registry = createRegistry();
 	for (const extension of [compactionExtension({ summarized: (summary) => summaries.push(summary), gaveUp: (_id, why) => gaveUp.push(why) }), ...extra]) registry.install(extension);
 	const faux = fauxProvider({ provider: "faux" });
+	if (compat !== undefined) (faux.models[0] as { compat?: unknown }).compat = compat;
 	const models = createModels();
 	models.setProvider(faux.provider);
 	const sent: Sent[] = [];
@@ -101,6 +102,26 @@ it("asks for the summary with the agent's own request and one more message", { t
 		// The agent goes on from the summary.
 		await t.turn("three", fauxAssistantMessage("third"));
 		expect(JSON.stringify(t.sent.at(-1)!.messages)).toContain("## Goal\\nsummarized");
+	} finally {
+		await t.harness.close(ctx);
+	}
+});
+
+it("asks a model that takes a system message mid-conversation with one, after the same start", { timeout: 60_000 }, async () => {
+	const t = await setup([], { supportsMidConvoSystemMessages: true });
+	try {
+		await t.turn("one" + long, fauxAssistantMessage("first" + long));
+		await t.turn("two", fauxAssistantMessage("second" + long));
+		const last = t.sent.at(-1)!;
+		await t.conversation.compact(undefined, ctx);
+		await t.conversation.waitForIdle(ctx);
+		const summary = t.sent.at(-1)!;
+		expect(summary.summary).toBe(true);
+		const shared = last.messages.length;
+		expect(JSON.stringify(summary.messages.slice(0, shared))).toBe(JSON.stringify(last.messages));
+		expect(summary.messages[shared + 1]).toMatchObject({ role: "system" });
+		expect(textOf(summary.messages[shared + 1])).toBe(COMPACTION_INLINE_PROMPT);
+		expect(t.gaveUp).toEqual([]);
 	} finally {
 		await t.harness.close(ctx);
 	}
