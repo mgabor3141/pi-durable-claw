@@ -335,6 +335,10 @@ async function main(): Promise<void> {
 		);
 	}
 
+	// Each thread's priority (T3's "Priority" option) in its requests and compaction summaries, for a model whose
+	// provider sets `compat.vllmPriority` in models.json: the inference gateway takes a lower one sooner.
+	toolRegistry?.install(t3.requestPriority());
+
 	// What a tool result says besides its output (an exit code, a timeout, who stopped it) reaches the model as plain
 	// lines after the output, as pi coding agent writes them, instead of pi-durable's `<harness>` block. Last: after
 	// every extension that changes a result (a broken image's text, the answer to a direct call of a script's tool).
